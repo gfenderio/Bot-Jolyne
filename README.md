@@ -12,16 +12,16 @@ npm install
 
 2. Salin `.env.example` menjadi `.env`, lalu isi token dan ID Discord.
 
-3. Deploy slash command ke server test:
-
-```bash
-npm run commands:deploy
-```
-
-4. Jalankan mode development:
+3. Jalankan mode development:
 
 ```bash
 npm run dev
+```
+
+Bot akan register slash command ke `DISCORD_GUILD_ID` sebelum login. Kalau hanya ingin deploy command tanpa menjalankan bot:
+
+```bash
+npm run commands:deploy
 ```
 
 ## Struktur
@@ -35,4 +35,3 @@ src/
   deploy-commands.ts
   index.ts
 ```
-
