@@ -1,7 +1,22 @@
 import { mapDelivereeStatusToLabel } from "./statusMapper.js";
 import type { DelivereeOrderSnapshot } from "./types.js";
 
+export type DelivereeRecoverySeverity = "info" | "warning" | "critical";
+
+export type DelivereeRecoveryAlert = {
+  bookingId: string;
+  driverName?: string;
+  reason: string;
+  recommendation: string;
+  retryCount?: number;
+  severity: DelivereeRecoverySeverity;
+  stalledForSeconds?: number;
+  status: DelivereeOrderSnapshot["status"];
+  vehiclePlate?: string;
+};
+
 export interface DelivereeNotifier {
+  sendRecoveryAlert(alert: DelivereeRecoveryAlert): Promise<void>;
   sendOrderUpdate(order: DelivereeOrderSnapshot): Promise<void>;
 }
 
@@ -26,12 +41,56 @@ export function formatDelivereeDiscordMessage(order: DelivereeOrderSnapshot) {
   return lines.join("\n");
 }
 
+function mapSeverityToLabel(severity: DelivereeRecoverySeverity) {
+  const labels: Record<DelivereeRecoverySeverity, string> = {
+    critical: "Critical",
+    info: "Info",
+    warning: "Warning"
+  };
+
+  return labels[severity];
+}
+
+export function formatDelivereeRecoveryAlertMessage(alert: DelivereeRecoveryAlert) {
+  const lines = [
+    `[Jolyne] Deliveree Recovery Alert #${alert.bookingId}`,
+    `Severity: ${mapSeverityToLabel(alert.severity)}`,
+    `Status: ${mapDelivereeStatusToLabel(alert.status)}`,
+    `Reason: ${alert.reason}`,
+    `Recommendation: ${alert.recommendation}`
+  ];
+
+  if (alert.driverName) {
+    lines.push(`Driver: ${alert.driverName}`);
+  }
+
+  if (alert.vehiclePlate) {
+    lines.push(`Plat: ${alert.vehiclePlate}`);
+  }
+
+  if (alert.stalledForSeconds !== undefined) {
+    lines.push(`Stalled: ${alert.stalledForSeconds} detik`);
+  }
+
+  if (alert.retryCount !== undefined) {
+    lines.push(`Retry Count: ${alert.retryCount}`);
+  }
+
+  return lines.join("\n");
+}
+
 export class DiscordWebhookNotifier implements DelivereeNotifier {
   constructor(private readonly webhookUrl?: string) {}
 
   async sendOrderUpdate(order: DelivereeOrderSnapshot) {
-    const content = formatDelivereeDiscordMessage(order);
+    await this.sendContent(formatDelivereeDiscordMessage(order));
+  }
 
+  async sendRecoveryAlert(alert: DelivereeRecoveryAlert) {
+    await this.sendContent(formatDelivereeRecoveryAlertMessage(alert));
+  }
+
+  private async sendContent(content: string) {
     if (!this.webhookUrl) {
       console.log("DISCORD_WEBHOOK_URL belum diisi. Simulasi kirim Discord:");
       console.log(content);

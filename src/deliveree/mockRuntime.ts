@@ -3,7 +3,8 @@ import { MockDelivereeClient } from "./mockDelivereeClient.js";
 import { InMemoryDelivereeStateStore } from "./stateStore.js";
 import type { DelivereeOrderSnapshot, DelivereeStatus } from "./types.js";
 
-export const activeMockDelivereeBookingIds = defaultActiveBookingIds;
+export const activeMockDelivereeBookingIds: string[] = [];
+export const availableMockDelivereeBookingIds = [...defaultActiveBookingIds];
 export const mockDelivereeClient = new MockDelivereeClient();
 export const mockDelivereeStateStore = new InMemoryDelivereeStateStore();
 
@@ -38,4 +39,18 @@ export async function getNextMockDelivereeTrackingResult(bookingId: string): Pro
     order,
     previousStatus: previousState?.status
   };
+}
+
+export function trackMockDelivereeBookingId(bookingId: string) {
+  if (!availableMockDelivereeBookingIds.includes(bookingId)) {
+    availableMockDelivereeBookingIds.push(bookingId);
+  }
+
+  if (!activeMockDelivereeBookingIds.includes(bookingId)) {
+    activeMockDelivereeBookingIds.push(bookingId);
+  }
+}
+
+export function resetMockDelivereeTrackingState(bookingId: string) {
+  mockDelivereeStateStore.deleteLastOrderState(bookingId);
 }

@@ -1,8 +1,19 @@
-import type { DelivereeOrderSnapshot } from "./types.js";
+import type { DelivereeMockScenario, DelivereeOrderSnapshot } from "./types.js";
+
+export type MockDelivereeOrderSnapshot = Omit<
+  DelivereeOrderSnapshot,
+  "bookingId" | "statusChangedAt" | "updatedAt"
+> & {
+  atSeconds?: number;
+};
 
 export type MockDelivereeOrderTimeline = {
   bookingId: string;
-  snapshots: Array<Omit<DelivereeOrderSnapshot, "bookingId" | "updatedAt">>;
+  progression?: "per_poll" | "elapsed_time";
+  retryCount?: number;
+  scenario?: DelivereeMockScenario;
+  snapshots: MockDelivereeOrderSnapshot[];
+  suppressRoutineStatusUpdates?: boolean;
 };
 
 export const mockDelivereeOrders: MockDelivereeOrderTimeline[] = [

@@ -1,6 +1,6 @@
 import { SlashCommandBuilder } from "discord.js";
 import { formatDelivereeDiscordMessage } from "../deliveree/discordNotifier.js";
-import { activeMockDelivereeBookingIds, getNextMockDelivereeTrackingResult } from "../deliveree/mockRuntime.js";
+import { availableMockDelivereeBookingIds, getNextMockDelivereeTrackingResult } from "../deliveree/mockRuntime.js";
 import { mapDelivereeStatusToLabel } from "../deliveree/statusMapper.js";
 import type { SlashCommand } from "../types/command.js";
 
@@ -29,7 +29,7 @@ export const command: SlashCommand = {
       await interaction.reply({
         content: [
           `Booking ID \`${bookingId}\` tidak ada di mock data.`,
-          `Coba salah satu: ${activeMockDelivereeBookingIds.map((id) => `\`${id}\``).join(", ")}.`
+          `Coba salah satu: ${availableMockDelivereeBookingIds.map((id) => `\`${id}\``).join(", ")}.`
         ].join("\n"),
         flags: ["Ephemeral"]
       });
