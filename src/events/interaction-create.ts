@@ -7,11 +7,14 @@ export async function handleInteractionCreate(interaction: Interaction) {
     return;
   }
 
+  const availableCommands = [...commands.keys()].join(", ");
+  console.log(`Slash command diterima: /${interaction.commandName}. Command aktif: ${availableCommands}`);
+
   const command = commands.get(interaction.commandName);
 
   if (!command) {
     await interaction.reply({
-      content: "Command tidak ditemukan.",
+      content: `Command tidak ditemukan di runtime ini. Command aktif: ${availableCommands}.`,
       flags: ["Ephemeral"]
     });
     return;
