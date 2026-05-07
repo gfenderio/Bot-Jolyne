@@ -1,8 +1,9 @@
 import { REST, Routes } from "discord.js";
 import { commandData } from "../commands/index.js";
-import { env } from "../config/env.js";
+import { requireDiscordBotEnv } from "../config/env.js";
 
 export async function registerGuildSlashCommands() {
+  const env = requireDiscordBotEnv();
   const rest = new REST({ version: "10" }).setToken(env.DISCORD_TOKEN);
 
   console.log(
