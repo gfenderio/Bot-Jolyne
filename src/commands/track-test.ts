@@ -43,6 +43,9 @@ export const command: SlashCommand = {
       previousStatus: result.previousStatus
     };
 
-    await interaction.reply(buildMockOrderMessage(state));
+    await interaction.reply({
+      ...buildMockOrderMessage(state),
+      flags: ["Ephemeral"]
+    });
   }
 };
