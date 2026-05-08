@@ -31,8 +31,8 @@ const outcomeByScenario: Record<DelivereeMockScenario, string> = {
   cancelled: "Order akan cancelled setelah driver assigned. Gunakan flow confirm reorder jika perlu.",
   normal_completed: "Order bergerak normal sampai completed tanpa alert kecil.",
   repeated_cancel: "Order akan cancelled sebagai simulasi retry/replacement yang gagal.",
-  stuck_driver_critical: "Driver assigned lalu stuck. Warning muncul setelah 20 detik, critical setelah 40 detik.",
-  stuck_driver_warning: "Driver assigned lalu stuck. Warning muncul setelah 20 detik tanpa progress."
+  stuck_driver_critical: "Driver assigned lalu stuck. Warning muncul setelah 20 menit, critical setelah 40 menit.",
+  stuck_driver_warning: "Driver assigned lalu stuck. Warning muncul setelah 20 menit tanpa progress."
 };
 
 const driverBySlot: Record<MockOrderSlot, { driverName: string; vehiclePlate: string }> = {

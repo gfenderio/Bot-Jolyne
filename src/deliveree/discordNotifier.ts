@@ -69,7 +69,7 @@ export function formatDelivereeRecoveryAlertMessage(alert: DelivereeRecoveryAler
   }
 
   if (alert.stalledForSeconds !== undefined) {
-    lines.push(`Stalled: ${alert.stalledForSeconds} detik`);
+    lines.push(`Stalled: ${alert.stalledForSeconds} menit`);
   }
 
   if (alert.retryCount !== undefined) {
