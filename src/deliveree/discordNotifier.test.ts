@@ -9,7 +9,7 @@ test("Discord Notifier - Recovery Alert uses 'menit' for stalled time", () => {
     recommendation: "Test Recommendation",
     severity: "warning",
     status: "driver_assigned",
-    stalledForSeconds: 15
+    stalledForSeconds: 15 * 60
   };
 
   const message = formatDelivereeRecoveryAlertMessage(alert);

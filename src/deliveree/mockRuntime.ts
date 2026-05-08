@@ -51,6 +51,14 @@ export function trackMockDelivereeBookingId(bookingId: string) {
   }
 }
 
+export function untrackMockDelivereeBookingId(bookingId: string) {
+  const index = activeMockDelivereeBookingIds.indexOf(bookingId);
+
+  if (index >= 0) {
+    activeMockDelivereeBookingIds.splice(index, 1);
+  }
+}
+
 export function resetMockDelivereeTrackingState(bookingId: string) {
   mockDelivereeStateStore.deleteLastOrderState(bookingId);
 }

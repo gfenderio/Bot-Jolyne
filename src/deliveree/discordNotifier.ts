@@ -51,6 +51,11 @@ function mapSeverityToLabel(severity: DelivereeRecoverySeverity) {
   return labels[severity];
 }
 
+function formatStalledMinutes(stalledForSeconds: number) {
+  const minutes = Math.max(1, Math.floor(stalledForSeconds / 60));
+  return `${minutes} menit`;
+}
+
 export function formatDelivereeRecoveryAlertMessage(alert: DelivereeRecoveryAlert) {
   const lines = [
     `[Jolyne] Deliveree Recovery Alert #${alert.bookingId}`,
@@ -69,7 +74,7 @@ export function formatDelivereeRecoveryAlertMessage(alert: DelivereeRecoveryAler
   }
 
   if (alert.stalledForSeconds !== undefined) {
-    lines.push(`Stalled: ${alert.stalledForSeconds} menit`);
+    lines.push(`Stalled: ${formatStalledMinutes(alert.stalledForSeconds)}`);
   }
 
   if (alert.retryCount !== undefined) {

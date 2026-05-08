@@ -1,6 +1,5 @@
 import { mockDelivereeClient } from "./mockRuntime.js";
 import { resetMockDelivereeTrackingState, trackMockDelivereeBookingId } from "./mockRuntime.js";
-import { mapDelivereeStatusToLabel } from "./statusMapper.js";
 import type { MockDelivereeOrderSnapshot, MockDelivereeOrderTimeline } from "./mockData.js";
 import type { DelivereeMockScenario, DelivereeStatus } from "./types.js";
 
@@ -170,8 +169,4 @@ export function createMockOrderForSlot(slot: MockOrderSlot): CreatedMockOrder {
     scenario,
     slot
   };
-}
-
-export function formatMockOrderInitialStatus(status: DelivereeStatus) {
-  return mapDelivereeStatusToLabel(status);
 }

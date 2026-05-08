@@ -11,8 +11,9 @@ export type DelivereePollerOptions = {
   stateStore: DelivereeStateStore;
 };
 
-const DRIVER_STUCK_WARNING_SECONDS = 20;
-const DRIVER_STUCK_CRITICAL_SECONDS = 40;
+const SECONDS_PER_MINUTE = 60;
+const DRIVER_STUCK_WARNING_SECONDS = 20 * SECONDS_PER_MINUTE;
+const DRIVER_STUCK_CRITICAL_SECONDS = 40 * SECONDS_PER_MINUTE;
 
 function shouldSuppressRoutineStatusUpdates(order: DelivereeOrderSnapshot) {
   return Boolean(order.scenario || order.suppressRoutineStatusUpdates);

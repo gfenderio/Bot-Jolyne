@@ -1,7 +1,9 @@
 import { SlashCommandBuilder } from "discord.js";
-import { buildMockOrderCreatedEmbed } from "../deliveree/mockOrderEmbed.js";
+import { buildMockOrderMessage } from "../deliveree/mockOrderEmbed.js";
 import { createMockOrderForSlot, isMockOrderSlot, type MockOrderSlot } from "../deliveree/mockOrderGenerator.js";
+import { getNextMockDelivereeTrackingResult } from "../deliveree/mockRuntime.js";
 import type { SlashCommand } from "../types/command.js";
+import { attachMockOrderControls } from "./mock-order-controls.js";
 
 export const command: SlashCommand = {
   data: new SlashCommandBuilder()
@@ -9,7 +11,7 @@ export const command: SlashCommand = {
     .setDescription("Buat mock order Deliveree secara acak untuk demo recovery."),
 
   async execute(interaction) {
-    const randomSlot = Math.floor(Math.random() * 10) + 1 as MockOrderSlot;
+    const randomSlot = (Math.floor(Math.random() * 10) + 1) as MockOrderSlot;
 
     if (!isMockOrderSlot(randomSlot)) {
       await interaction.reply({
@@ -19,10 +21,19 @@ export const command: SlashCommand = {
       return;
     }
 
-    const order = createMockOrderForSlot(randomSlot);
+    const createdOrder = createMockOrderForSlot(randomSlot);
+    const trackingResult = await getNextMockDelivereeTrackingResult(createdOrder.bookingId);
+    const state = {
+      bookingId: createdOrder.bookingId,
+      changed: trackingResult.changed,
+      createdOrder,
+      order: trackingResult.order ?? undefined,
+      previousStatus: trackingResult.previousStatus
+    };
 
-    await interaction.reply({
-      embeds: [buildMockOrderCreatedEmbed(order)]
-    });
+    await interaction.reply(buildMockOrderMessage(state));
+
+    const message = await interaction.fetchReply();
+    attachMockOrderControls(interaction, message, state);
   }
 };

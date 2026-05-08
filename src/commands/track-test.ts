@@ -1,14 +1,10 @@
 import { SlashCommandBuilder } from "discord.js";
-import { formatDelivereeDiscordMessage } from "../deliveree/discordNotifier.js";
+import { buildMockOrderMessage } from "../deliveree/mockOrderEmbed.js";
 import { availableMockDelivereeBookingIds, getNextMockDelivereeTrackingResult } from "../deliveree/mockRuntime.js";
-import { mapDelivereeStatusToLabel } from "../deliveree/statusMapper.js";
 import type { SlashCommand } from "../types/command.js";
+import { attachMockOrderControls } from "./mock-order-controls.js";
 
 const DEFAULT_BOOKING_ID = "19320032";
-
-function codeBlock(content: string) {
-  return `\`\`\`text\n${content}\n\`\`\``;
-}
 
 export const command: SlashCommand = {
   data: new SlashCommandBuilder()
@@ -27,26 +23,30 @@ export const command: SlashCommand = {
 
     if (!result.order) {
       await interaction.reply({
-        content: [
-          `Booking ID \`${bookingId}\` tidak ada di mock data.`,
-          `Coba salah satu: ${availableMockDelivereeBookingIds.map((id) => `\`${id}\``).join(", ")}.`
-        ].join("\n"),
+        ...buildMockOrderMessage({
+          bookingId,
+          notice: [
+            `Booking ID \`${bookingId}\` tidak ada di mock data.`,
+            `Coba salah satu: ${availableMockDelivereeBookingIds.map((id) => `\`${id}\``).join(", ")}.`
+          ].join("\n")
+        }, {
+          controlsDisabled: true
+        }),
         flags: ["Ephemeral"]
       });
       return;
     }
 
-    if (!result.changed) {
-      await interaction.reply({
-        content: [
-          `[Jolyne] Status Deliveree #${result.order.bookingId} belum berubah.`,
-          `Status terakhir: ${mapDelivereeStatusToLabel(result.order.status)}`
-        ].join("\n"),
-        flags: ["Ephemeral"]
-      });
-      return;
-    }
+    const state = {
+      bookingId: result.order.bookingId,
+      changed: result.changed,
+      order: result.order,
+      previousStatus: result.previousStatus
+    };
 
-    await interaction.reply(codeBlock(formatDelivereeDiscordMessage(result.order)));
+    await interaction.reply(buildMockOrderMessage(state));
+
+    const message = await interaction.fetchReply();
+    attachMockOrderControls(interaction, message, state);
   }
 };
