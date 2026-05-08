@@ -1,7 +1,8 @@
-import { ComponentType } from "discord.js";
-import type { ChatInputCommandInteraction, Message } from "discord.js";
+import type { ButtonInteraction } from "discord.js";
 import { buildMockOrderMessage } from "../deliveree/mockOrderEmbed.js";
+import { createReplacementMockOrder } from "../deliveree/mockOrderGenerator.js";
 import { getNextMockDelivereeTrackingResult, untrackMockDelivereeBookingId } from "../deliveree/mockRuntime.js";
+import type { CreatedMockOrder } from "../deliveree/mockOrderGenerator.js";
 import type { MockOrderDecision, MockOrderViewState } from "../deliveree/mockOrderEmbed.js";
 
 type MockOrderControlAction = "cancel" | "refresh" | "reorder";
@@ -11,7 +12,7 @@ type ParsedMockOrderControlId = {
   bookingId: string;
 };
 
-function parseMockOrderControlId(customId: string): ParsedMockOrderControlId | undefined {
+export function parseMockOrderControlId(customId: string): ParsedMockOrderControlId | undefined {
   const [scope, action, ...bookingIdParts] = customId.split(":");
 
   if (scope !== "mock-order" || !bookingIdParts.length) {
@@ -28,85 +29,100 @@ function parseMockOrderControlId(customId: string): ParsedMockOrderControlId | u
   };
 }
 
-function getUserLabel(interaction: ChatInputCommandInteraction) {
+function getUserLabel(interaction: ButtonInteraction) {
   return interaction.user.globalName ?? interaction.user.username;
 }
 
-function buildDecision(type: MockOrderDecision["type"], interaction: ChatInputCommandInteraction): MockOrderDecision {
+function buildDecision(
+  type: MockOrderDecision["type"],
+  interaction: ButtonInteraction,
+  sourceBookingId: string,
+  replacementBookingId?: string
+): MockOrderDecision {
   return {
     decidedAt: new Date().toISOString(),
+    replacementBookingId,
+    sourceBookingId,
     type,
     userLabel: getUserLabel(interaction)
   };
 }
 
-export function attachMockOrderControls(
-  interaction: ChatInputCommandInteraction,
-  message: Message,
-  initialState: MockOrderViewState
-) {
-  let state = initialState;
-  const collector = message.createMessageComponentCollector({
-    componentType: ComponentType.Button,
-    time: 180_000
-  });
+async function buildTrackingState(
+  bookingId: string,
+  createdOrder?: CreatedMockOrder,
+  decision?: MockOrderDecision
+): Promise<MockOrderViewState> {
+  const result = await getNextMockDelivereeTrackingResult(bookingId);
 
-  collector.on("collect", async (buttonInteraction) => {
-    const parsed = parseMockOrderControlId(buttonInteraction.customId);
+  return {
+    bookingId,
+    changed: result.changed,
+    createdOrder,
+    decision,
+    notice: result.order ? undefined : `Booking ID ${bookingId} tidak ditemukan di mock data.`,
+    order: result.order ?? undefined,
+    previousStatus: result.previousStatus
+  };
+}
 
-    if (!parsed || parsed.bookingId !== state.bookingId) {
-      return;
+export async function handleMockOrderButtonInteraction(interaction: ButtonInteraction) {
+  const parsed = parseMockOrderControlId(interaction.customId);
+
+  if (!parsed) {
+    return false;
+  }
+
+  try {
+    if (parsed.action === "refresh") {
+      const state = await buildTrackingState(parsed.bookingId);
+      await interaction.update(buildMockOrderMessage(state, {
+        controlsDisabled: !state.order
+      }));
+      return true;
     }
 
-    if (buttonInteraction.user.id !== interaction.user.id) {
-      await buttonInteraction.reply({
-        content: "Kontrol mock order ini hanya bisa digunakan oleh pemanggil command.",
+    if (parsed.action === "cancel") {
+      untrackMockDelivereeBookingId(parsed.bookingId);
+      const decision = buildDecision("cancel", interaction, parsed.bookingId);
+      const state = await buildTrackingState(parsed.bookingId, undefined, decision);
+
+      await interaction.update(buildMockOrderMessage(state, {
+        controlsDisabled: true
+      }));
+      return true;
+    }
+
+    const replacementOrder = createReplacementMockOrder(parsed.bookingId);
+
+    if (!replacementOrder) {
+      await interaction.reply({
+        content: `Booking ID \`${parsed.bookingId}\` tidak bisa dibuatkan replacement mock order.`,
         flags: ["Ephemeral"]
       });
-      return;
+      return true;
     }
 
-    try {
-      if (parsed.action === "refresh") {
-        const result = await getNextMockDelivereeTrackingResult(parsed.bookingId);
+    const decision = buildDecision("reorder", interaction, parsed.bookingId, replacementOrder.bookingId);
+    const state = await buildTrackingState(replacementOrder.bookingId, replacementOrder, decision);
 
-        state = {
-          ...state,
-          changed: result.changed,
-          notice: result.order ? undefined : `Booking ID ${parsed.bookingId} tidak ditemukan di mock data.`,
-          order: result.order ?? undefined,
-          previousStatus: result.previousStatus
-        };
+    await interaction.update(buildMockOrderMessage(state));
+    return true;
+  } catch (error) {
+    console.error(`Gagal memproses kontrol mock order ${parsed.action} untuk ${parsed.bookingId}.`, error);
 
-        await buttonInteraction.update(buildMockOrderMessage(state, {
-          controlsDisabled: !result.order
-        }));
-        return;
-      }
-
-      if (parsed.action === "cancel") {
-        untrackMockDelivereeBookingId(parsed.bookingId);
-      }
-
-      state = {
-        ...state,
-        decision: buildDecision(parsed.action, interaction),
-        notice: undefined
-      };
-
-      await buttonInteraction.update(buildMockOrderMessage(state));
-    } catch (error) {
-      console.error(`Gagal memproses kontrol mock order ${parsed.action} untuk ${parsed.bookingId}.`, error);
-      await buttonInteraction.reply({
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp({
         content: "Gagal memproses kontrol mock order.",
         flags: ["Ephemeral"]
       });
+      return true;
     }
-  });
 
-  collector.on("end", async () => {
-    await interaction.editReply(buildMockOrderMessage(state, {
-      controlsDisabled: true
-    })).catch(() => undefined);
-  });
+    await interaction.reply({
+      content: "Gagal memproses kontrol mock order.",
+      flags: ["Ephemeral"]
+    });
+    return true;
+  }
 }

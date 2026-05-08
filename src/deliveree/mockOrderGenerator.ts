@@ -13,6 +13,13 @@ export type CreatedMockOrder = {
   slot: MockOrderSlot;
 };
 
+const replacementCountBySourceBookingId = new Map<string, number>();
+
+const legacySlotByBookingId: Record<string, MockOrderSlot> = {
+  "19320032": 1,
+  "19320033": 2
+};
+
 const scenarioBySlot: Record<MockOrderSlot, DelivereeMockScenario> = {
   1: "normal_completed",
   2: "cancelled",
@@ -53,6 +60,23 @@ export function isMockOrderSlot(value: number): value is MockOrderSlot {
 
 export function getMockBookingId(slot: MockOrderSlot) {
   return `MOCK-${String(slot).padStart(3, "0")}`;
+}
+
+export function getMockOrderSlotFromBookingId(bookingId: string): MockOrderSlot | undefined {
+  const legacySlot = legacySlotByBookingId[bookingId];
+
+  if (legacySlot) {
+    return legacySlot;
+  }
+
+  const match = /^MOCK-(\d{3})(?:-R\d+)?$/.exec(bookingId);
+
+  if (!match) {
+    return undefined;
+  }
+
+  const slot = Number(match[1]);
+  return isMockOrderSlot(slot) ? slot : undefined;
 }
 
 export function getMockOrderScenario(slot: MockOrderSlot) {
@@ -134,9 +158,15 @@ function createStuckTimeline(slot: MockOrderSlot): MockDelivereeOrderSnapshot[] 
   ];
 }
 
-function buildMockOrderTimeline(slot: MockOrderSlot): MockDelivereeOrderTimeline {
-  const bookingId = getMockBookingId(slot);
-  const scenario = getMockOrderScenario(slot);
+function buildMockOrderTimeline(
+  slot: MockOrderSlot,
+  options: {
+    bookingId?: string;
+    scenario?: DelivereeMockScenario;
+  } = {}
+): MockDelivereeOrderTimeline {
+  const bookingId = options.bookingId ?? getMockBookingId(slot);
+  const scenario = options.scenario ?? getMockOrderScenario(slot);
   const snapshots = scenario === "normal_completed"
     ? createNormalCompletedTimeline(slot)
     : scenario === "cancelled" || scenario === "repeated_cancel"
@@ -167,6 +197,36 @@ export function createMockOrderForSlot(slot: MockOrderSlot): CreatedMockOrder {
     initialStatus,
     outcome: getMockOrderOutcome(scenario),
     scenario,
+    slot
+  };
+}
+
+export function createReplacementMockOrder(sourceBookingId: string): CreatedMockOrder | undefined {
+  const slot = getMockOrderSlotFromBookingId(sourceBookingId);
+
+  if (!slot) {
+    return undefined;
+  }
+
+  const baseBookingId = getMockBookingId(slot);
+  const replacementCount = (replacementCountBySourceBookingId.get(baseBookingId) ?? 0) + 1;
+  replacementCountBySourceBookingId.set(baseBookingId, replacementCount);
+
+  const timeline = buildMockOrderTimeline(slot, {
+    bookingId: `${baseBookingId}-R${replacementCount}`,
+    scenario: "normal_completed"
+  });
+  const initialStatus = timeline.snapshots[0].status;
+
+  mockDelivereeClient.registerOrderTimeline(timeline);
+  resetMockDelivereeTrackingState(timeline.bookingId);
+  trackMockDelivereeBookingId(timeline.bookingId);
+
+  return {
+    bookingId: timeline.bookingId,
+    initialStatus,
+    outcome: getMockOrderOutcome(timeline.scenario!),
+    scenario: timeline.scenario!,
     slot
   };
 }

@@ -3,7 +3,6 @@ import { buildMockOrderMessage } from "../deliveree/mockOrderEmbed.js";
 import { createMockOrderForSlot, isMockOrderSlot, type MockOrderSlot } from "../deliveree/mockOrderGenerator.js";
 import { getNextMockDelivereeTrackingResult } from "../deliveree/mockRuntime.js";
 import type { SlashCommand } from "../types/command.js";
-import { attachMockOrderControls } from "./mock-order-controls.js";
 
 export const command: SlashCommand = {
   data: new SlashCommandBuilder()
@@ -32,8 +31,5 @@ export const command: SlashCommand = {
     };
 
     await interaction.reply(buildMockOrderMessage(state));
-
-    const message = await interaction.fetchReply();
-    attachMockOrderControls(interaction, message, state);
   }
 };

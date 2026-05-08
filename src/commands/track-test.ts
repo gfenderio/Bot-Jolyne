@@ -2,7 +2,6 @@ import { SlashCommandBuilder } from "discord.js";
 import { buildMockOrderMessage } from "../deliveree/mockOrderEmbed.js";
 import { availableMockDelivereeBookingIds, getNextMockDelivereeTrackingResult } from "../deliveree/mockRuntime.js";
 import type { SlashCommand } from "../types/command.js";
-import { attachMockOrderControls } from "./mock-order-controls.js";
 
 const DEFAULT_BOOKING_ID = "19320032";
 
@@ -45,8 +44,5 @@ export const command: SlashCommand = {
     };
 
     await interaction.reply(buildMockOrderMessage(state));
-
-    const message = await interaction.fetchReply();
-    attachMockOrderControls(interaction, message, state);
   }
 };

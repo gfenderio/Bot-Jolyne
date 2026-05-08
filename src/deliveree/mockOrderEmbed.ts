@@ -8,6 +8,8 @@ const JAKARTA_TIME_ZONE = "Asia/Jakarta";
 
 export type MockOrderDecision = {
   decidedAt: string;
+  replacementBookingId?: string;
+  sourceBookingId?: string;
   type: "cancel" | "reorder";
   userLabel: string;
 };
@@ -156,9 +158,11 @@ function formatDecision(decision: MockOrderDecision) {
 
   return [
     `Action: **${action}**`,
+    decision.sourceBookingId ? `Order asal: \`${decision.sourceBookingId}\`` : undefined,
+    decision.replacementBookingId ? `Replacement: \`${decision.replacementBookingId}\`` : undefined,
     `Dipilih oleh: ${decision.userLabel}`,
     `Waktu: ${formatDateTime(decision.decidedAt)}`
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 export function buildMockOrderEmbed(state: MockOrderViewState) {
