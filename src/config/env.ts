@@ -42,6 +42,21 @@ const pollIntervalSeconds = z.preprocess(
   z.coerce.number().int().positive()
 );
 
+const localPort = z.preprocess(
+  (value) => {
+    if (value === undefined) {
+      return 3001;
+    }
+
+    if (typeof value === "string" && value.trim() === "") {
+      return 3001;
+    }
+
+    return value;
+  },
+  z.coerce.number().int().min(1).max(65535)
+);
+
 const optionalStringList = z.preprocess(
   (value) => {
     if (typeof value !== "string") {
@@ -93,10 +108,18 @@ const envSchema = z.object({
   DELIVEREE_ALLOWED_GUILD_ID: optionalString,
   DELIVEREE_BUTTON_SIGNING_SECRET: optionalString,
   DELIVEREE_CASE_STORE_PATH: optionalString.default("data/deliveree-cases.json"),
+  DELIVEREE_EXTENSION_ALLOWED_DEVICE_IDS: optionalStringList.default(["yugi-browser"]),
+  DELIVEREE_EXTENSION_ENABLED: optionalBoolean,
+  DELIVEREE_EXTENSION_PORT: localPort,
+  DELIVEREE_EXTENSION_TOKEN: optionalString.pipe(
+    z.string().min(32, "Token harus minimal 32 karakter untuk keamanan.").optional()
+  ),
   DELIVEREE_MONITOR_INTERVAL_SECONDS: pollIntervalSeconds.default(60),
   DELIVEREE_OWNER_USER_IDS: optionalStringList.default(["419213146209779713"]),
   DELIVEREE_PLAYWRIGHT_PROFILE_DIR: optionalString.default("data/deliveree-playwright-profile"),
   DELIVEREE_SCREENSHOT_DIR: optionalString.default("data/deliveree-screenshots"),
+  DELIVEREE_STUCK_DRIVER_WARNING_MINUTES: pollIntervalSeconds.default(20),
+  DELIVEREE_STUCK_DRIVER_CRITICAL_MINUTES: pollIntervalSeconds.default(40),
   DELIVEREE_WEB_AUTOMATION_APPROVED: optionalBoolean,
   DELIVEREE_WATCH_URLS: optionalStringList.default([])
 });

@@ -158,6 +158,51 @@ npm run deliveree:login
 
 Command ini membuka browser Playwright dengan persistent profile di `DELIVEREE_PLAYWRIGHT_PROFILE_DIR`. Login di browser tersebut, lalu tekan Enter di terminal setelah selesai. Untuk Coolify, pastikan folder `data/` dipasang sebagai persistent volume agar session dan case store tidak hilang saat restart.
 
+## Deliveree Extension Lokal
+
+Tahap awal recovery Deliveree memakai Chrome extension lokal yang read-only. Extension berjalan di browser staff yang sudah login Deliveree, membaca detail aman dari halaman order, lalu mengirim event ke endpoint lokal Jolyne. Jolyne mengirim notifikasi ke `DELIVEREE_ALERT_CHANNEL_ID` memakai Discord bot, bukan webhook baru.
+
+Konfigurasi `.env` lokal:
+
+```bash
+DELIVEREE_EXTENSION_ENABLED=true
+DELIVEREE_EXTENSION_PORT=3001
+DELIVEREE_EXTENSION_TOKEN=change-me-local-random-token
+DELIVEREE_EXTENSION_ALLOWED_DEVICE_IDS=yugi-browser
+DELIVEREE_ALERT_CHANNEL_ID=1501899831268868106
+```
+
+Cara pakai:
+
+1. Jalankan Jolyne dengan Discord bot aktif:
+
+```bash
+npm run dev
+```
+
+2. Buka `chrome://extensions`, aktifkan Developer mode, lalu pilih `Load unpacked`.
+3. Pilih folder `extensions/deliveree-capture`.
+4. Buka popup extension, isi:
+   - Intake URL: `http://127.0.0.1:3001`
+   - Device ID: `yugi-browser`
+   - Token: sama dengan `DELIVEREE_EXTENSION_TOKEN`
+5. Buka halaman `https://webapp.deliveree.com/bookings/<id>`.
+
+Data yang dikirim sengaja minimal: booking ID, status, URL halaman, duplicate URL, jenis layanan, jarak, jumlah tujuan, dan No. Job. Extension tidak mengirim nomor telepon, alamat lengkap, foto, signature, cookie, password, OTP, atau data pembayaran. Extension juga tidak klik tombol Deliveree apa pun.
+
+Halaman utama `https://webapp.deliveree.com/bookings/new` dan draft pemesanan seperti `https://webapp.deliveree.com/bookings/new?ftl=true` dicatat sebagai log lokal saja. Kartu `Pesanan Terbaru` di halaman utama tidak dianggap sebagai booking aktif, sehingga tidak memicu alert Discord.
+
+Popup extension menyimpan log lokal terbatas untuk troubleshooting. Gunakan tombol `Copy` untuk menyalin log terbaru saat perlu review bersama, atau `Clear` untuk mengosongkan log setelah issue selesai. Log tidak menyimpan token, cookie, password, OTP, nomor telepon, alamat lengkap, foto, atau signature.
+
+Gunakan `Test Intake` di popup untuk mengecek apakah endpoint lokal Jolyne hidup dan token/device ID diterima. Gunakan `Send Discord Test` hanya saat ingin membuktikan alur penuh Chrome extension -> Jolyne -> Discord; tombol ini akan mengirim pesan test ke `DELIVEREE_ALERT_CHANNEL_ID`.
+
+Rule notifikasi tahap 1:
+
+- Booking baru terdeteksi: kirim satu notifikasi ringan.
+- Status berubah: kirim notifikasi.
+- Status `cancelled`: kirim alert prioritas dengan duplicate URL jika ada.
+- Booking dan status yang sama berulang: disimpan sebagai observasi, tapi tidak mengirim spam Discord.
+
 ## Struktur
 
 ```text
@@ -170,4 +215,6 @@ src/
   types/         Shared TypeScript types
   deploy-commands.ts
   index.ts
+extensions/
+  deliveree-capture/  Chrome extension read-only untuk endpoint lokal
 ```

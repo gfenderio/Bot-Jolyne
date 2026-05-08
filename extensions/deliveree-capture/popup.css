@@ -1,0 +1,165 @@
+:root {
+  color: #1f2933;
+  font-family: Arial, sans-serif;
+  font-size: 13px;
+}
+
+body {
+  background: #f6f8fa;
+  margin: 0;
+  width: 380px;
+}
+
+main {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+h1 {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.state {
+  background: #e5e7eb;
+  border-radius: 999px;
+  color: #374151;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.state.ok {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.state.error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+label {
+  color: #4b5563;
+  display: grid;
+  gap: 5px;
+  font-weight: 700;
+}
+
+input {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  box-sizing: border-box;
+  color: #111827;
+  font: inherit;
+  height: 34px;
+  padding: 7px 9px;
+  width: 100%;
+}
+
+button {
+  background: #15803d;
+  border: 0;
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  height: 34px;
+}
+
+button.secondary {
+  background: #334155;
+}
+
+button.danger {
+  background: #b91c1c;
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+.action-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.action-grid #save {
+  grid-column: 1 / -1;
+}
+
+section {
+  border-top: 1px solid #e5e7eb;
+  padding-top: 10px;
+}
+
+dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+dl div {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+}
+
+dt {
+  color: #6b7280;
+  font-weight: 700;
+}
+
+dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.log-section {
+  display: grid;
+  gap: 8px;
+}
+
+.section-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+h2 {
+  font-size: 14px;
+  margin: 0;
+}
+
+.button-row {
+  display: flex;
+  gap: 6px;
+}
+
+.button-row button {
+  height: 28px;
+  padding: 0 10px;
+}
+
+textarea {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  box-sizing: border-box;
+  color: #e5e7eb;
+  font: 12px/1.45 Consolas, monospace;
+  height: 150px;
+  padding: 8px;
+  resize: vertical;
+  width: 100%;
+}

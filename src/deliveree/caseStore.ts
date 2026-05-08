@@ -24,7 +24,10 @@ export type DelivereeRecoveryCase = {
   lastScreenshotPath?: string;
   lastStatusChangeAt: string;
   retryCount: number;
+  silencedAt?: string;
+  silenceReason?: string;
   status: DelivereeWebStatus;
+  stuckDriverAlertSentAt?: string;
   url: string;
 };
 
@@ -163,7 +166,7 @@ export class JsonDelivereeCaseStore {
     return updated;
   }
 
-  async closeCase(caseId: string, userId: string, nonce?: string) {
+  async silenceCase(caseId: string, userId: string, reason?: string, nonce?: string) {
     const store = await this.read();
     const existingIndex = store.cases.findIndex((recoveryCase) => recoveryCase.caseId === caseId);
 
@@ -177,15 +180,71 @@ export class JsonDelivereeCaseStore {
       actionLog: [
         ...store.cases[existingIndex].actionLog,
         {
-          action: "closed",
+          action: "silenced",
           at: now,
           beforeStatus: store.cases[existingIndex].status,
           nonce,
-          note: "Recovery case closed from Discord.",
+          note: reason || "Recovery case silenced from Discord.",
+          userId
+        }
+      ],
+      silencedAt: now,
+      silenceReason: reason
+    };
+
+    store.cases[existingIndex] = updated;
+    await this.write(store);
+    return updated;
+  }
+
+  async closeCase(
+    caseId: string,
+    userId: string,
+    nonce?: string,
+    action = "closed",
+    note = "Recovery case closed from Discord."
+  ) {
+    const store = await this.read();
+    const existingIndex = store.cases.findIndex((recoveryCase) => recoveryCase.caseId === caseId);
+
+    if (existingIndex === -1) {
+      return undefined;
+    }
+
+    const now = new Date().toISOString();
+    const updated = {
+      ...store.cases[existingIndex],
+      actionLog: [
+        ...store.cases[existingIndex].actionLog,
+        {
+          action,
+          at: now,
+          beforeStatus: store.cases[existingIndex].status,
+          nonce,
+          note,
           userId
         }
       ],
       closedAt: now
+    };
+
+    store.cases[existingIndex] = updated;
+    await this.write(store);
+    return updated;
+  }
+
+  async markStuckDriverAlertSent(caseId: string) {
+    const store = await this.read();
+    const existingIndex = store.cases.findIndex((recoveryCase) => recoveryCase.caseId === caseId);
+
+    if (existingIndex === -1) {
+      return undefined;
+    }
+
+    const now = new Date().toISOString();
+    const updated = {
+      ...store.cases[existingIndex],
+      stuckDriverAlertSentAt: now
     };
 
     store.cases[existingIndex] = updated;

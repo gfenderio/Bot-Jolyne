@@ -23,5 +23,17 @@ export default tseslint.config(
     rules: {
       "@typescript-eslint/no-floating-promises": "off"
     }
+  },
+  {
+    files: ["extensions/**/*.js"],
+    languageOptions: {
+      globals: {
+        chrome: "readonly",
+        document: "readonly",
+        MutationObserver: "readonly",
+        navigator: "readonly",
+        window: "readonly"
+      }
+    }
   }
 );

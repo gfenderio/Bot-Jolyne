@@ -4,6 +4,9 @@ export const DELIVEREE_BUTTON_SCOPE = "deliv";
 
 export const DELIVEREE_BUTTON_ACTIONS = [
   "close",
+  "ignore",
+  "manual_reorder",
+  "need_followup",
   "prepare_reorder",
   "refresh"
 ] as const;

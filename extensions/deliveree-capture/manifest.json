@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Jolyne Deliveree Capture",
+  "version": "0.1.0",
+  "description": "Read-only Deliveree order detector for local Jolyne intake.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://webapp.deliveree.com/bookings/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://webapp.deliveree.com/bookings/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Jolyne Deliveree"
+  }
+}

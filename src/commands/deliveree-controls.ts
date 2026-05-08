@@ -71,6 +71,44 @@ export async function handleDelivereeButtonInteraction(interaction: ButtonIntera
     return true;
   }
 
+  if (parsed.action === "manual_reorder") {
+    await store.closeCase(
+      parsed.caseId,
+      interaction.user.id,
+      parsed.nonce,
+      "manual_reorder",
+      "Staff sudah reorder manual di Deliveree."
+    );
+    await interaction.reply({
+      content: `Recovery case Deliveree #${recoveryCase.bookingId} ditutup. Reorder manual sudah dilakukan.`,
+      flags: ["Ephemeral"]
+    });
+    return true;
+  }
+
+  if (parsed.action === "ignore") {
+    await store.silenceCase(parsed.caseId, interaction.user.id, "Staff memutuskan untuk abaikan case ini.", parsed.nonce);
+    await interaction.reply({
+      content: `Recovery case Deliveree #${recoveryCase.bookingId} diabaikan. Alert tidak akan muncul lagi.`,
+      flags: ["Ephemeral"]
+    });
+    return true;
+  }
+
+  if (parsed.action === "need_followup") {
+    await store.appendActionLog(parsed.caseId, {
+      action: "need_followup",
+      nonce: parsed.nonce,
+      note: "Staff menandai case ini butuh follow up manual.",
+      userId: interaction.user.id
+    });
+    await interaction.reply({
+      content: `Recovery case Deliveree #${recoveryCase.bookingId} ditandai butuh follow up. Case tetap aktif.`,
+      flags: ["Ephemeral"]
+    });
+    return true;
+  }
+
   await interaction.deferReply({
     flags: ["Ephemeral"]
   });

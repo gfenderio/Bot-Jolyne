@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Jolyne Deliveree</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Jolyne Deliveree</h1>
+        <span id="connection-state" class="state">Idle</span>
+      </header>
+
+      <label>
+        Intake URL
+        <input id="intake-url" type="url" autocomplete="off" spellcheck="false">
+      </label>
+
+      <label>
+        Device ID
+        <input id="device-id" type="text" autocomplete="off" spellcheck="false">
+      </label>
+
+      <label>
+        Token
+        <input id="token" type="password" autocomplete="off" spellcheck="false">
+      </label>
+
+      <div class="action-grid">
+        <button id="save" type="button">Save</button>
+        <button id="test-intake" class="secondary" type="button">Test Intake</button>
+        <button id="test-discord" class="secondary" type="button">Send Discord Test</button>
+      </div>
+
+      <section>
+        <dl>
+          <div>
+            <dt>Booking</dt>
+            <dd id="booking-id">-</dd>
+          </div>
+          <div>
+            <dt>Status</dt>
+            <dd id="status">-</dd>
+          </div>
+          <div>
+            <dt>Last Check</dt>
+            <dd id="last-sent">-</dd>
+          </div>
+          <div>
+            <dt>Result</dt>
+            <dd id="result">-</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="log-section">
+        <div class="section-head">
+          <h2>Log</h2>
+          <div class="button-row">
+            <button id="copy-logs" class="secondary" type="button">Copy</button>
+            <button id="clear-logs" class="danger" type="button">Clear</button>
+          </div>
+        </div>
+        <textarea id="logs" readonly spellcheck="false"></textarea>
+      </section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
