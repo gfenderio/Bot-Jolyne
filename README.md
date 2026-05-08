@@ -116,7 +116,11 @@ Timeline demo dibuat cepat:
 
 ## Deliveree Web Monitor Aman
 
-Deliveree web monitor memakai Playwright untuk membaca halaman Deliveree terautentikasi tanpa memakai API resmi. Mode default adalah `readonly`.
+Deliveree web monitor memakai Playwright untuk membaca halaman Deliveree terautentikasi tanpa memakai API resmi. Karena syarat penggunaan Deliveree membatasi penggunaan program/script untuk mengambil data dari platform tanpa otorisasi, fitur live web automation dikunci oleh compliance gate.
+
+Gunakan fitur ini hanya setelah ada approval yang jelas, misalnya API resmi/webhook, izin tertulis dari Deliveree/account manager, atau approval internal yang menyatakan akses otomatis ini diperbolehkan. Sebelum itu, gunakan mock flow, screen recording, atau fixture screenshot untuk discovery dan testing.
+
+Referensi: https://www.deliveree.com/id/en/terms-and-conditions-for-users/
 
 Konfigurasi utama:
 
@@ -124,23 +128,27 @@ Konfigurasi utama:
 DELIVEREE_ALERT_CHANNEL_ID=1501899831268868106
 DELIVEREE_ALLOWED_CHANNEL_IDS=1501899831268868106
 DELIVEREE_OWNER_USER_IDS=your_discord_user_id
-DELIVEREE_ACTION_MODE=readonly
-DELIVEREE_WATCH_URLS=https://webapp.deliveree.com/bookings/19330506
+DELIVEREE_ACTION_MODE=paused
+DELIVEREE_WEB_AUTOMATION_APPROVED=false
+DELIVEREE_WATCH_URLS=
 DELIVEREE_BUTTON_SIGNING_SECRET=change-me-to-random-secret
 DELIVEREE_CASE_STORE_PATH=data/deliveree-cases.json
-DELIVEREE_MONITOR_INTERVAL_SECONDS=60
+DELIVEREE_MONITOR_INTERVAL_SECONDS=180
 DELIVEREE_PLAYWRIGHT_PROFILE_DIR=data/deliveree-playwright-profile
 DELIVEREE_SCREENSHOT_DIR=data/deliveree-screenshots
 ```
 
 Security boundary:
 
+- Jangan aktifkan `DELIVEREE_WEB_AUTOMATION_APPROVED=true` sebelum approval/izin akses otomatis jelas.
+- Prioritaskan API resmi/webhook Deliveree jika tersedia untuk use case perusahaan.
 - Jangan simpan email/password Deliveree di repo, README, `.env.example`, database, atau log.
 - Login Deliveree dilakukan manual lewat browser Playwright.
 - Jika credential pernah diketik di chat, rotasi password sebelum dipakai live.
 - Action Deliveree hanya boleh dijalankan oleh Discord user ID di `DELIVEREE_OWNER_USER_IDS`.
 - Bot tidak boleh klik tombol final seperti `Pesan Pengemudi`, `Simpan`, `Batalkan & Simpan`, atau `Konfirmasi`.
 - Jika UI tidak dikenali, captcha muncul, atau session expired, bot mengembalikan status aman dan meminta review manual.
+- Untuk discovery sebelum approval, gunakan screen recording dari pengguna internal dan sanitized screenshot/test fixture, bukan live polling.
 
 Login manual lokal:
 

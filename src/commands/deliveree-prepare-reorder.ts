@@ -27,6 +27,17 @@ export const command: SlashCommand = {
       return;
     }
 
+    if (!env.DELIVEREE_WEB_AUTOMATION_APPROVED) {
+      await interaction.reply({
+        content: [
+          "Prepare reorder Deliveree masih dikunci oleh compliance gate.",
+          "Aktifkan `DELIVEREE_WEB_AUTOMATION_APPROVED=true` hanya setelah ada izin/approval yang jelas untuk akses otomatis Deliveree."
+        ].join("\n"),
+        flags: ["Ephemeral"]
+      });
+      return;
+    }
+
     if (getDelivereeRuntimeMode() !== "prepare_reorder") {
       await interaction.reply({
         content: "Prepare reorder masih dikunci. Set `DELIVEREE_ACTION_MODE=prepare_reorder` setelah read-only monitor terbukti aman.",

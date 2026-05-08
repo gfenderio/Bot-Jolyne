@@ -56,6 +56,24 @@ const optionalStringList = z.preprocess(
   z.array(z.string()).optional()
 );
 
+const optionalBoolean = z.preprocess((value) => {
+  if (typeof value !== "string") {
+    return value === undefined ? false : value;
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  if (["1", "true", "yes", "y"].includes(normalized)) {
+    return true;
+  }
+
+  if (["", "0", "false", "no", "n"].includes(normalized)) {
+    return false;
+  }
+
+  return value;
+}, z.boolean().default(false));
+
 const delivereeActionMode = z.enum(["paused", "prepare_reorder", "readonly"]).default("readonly");
 
 const envSchema = z.object({
@@ -79,6 +97,7 @@ const envSchema = z.object({
   DELIVEREE_OWNER_USER_IDS: optionalStringList.default(["419213146209779713"]),
   DELIVEREE_PLAYWRIGHT_PROFILE_DIR: optionalString.default("data/deliveree-playwright-profile"),
   DELIVEREE_SCREENSHOT_DIR: optionalString.default("data/deliveree-screenshots"),
+  DELIVEREE_WEB_AUTOMATION_APPROVED: optionalBoolean,
   DELIVEREE_WATCH_URLS: optionalStringList.default([])
 });
 

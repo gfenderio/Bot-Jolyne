@@ -31,6 +31,17 @@ export const command: SlashCommand = {
       return;
     }
 
+    if (!env.DELIVEREE_WEB_AUTOMATION_APPROVED) {
+      await interaction.reply({
+        content: [
+          "Live Deliveree web automation masih dikunci oleh compliance gate.",
+          "Aktifkan `DELIVEREE_WEB_AUTOMATION_APPROVED=true` hanya setelah ada izin/approval yang jelas untuk akses otomatis Deliveree."
+        ].join("\n"),
+        flags: ["Ephemeral"]
+      });
+      return;
+    }
+
     const url = interaction.options.getString("url")?.trim() || getDefaultWatchUrl();
 
     if (!url) {

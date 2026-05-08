@@ -113,6 +113,11 @@ async function sendObservation(client: Client<true>, recoveryCase: DelivereeReco
 }
 
 export async function runDelivereeWebMonitorOnce(client: Client<true>) {
+  if (!env.DELIVEREE_WEB_AUTOMATION_APPROVED) {
+    console.warn("Deliveree monitor dilewati karena compliance gate belum approve live web automation.");
+    return;
+  }
+
   if (isDelivereePaused()) {
     console.warn("Deliveree monitor dilewati karena mode paused.");
     return;
@@ -145,6 +150,11 @@ export async function runDelivereeWebMonitorOnce(client: Client<true>) {
 }
 
 export function startDelivereeWebMonitor(client: Client<true>) {
+  if (!env.DELIVEREE_WEB_AUTOMATION_APPROVED) {
+    console.log("Deliveree web monitor tidak aktif karena DELIVEREE_WEB_AUTOMATION_APPROVED belum true.");
+    return () => undefined;
+  }
+
   if (env.DELIVEREE_WATCH_URLS.length === 0) {
     console.log("Deliveree web monitor tidak aktif karena DELIVEREE_WATCH_URLS kosong.");
     return () => undefined;
