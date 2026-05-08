@@ -7,6 +7,7 @@ import {
   mockDelivereeStateStore
 } from "./deliveree/mockRuntime.js";
 import { startDelivereePoller } from "./deliveree/poller.js";
+import { startDelivereeWebMonitor } from "./deliveree/webMonitor.js";
 import { handleInteractionCreate } from "./events/interaction-create.js";
 import { handleReady } from "./events/ready.js";
 import { startBirthdayNowScheduler } from "./schedulers/birthday-now.js";
@@ -30,6 +31,7 @@ if (!env.DISCORD_TOKEN) {
   client.once(Events.ClientReady, (readyClient) => {
     handleReady(readyClient);
     startBirthdayNowScheduler(readyClient);
+    startDelivereeWebMonitor(readyClient);
   });
   client.on(Events.Error, (error) => {
     console.error("Discord client error", error);

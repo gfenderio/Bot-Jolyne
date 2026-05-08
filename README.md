@@ -108,6 +108,47 @@ Timeline demo dibuat cepat:
 - `/birthdaynowtest`: tes tampilan embed birthday tanpa data Metabase.
 - `/track-test`: tes tracking Deliveree dari mock data lokal. Opsi `booking_id` bisa diisi, default `19320032`.
 - `/mock-order`: buat mock order Deliveree slot 1-10 untuk demo recovery.
+- `/whoami`: tampilkan Discord user ID untuk konfigurasi owner bot.
+- `/deliveree-status`: cek status booking Deliveree live secara read-only via Playwright.
+- `/deliveree-pause`: emergency stop Deliveree monitor/action.
+- `/deliveree-resume`: kembalikan Deliveree runtime ke mode read-only.
+- `/deliveree-prepare-reorder`: owner-only, menyiapkan review reorder tanpa final submit. Saat ini berhenti sebelum klik action apa pun.
+
+## Deliveree Web Monitor Aman
+
+Deliveree web monitor memakai Playwright untuk membaca halaman Deliveree terautentikasi tanpa memakai API resmi. Mode default adalah `readonly`.
+
+Konfigurasi utama:
+
+```bash
+DELIVEREE_ALERT_CHANNEL_ID=1501899831268868106
+DELIVEREE_ALLOWED_CHANNEL_IDS=1501899831268868106
+DELIVEREE_OWNER_USER_IDS=your_discord_user_id
+DELIVEREE_ACTION_MODE=readonly
+DELIVEREE_WATCH_URLS=https://webapp.deliveree.com/bookings/19330506
+DELIVEREE_BUTTON_SIGNING_SECRET=change-me-to-random-secret
+DELIVEREE_CASE_STORE_PATH=data/deliveree-cases.json
+DELIVEREE_MONITOR_INTERVAL_SECONDS=60
+DELIVEREE_PLAYWRIGHT_PROFILE_DIR=data/deliveree-playwright-profile
+DELIVEREE_SCREENSHOT_DIR=data/deliveree-screenshots
+```
+
+Security boundary:
+
+- Jangan simpan email/password Deliveree di repo, README, `.env.example`, database, atau log.
+- Login Deliveree dilakukan manual lewat browser Playwright.
+- Jika credential pernah diketik di chat, rotasi password sebelum dipakai live.
+- Action Deliveree hanya boleh dijalankan oleh Discord user ID di `DELIVEREE_OWNER_USER_IDS`.
+- Bot tidak boleh klik tombol final seperti `Pesan Pengemudi`, `Simpan`, `Batalkan & Simpan`, atau `Konfirmasi`.
+- Jika UI tidak dikenali, captcha muncul, atau session expired, bot mengembalikan status aman dan meminta review manual.
+
+Login manual lokal:
+
+```bash
+npm run deliveree:login
+```
+
+Command ini membuka browser Playwright dengan persistent profile di `DELIVEREE_PLAYWRIGHT_PROFILE_DIR`. Login di browser tersebut, lalu tekan Enter di terminal setelah selesai. Untuk Coolify, pastikan folder `data/` dipasang sebagai persistent volume agar session dan case store tidak hilang saat restart.
 
 ## Struktur
 
