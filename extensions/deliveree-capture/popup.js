@@ -111,6 +111,53 @@ function humanSignal(eventType, status) {
   return "Tidak ada sinyal MVP";
 }
 
+function inferEventType(status) {
+  if (status === "cancelled" || status === "no_driver_found") {
+    return "order_failed";
+  }
+
+  if (status === "searching_driver" || status === "driver_assigned") {
+    return "order_created";
+  }
+
+  return undefined;
+}
+
+function pageStatusFromLog(entry) {
+  const details = entry?.details || {};
+
+  if (!["active_page_status_finished", "page_state_finished"].includes(entry?.event) || !details.ok) {
+    return undefined;
+  }
+
+  return {
+    bookingId: details.bookingId,
+    eventType: details.eventType || inferEventType(details.status),
+    manualTest: entry.event === "active_page_status_finished",
+    pageKind: details.pageKind,
+    receivedAt: entry.at,
+    source: details.source,
+    status: details.status,
+    statusText: details.statusText
+  };
+}
+
+function latestPageStatusFromLogs(logs) {
+  if (!Array.isArray(logs)) {
+    return undefined;
+  }
+
+  for (const entry of logs) {
+    const pageStatus = pageStatusFromLog(entry);
+
+    if (pageStatus) {
+      return pageStatus;
+    }
+  }
+
+  return undefined;
+}
+
 function summaryBadgeClass(pageStatus) {
   if (!pageStatus) {
     return "";
@@ -162,15 +209,17 @@ async function render() {
   elements.intakeUrl.value = data.intakeUrl;
   elements.deviceId.value = data.deviceId;
   elements.token.value = data.token;
-  elements.bookingId.textContent = data.lastEvent?.bookingId || "-";
-  elements.status.textContent = data.lastEvent?.status || "-";
-  elements.eventType.textContent = data.lastEvent?.eventType || "-";
+  const pageStatus = data.lastPageStatus || latestPageStatusFromLogs(data.extensionLogs);
+
+  elements.bookingId.textContent = data.lastEvent?.bookingId || pageStatus?.bookingId || "-";
+  elements.status.textContent = data.lastEvent?.status || pageStatus?.status || "-";
+  elements.eventType.textContent = data.lastEvent?.eventType || pageStatus?.eventType || "-";
   elements.lastSent.textContent = formatTime(data.lastResult?.at);
   elements.result.textContent = data.lastResult?.ok
     ? `${data.lastResult.action || "ok"} (${data.lastResult.httpStatus || 200})`
     : data.lastResult?.error || "-";
   elements.logs.value = formatLogs(data.extensionLogs);
-  setSummary(data.lastPageStatus);
+  setSummary(pageStatus);
   setConnectionState(data.lastResult);
 }
 
