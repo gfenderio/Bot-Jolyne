@@ -10,6 +10,7 @@ import {
   createDelivereeExtensionIntakeServer,
   DelivereeExtensionDiscordTestDisabledError,
   DiscordRestDelivereeExtensionNotifier,
+  buildDelivereeExtensionManualComponents,
   getLatestDelivereeExtensionPageState,
   type StoredDelivereeExtensionPageState,
   type DelivereeExtensionConnectionTestNotification,
@@ -54,18 +55,20 @@ async function withTestServer<T>(
     pageStates: StoredDelivereeExtensionPageState[];
     post: (payload: unknown, headers?: Record<string, string>) => Promise<Response>;
     postPath: (path: string, payload?: unknown, headers?: Record<string, string>) => Promise<Response>;
+    store: JsonDelivereeCaseStore;
   }) => Promise<T>
 ) {
   const dir = await mkdtemp(join(tmpdir(), "jolyne-deliveree-extension-"));
   const notifier = new MemoryExtensionNotifier();
   const pageStates: StoredDelivereeExtensionPageState[] = [];
+  const store = new JsonDelivereeCaseStore(join(dir, "cases.json"));
   const server = createDelivereeExtensionIntakeServer({
     allowedDeviceIds: ["yugi-browser"],
     notifier,
     onPageState(state) {
       pageStates.push(state);
     },
-    store: new JsonDelivereeCaseStore(join(dir, "cases.json")),
+    store,
     token: "test-token"
   });
 
@@ -97,7 +100,8 @@ async function withTestServer<T>(
       notifier,
       pageStates,
       post,
-      postPath
+      postPath,
+      store
     });
   } finally {
     clearDelivereeExtensionPageStates();
@@ -219,6 +223,18 @@ test("Deliveree Extension Intake - Discord REST notifier sends embeds without ga
   assert.match(JSON.stringify(calls[0].body), /Deliveree #19330506/);
 });
 
+test("Deliveree Extension Intake - builds safe manual case controls only", () => {
+  const components = buildDelivereeExtensionManualComponents("19330506", "test-secret-for-buttons");
+  const json = JSON.stringify(components.map((component) => component.toJSON()));
+
+  assert.match(json, /Need Follow Up/);
+  assert.match(json, /Manual Reorder Done/);
+  assert.match(json, /Close Case/);
+  assert.match(json, /Ignore/);
+  assert.doesNotMatch(json, /Prepare Reorder/);
+  assert.doesNotMatch(json, /Refresh/);
+});
+
 test("Deliveree Extension Intake - reports disabled Discord test explicitly", async () => {
   const dir = await mkdtemp(join(tmpdir(), "jolyne-deliveree-extension-"));
   const server = createDelivereeExtensionIntakeServer({
@@ -323,6 +339,47 @@ test("Deliveree Extension Intake - keeps status start time while heartbeat statu
     assert.strictEqual(latest?.status, "searching_driver");
     assert.strictEqual(latest?.statusStartedAt, "2026-05-08T07:00:00.000Z");
     assert.strictEqual(secondBody.statusStartedAt, "2026-05-08T07:00:00.000Z");
+  });
+});
+
+test("Deliveree Extension Intake - page-state heartbeat updates recovery case without alert noise", async () => {
+  await withTestServer(async ({ notifier, postPath, store }) => {
+    const response = await postPath("/deliveree/extension/page-state", {
+      bookingId: "19343630",
+      driverName: "Driver Test",
+      observedAt: "2026-05-09T09:00:00.000Z",
+      pageKind: "booking_detail",
+      pageUrl: "https://webapp.deliveree.com/bookings/19343630/tracking",
+      plateNumber: "B1234ABC",
+      schemaVersion: 1,
+      status: "going_to_pickup",
+      statusText: "Menuju Penjemputan",
+      vehicleDescription: "Van"
+    });
+    await postPath("/deliveree/extension/page-state", {
+      bookingId: "19343630",
+      driverName: "Driver Test",
+      observedAt: "2026-05-09T09:01:00.000Z",
+      pageKind: "booking_detail",
+      pageUrl: "https://webapp.deliveree.com/bookings/19343630/tracking",
+      plateNumber: "B1234ABC",
+      schemaVersion: 1,
+      status: "going_to_pickup",
+      statusText: "Menuju Penjemputan",
+      vehicleDescription: "Van"
+    });
+    const body = await response.json() as { caseId?: string; ok: boolean };
+    const recoveryCase = await store.getCase("19343630");
+
+    assert.strictEqual(response.status, 200);
+    assert.strictEqual(body.ok, true);
+    assert.strictEqual(body.caseId, "19343630");
+    assert.strictEqual(recoveryCase?.status, "going_to_pickup");
+    assert.strictEqual(recoveryCase?.driverName, "Driver Test");
+    assert.strictEqual(recoveryCase?.plateNumber, "B1234ABC");
+    assert.strictEqual(recoveryCase?.vehicleDescription, "Van");
+    assert.strictEqual(recoveryCase?.actionLog.length, 1);
+    assert.strictEqual(notifier.notifications.length, 0);
   });
 });
 

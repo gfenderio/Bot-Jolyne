@@ -105,6 +105,8 @@ Timeline demo dibuat cepat:
 - `/birthdaynow`: tampilkan admin yang birthday hari ini.
 - `/whoami`: tampilkan Discord user ID untuk konfigurasi owner bot.
 - `/deliveree-status`: cek status halaman Deliveree terakhir dari Chrome extension lokal.
+- `/deliveree-cases`: lihat daftar recovery case Deliveree terbaru.
+- `/deliveree-case`: lihat detail satu recovery case Deliveree dan tombol aksi manual.
 
 ## Deliveree Web Monitor Aman
 
@@ -163,6 +165,7 @@ DELIVEREE_EXTENSION_TOKEN=change-me-local-random-token
 DELIVEREE_EXTENSION_ALLOWED_DEVICE_IDS=yugi-browser
 DELIVEREE_INTAKE_DISCORD_ENABLED=false
 DELIVEREE_ALERT_CHANNEL_ID=1501899831268868106
+DELIVEREE_BUTTON_SIGNING_SECRET=change-me-to-random-secret
 ```
 
 Cara pakai:
@@ -204,6 +207,8 @@ Gunakan `Test Intake` di popup untuk mengecek apakah endpoint lokal Jolyne hidup
 Command test lokal:
 
 - `/deliveree-status`: membaca heartbeat terakhir dari Chrome extension dan mengirim embed ringkas.
+- `/deliveree-cases`: membaca daftar case yang sudah pernah dilihat extension/intake.
+- `/deliveree-case booking_id:<id>`: membuka detail case dan tombol manual jika case masih aktif.
 - Jika Deliveree belum terbuka, Jolyne akan menampilkan bahwa halaman Deliveree belum terdeteksi.
 - Jika heartbeat sudah stale, Jolyne tetap menampilkan status terakhir plus peringatan agar Chrome/tab Deliveree/extension/local intake dicek.
 - Jika Deliveree terbuka di front page atau draft pemesanan, Jolyne menampilkan status idle.
@@ -219,6 +224,16 @@ Rule notifikasi tahap 1:
 - Heartbeat page-state yang sama didedup di log server agar runner tidak berisik.
 - Manual `Test Intake` tetap muncul di log popup/server supaya debugging jelas.
 - Event booking dan status yang sama berulang disimpan sebagai observasi, tapi tidak mengirim spam Discord.
+
+Manual case tracking MVP:
+
+- Setiap booking detail yang punya booking ID dan status akan masuk ke `DELIVEREE_CASE_STORE_PATH`.
+- Heartbeat page-state memperbarui status/current context case tanpa menambah action log berulang setiap 15 detik.
+- Data operasional aman yang bisa disimpan: status, status text, driver, plat, ETA, keterlambatan, failure reason, service type, jarak, jumlah tujuan, dan No. Job.
+- Alert `order_created` dan `order_failed` menyertakan tombol manual bila `DELIVEREE_BUTTON_SIGNING_SECRET` terisi.
+- Tombol manual yang aman: `Need Follow Up`, `Manual Reorder Done`, `Close Case`, dan `Ignore`.
+- Tombol manual hanya mencatat keputusan/status case di Jolyne. Tombol ini tidak membuka Playwright, tidak klik Deliveree, tidak submit order, dan tidak membuat reorder otomatis.
+- Dalam mode `npm run deliveree:intake` yang hanya mengirim Discord REST, tombol Discord baru bisa diproses jika runtime Discord bot yang aktif menjalankan branch/kode yang sama dan memakai case store yang sama. Untuk local-only testing tanpa full bot lokal, gunakan file case store dan popup/log sebagai bukti dulu.
 
 ## Struktur
 

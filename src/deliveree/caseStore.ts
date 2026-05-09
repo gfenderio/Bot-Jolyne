@@ -1,5 +1,9 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import type {
+  DelivereeExtensionEventType,
+  DelivereeExtensionPageKind
+} from "./extensionDomExtractor.js";
 import type { DelivereeWebStatus } from "./webClassifier.js";
 
 export type DelivereeActionLogEntry = {
@@ -20,14 +24,30 @@ export type DelivereeRecoveryCase = {
   bookingId: string;
   caseId: string;
   closedAt?: string;
+  destinationCount?: number;
+  deviceId?: string;
+  driverName?: string;
+  duplicateUrl?: string;
+  etaText?: string;
+  eventType?: DelivereeExtensionEventType;
+  failureReason?: string;
+  jobNo?: string;
+  lastHeartbeatAt?: string;
+  lastPageKind?: DelivereeExtensionPageKind;
   lastObservedAt: string;
   lastScreenshotPath?: string;
   lastStatusChangeAt: string;
+  lateText?: string;
+  plateNumber?: string;
   retryCount: number;
+  serviceType?: string;
   silencedAt?: string;
   silenceReason?: string;
   status: DelivereeWebStatus;
+  statusText?: string;
   stuckDriverAlertSentAt?: string;
+  totalDistanceKm?: number;
+  vehicleDescription?: string;
   url: string;
 };
 
@@ -37,9 +57,28 @@ type StoreFile = {
 
 export type UpsertObservationInput = {
   bookingId: string;
+  destinationCount?: number;
+  deviceId?: string;
+  driverName?: string;
+  duplicateUrl?: string;
+  etaText?: string;
+  eventType?: DelivereeExtensionEventType;
+  failureReason?: string;
+  jobNo?: string;
+  lastHeartbeatAt?: string;
+  lastPageKind?: DelivereeExtensionPageKind;
+  lateText?: string;
+  observedAt?: string;
+  plateNumber?: string;
+  recordUnchangedAction?: boolean;
+  serviceType?: string;
   screenshotPath?: string;
   status: DelivereeWebStatus;
+  statusStartedAt?: string;
+  statusText?: string;
+  totalDistanceKm?: number;
   url: string;
+  vehicleDescription?: string;
 };
 
 export class JsonDelivereeCaseStore {
@@ -58,6 +97,7 @@ export class JsonDelivereeCaseStore {
   async upsertObservation(input: UpsertObservationInput) {
     const store = await this.read();
     const now = new Date().toISOString();
+    const observedAt = input.observedAt ?? now;
     const caseId = input.bookingId;
     const existingIndex = store.cases.findIndex((recoveryCase) => recoveryCase.caseId === caseId);
 
@@ -66,17 +106,35 @@ export class JsonDelivereeCaseStore {
         actionLog: [{
           action: "observed",
           afterStatus: input.status,
-          at: now,
-          note: "Initial Deliveree web observation.",
+          at: observedAt,
+          note: input.lastPageKind
+            ? "Initial Deliveree extension observation."
+            : "Initial Deliveree web observation.",
           screenshotPath: input.screenshotPath
         }],
         bookingId: input.bookingId,
         caseId,
-        lastObservedAt: now,
+        destinationCount: input.destinationCount,
+        deviceId: input.deviceId,
+        driverName: input.driverName,
+        duplicateUrl: input.duplicateUrl,
+        etaText: input.etaText,
+        eventType: input.eventType,
+        failureReason: input.failureReason,
+        jobNo: input.jobNo,
+        lastHeartbeatAt: input.lastHeartbeatAt,
+        lastPageKind: input.lastPageKind,
+        lastObservedAt: observedAt,
         lastScreenshotPath: input.screenshotPath,
-        lastStatusChangeAt: now,
+        lastStatusChangeAt: input.statusStartedAt ?? observedAt,
+        lateText: input.lateText,
+        plateNumber: input.plateNumber,
         retryCount: 0,
+        serviceType: input.serviceType,
         status: input.status,
+        statusText: input.statusText,
+        totalDistanceKm: input.totalDistanceKm,
+        vehicleDescription: input.vehicleDescription,
         url: input.url
       };
 
@@ -90,23 +148,42 @@ export class JsonDelivereeCaseStore {
 
     const existing = store.cases[existingIndex];
     const changed = existing.status !== input.status;
+    const shouldRecordAction = changed || input.recordUnchangedAction !== false;
     const updated: DelivereeRecoveryCase = {
       ...existing,
-      actionLog: [
-        ...existing.actionLog,
-        {
-          action: "observed",
-          afterStatus: input.status,
-          at: now,
-          beforeStatus: existing.status,
-          note: changed ? "Deliveree web status changed." : "Deliveree web status unchanged.",
-          screenshotPath: input.screenshotPath
-        }
-      ],
-      lastObservedAt: now,
+      actionLog: shouldRecordAction
+        ? [
+            ...existing.actionLog,
+            {
+              action: "observed",
+              afterStatus: input.status,
+              at: observedAt,
+              beforeStatus: existing.status,
+              note: changed ? "Deliveree status changed." : "Deliveree status unchanged.",
+              screenshotPath: input.screenshotPath
+            }
+          ]
+        : existing.actionLog,
+      destinationCount: input.destinationCount ?? existing.destinationCount,
+      deviceId: input.deviceId ?? existing.deviceId,
+      driverName: input.driverName ?? existing.driverName,
+      duplicateUrl: input.duplicateUrl ?? existing.duplicateUrl,
+      etaText: input.etaText ?? existing.etaText,
+      eventType: input.eventType ?? existing.eventType,
+      failureReason: input.failureReason ?? existing.failureReason,
+      jobNo: input.jobNo ?? existing.jobNo,
+      lastHeartbeatAt: input.lastHeartbeatAt ?? existing.lastHeartbeatAt,
+      lastPageKind: input.lastPageKind ?? existing.lastPageKind,
+      lastObservedAt: observedAt,
       lastScreenshotPath: input.screenshotPath ?? existing.lastScreenshotPath,
-      lastStatusChangeAt: changed ? now : existing.lastStatusChangeAt,
+      lastStatusChangeAt: changed ? input.statusStartedAt ?? observedAt : existing.lastStatusChangeAt,
+      lateText: input.lateText ?? existing.lateText,
+      plateNumber: input.plateNumber ?? existing.plateNumber,
+      serviceType: input.serviceType ?? existing.serviceType,
       status: input.status,
+      statusText: input.statusText ?? existing.statusText,
+      totalDistanceKm: input.totalDistanceKm ?? existing.totalDistanceKm,
+      vehicleDescription: input.vehicleDescription ?? existing.vehicleDescription,
       url: input.url
     };
 

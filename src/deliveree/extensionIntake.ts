@@ -1,11 +1,15 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   EmbedBuilder,
   type Client,
   type MessageCreateOptions
 } from "discord.js";
 import { ZodError } from "zod";
 import { env } from "../config/env.js";
+import { createSignedDelivereeButtonId } from "../security/signedButton.js";
 import { createDelivereeCaseStore } from "./liveRuntime.js";
 import type { DelivereeRecoveryCase } from "./caseStore.js";
 import {
@@ -149,25 +153,50 @@ export type DelivereeExtensionNotification = {
   recoveryCase: DelivereeRecoveryCase;
 };
 
+export type DelivereeExtensionNotificationSendResult = {
+  channelId?: string;
+  messageId?: string;
+};
+
 export type DelivereeExtensionConnectionTestNotification = {
   deviceId: string;
   observedAt: string;
 };
 
 export interface DelivereeExtensionNotificationSender {
-  send(notification: DelivereeExtensionNotification): Promise<void>;
+  send(notification: DelivereeExtensionNotification): Promise<DelivereeExtensionNotificationSendResult | void>;
   sendConnectionTest(notification: DelivereeExtensionConnectionTestNotification): Promise<void>;
 }
 
 export interface DelivereeExtensionCaseStore {
   upsertObservation(input: {
     bookingId: string;
+    destinationCount?: number;
+    deviceId?: string;
+    driverName?: string;
+    duplicateUrl?: string;
+    etaText?: string;
+    eventType?: DelivereeExtensionEventType;
+    failureReason?: string;
+    jobNo?: string;
+    lastHeartbeatAt?: string;
+    lastPageKind?: DelivereeExtensionPageStatePayload["pageKind"];
+    lateText?: string;
+    observedAt?: string;
+    plateNumber?: string;
+    recordUnchangedAction?: boolean;
+    serviceType?: string;
     status: DelivereeExtensionStatusPayload["status"];
+    statusStartedAt?: string;
+    statusText?: string;
+    totalDistanceKm?: number;
     url: string;
+    vehicleDescription?: string;
   }): Promise<{
     changed: boolean;
     recoveryCase: DelivereeRecoveryCase;
   }>;
+  setAlertMessage?(caseId: string, channelId: string, messageId: string): Promise<DelivereeRecoveryCase | undefined>;
 }
 
 export type DelivereeExtensionIntakeOptions = {
@@ -309,26 +338,59 @@ function getNotificationAction(
   return changed ? eventType : "deduped";
 }
 
+function toObservationInputFromStatusPayload(
+  payload: DelivereeExtensionStatusPayload,
+  deviceId: string,
+  statusStartedAt?: string
+) {
+  return {
+    bookingId: payload.bookingId,
+    destinationCount: payload.destinationCount,
+    deviceId,
+    driverName: payload.driverName,
+    duplicateUrl: payload.duplicateUrl,
+    etaText: payload.etaText,
+    eventType: getMvpEventType(payload),
+    failureReason: payload.failureReason,
+    jobNo: payload.jobNo,
+    lastHeartbeatAt: payload.observedAt,
+    lastPageKind: "booking_detail" as const,
+    lateText: payload.lateText,
+    observedAt: payload.observedAt,
+    plateNumber: payload.plateNumber,
+    serviceType: payload.serviceType,
+    status: payload.status,
+    statusStartedAt,
+    statusText: payload.statusText,
+    totalDistanceKm: payload.totalDistanceKm,
+    url: payload.pageUrl,
+    vehicleDescription: payload.vehicleDescription
+  };
+}
+
 export async function handleDelivereeExtensionStatusEvent(
   payload: DelivereeExtensionStatusPayload,
   deviceId: string,
   options: Pick<DelivereeExtensionIntakeOptions, "notifier" | "store">
 ): Promise<DelivereeExtensionIntakeDecision> {
-  recordDelivereeExtensionPageState(deviceId, toPageStatePayload(payload));
+  const storedPageState = recordDelivereeExtensionPageState(deviceId, toPageStatePayload(payload));
   const { changed, recoveryCase } = await options.store.upsertObservation({
-    bookingId: payload.bookingId,
-    status: payload.status,
-    url: payload.pageUrl
+    ...toObservationInputFromStatusPayload(payload, deviceId, storedPageState.statusStartedAt),
+    lastHeartbeatAt: storedPageState.receivedAt
   });
   const action = getNotificationAction(changed, payload, recoveryCase);
 
   if (action !== "deduped" && action !== "ignored") {
-    await options.notifier.send({
+    const sendResult = await options.notifier.send({
       action,
       deviceId,
       payload,
       recoveryCase
     });
+
+    if (sendResult?.channelId && sendResult.messageId) {
+      await options.store.setAlertMessage?.(recoveryCase.caseId, sendResult.channelId, sendResult.messageId);
+    }
   }
 
   return {
@@ -382,16 +444,43 @@ async function handleDelivereeExtensionDiscordTest(
 async function handleDelivereeExtensionPageState(
   body: string,
   deviceId: string,
-  options: Pick<DelivereeExtensionIntakeOptions, "onPageState">,
+  options: Pick<DelivereeExtensionIntakeOptions, "onPageState" | "store">,
   context: { manualTest: boolean }
 ) {
   const pageState = parseDelivereeExtensionPageStatePayload(parseJsonBody(body));
   const stored = recordDelivereeExtensionPageState(deviceId, pageState);
 
+  let caseId: string | undefined;
+
+  if (stored.bookingId && stored.status) {
+    const upsert = await options.store.upsertObservation({
+      bookingId: stored.bookingId,
+      deviceId,
+      driverName: stored.driverName,
+      etaText: stored.etaText,
+      eventType: stored.eventType,
+      failureReason: stored.failureReason,
+      lastHeartbeatAt: stored.receivedAt,
+      lastPageKind: stored.pageKind,
+      lateText: stored.lateText,
+      observedAt: stored.receivedAt,
+      plateNumber: stored.plateNumber,
+      recordUnchangedAction: false,
+      status: stored.status,
+      statusStartedAt: stored.statusStartedAt,
+      statusText: stored.statusText,
+      url: stored.pageUrl,
+      vehicleDescription: stored.vehicleDescription
+    });
+
+    caseId = upsert.recoveryCase.caseId;
+  }
+
   await options.onPageState?.(stored, context);
 
   return {
     action: "page_state_recorded",
+    caseId,
     deviceId,
     ok: true,
     pageKind: stored.pageKind,
@@ -525,6 +614,52 @@ function fieldValue(value: string | number | undefined) {
   return String(value);
 }
 
+export function buildDelivereeExtensionManualComponents(
+  caseId: string,
+  secret = env.DELIVEREE_BUTTON_SIGNING_SECRET
+) {
+  if (!secret) {
+    return [];
+  }
+
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(createSignedDelivereeButtonId({
+          action: "need_followup",
+          caseId,
+          secret
+        }))
+        .setLabel("Need Follow Up")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(createSignedDelivereeButtonId({
+          action: "manual_reorder",
+          caseId,
+          secret
+        }))
+        .setLabel("Manual Reorder Done")
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(createSignedDelivereeButtonId({
+          action: "close",
+          caseId,
+          secret
+        }))
+        .setLabel("Close Case")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(createSignedDelivereeButtonId({
+          action: "ignore",
+          caseId,
+          secret
+        }))
+        .setLabel("Ignore")
+        .setStyle(ButtonStyle.Danger)
+    )
+  ];
+}
+
 export function buildDelivereeExtensionNotificationEmbed(notification: DelivereeExtensionNotification) {
   const fields = [
     {
@@ -607,6 +742,13 @@ export function buildDelivereeExtensionNotificationEmbed(notification: Deliveree
     .setTimestamp(new Date(notification.payload.observedAt));
 }
 
+export function buildDelivereeExtensionNotificationMessage(notification: DelivereeExtensionNotification) {
+  return {
+    components: buildDelivereeExtensionManualComponents(notification.recoveryCase.caseId),
+    embeds: [buildDelivereeExtensionNotificationEmbed(notification)]
+  } satisfies MessageCreateOptions;
+}
+
 export function buildDelivereeExtensionConnectionTestEmbed(notification: DelivereeExtensionConnectionTestNotification) {
   return new EmbedBuilder()
     .setColor(0x27ae60)
@@ -635,11 +777,10 @@ export class DiscordBotDelivereeExtensionNotifier implements DelivereeExtensionN
 
   async send(notification: DelivereeExtensionNotification) {
     try {
-      await this.sendToAlertChannel({
-        embeds: [buildDelivereeExtensionNotificationEmbed(notification)]
-      });
+      return await this.sendToAlertChannel(buildDelivereeExtensionNotificationMessage(notification));
     } catch (error) {
       console.error("Deliveree extension intake gagal mengirim alert Discord.", error);
+      return undefined;
     }
   }
 
@@ -649,14 +790,19 @@ export class DiscordBotDelivereeExtensionNotifier implements DelivereeExtensionN
     });
   }
 
-  private async sendToAlertChannel(message: MessageCreateOptions) {
+  private async sendToAlertChannel(message: MessageCreateOptions): Promise<DelivereeExtensionNotificationSendResult> {
     const channel = await this.client.channels.fetch(env.DELIVEREE_ALERT_CHANNEL_ID);
 
     if (!channel?.isTextBased() || !("send" in channel)) {
       throw new Error(`Channel ${env.DELIVEREE_ALERT_CHANNEL_ID} tidak bisa dikirimi pesan.`);
     }
 
-    await channel.send(message);
+    const sentMessage = await channel.send(message);
+
+    return {
+      channelId: sentMessage.channelId,
+      messageId: sentMessage.id
+    };
   }
 }
 
@@ -670,7 +816,11 @@ export class DiscordRestDelivereeExtensionNotifier implements DelivereeExtension
   }) {}
 
   async send(notification: DelivereeExtensionNotification) {
-    await this.sendToAlertChannel({
+    const components = buildDelivereeExtensionManualComponents(notification.recoveryCase.caseId)
+      .map((row) => row.toJSON());
+
+    return this.sendToAlertChannel({
+      components,
       embeds: [buildDelivereeExtensionNotificationEmbed(notification).toJSON()]
     });
   }
@@ -681,7 +831,7 @@ export class DiscordRestDelivereeExtensionNotifier implements DelivereeExtension
     });
   }
 
-  private async sendToAlertChannel(message: { embeds: unknown[] }) {
+  private async sendToAlertChannel(message: { components?: unknown[]; embeds: unknown[] }): Promise<DelivereeExtensionNotificationSendResult> {
     const fetchImpl = this.options.fetchImpl ?? fetch;
     const response = await fetchImpl(`https://discord.com/api/v10/channels/${this.options.channelId}/messages`, {
       body: JSON.stringify(message),
@@ -696,6 +846,13 @@ export class DiscordRestDelivereeExtensionNotifier implements DelivereeExtension
       const errorText = await response.text().catch(() => "");
       throw new Error(`Discord REST send failed: HTTP ${response.status}${errorText ? ` ${errorText}` : ""}`);
     }
+
+    const body = await response.json().catch(() => undefined) as { channel_id?: string; id?: string } | undefined;
+
+    return {
+      channelId: body?.channel_id,
+      messageId: body?.id
+    };
   }
 }
 

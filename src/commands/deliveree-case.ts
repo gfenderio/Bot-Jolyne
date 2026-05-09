@@ -1,7 +1,12 @@
 import { EmbedBuilder, SlashCommandBuilder } from "discord.js";
-import type { SlashCommand } from "../types/command.js";
-import { getDelivereeAccessDeniedReason } from "../security/discordAccess.js";
+import { buildDelivereeExtensionManualComponents } from "../deliveree/extensionIntake.js";
 import { createDelivereeCaseStore } from "../deliveree/liveRuntime.js";
+import { getDelivereeAccessDeniedReason } from "../security/discordAccess.js";
+import type { SlashCommand } from "../types/command.js";
+
+function toDiscordTimestamp(value: string, format: "F" | "R" | "t" = "R") {
+  return `<t:${Math.floor(new Date(value).getTime() / 1000)}:${format}>`;
+}
 
 export const command: SlashCommand = {
   data: new SlashCommandBuilder()
@@ -13,6 +18,7 @@ export const command: SlashCommand = {
         .setDescription("Booking ID Deliveree")
         .setRequired(true)
     ),
+
   async execute(interaction) {
     const deniedReason = getDelivereeAccessDeniedReason(interaction);
 
@@ -43,35 +49,75 @@ export const command: SlashCommand = {
       },
       {
         inline: true,
+        name: "Case Status",
+        value: recoveryCase.closedAt
+          ? "Closed"
+          : recoveryCase.silencedAt
+            ? "Silenced"
+            : "Active"
+      },
+      {
+        inline: true,
         name: "Retry Count",
         value: String(recoveryCase.retryCount)
       },
       {
-        inline: true,
-        name: "Case Status",
-        value: recoveryCase.closedAt
-          ? "❌ Closed"
-          : recoveryCase.silencedAt
-            ? "🔇 Silenced"
-            : "✅ Active"
-      },
-      {
         inline: false,
         name: "Last Observed",
-        value: `<t:${Math.floor(new Date(recoveryCase.lastObservedAt).getTime() / 1000)}:F>`
+        value: toDiscordTimestamp(recoveryCase.lastObservedAt, "F")
       },
       {
         inline: false,
         name: "Last Status Change",
-        value: `<t:${Math.floor(new Date(recoveryCase.lastStatusChangeAt).getTime() / 1000)}:R>`
+        value: toDiscordTimestamp(recoveryCase.lastStatusChangeAt)
       }
     ];
 
-    if (recoveryCase.stuckDriverAlertSentAt) {
+    if (recoveryCase.statusText) {
+      fields.push({
+        inline: true,
+        name: "Status Text",
+        value: recoveryCase.statusText
+      });
+    }
+
+    if (recoveryCase.deviceId) {
+      fields.push({
+        inline: true,
+        name: "Device",
+        value: `\`${recoveryCase.deviceId}\``
+      });
+    }
+
+    if (recoveryCase.driverName) {
+      fields.push({
+        inline: true,
+        name: "Driver",
+        value: recoveryCase.driverName
+      });
+    }
+
+    if (recoveryCase.plateNumber) {
+      fields.push({
+        inline: true,
+        name: "Plat",
+        value: `\`${recoveryCase.plateNumber}\``
+      });
+    }
+
+    if (recoveryCase.etaText) {
+      fields.push({
+        inline: true,
+        name: "ETA",
+        value: recoveryCase.etaText
+      });
+    }
+
+    if (recoveryCase.failureReason) {
       fields.push({
         inline: false,
-        name: "Stuck Driver Alert",
-        value: `Sent <t:${Math.floor(new Date(recoveryCase.stuckDriverAlertSentAt).getTime() / 1000)}:R>`
+        name: "Failure Reason",
+        value: recoveryCase.failureReason
       });
     }
 
@@ -79,7 +125,7 @@ export const command: SlashCommand = {
       fields.push({
         inline: false,
         name: "Silenced",
-        value: `<t:${Math.floor(new Date(recoveryCase.silencedAt).getTime() / 1000)}:R>\n${recoveryCase.silenceReason || "No reason"}`
+        value: `${toDiscordTimestamp(recoveryCase.silencedAt)}\n${recoveryCase.silenceReason || "No reason"}`
       });
     }
 
@@ -87,20 +133,20 @@ export const command: SlashCommand = {
       fields.push({
         inline: false,
         name: "Closed",
-        value: `<t:${Math.floor(new Date(recoveryCase.closedAt).getTime() / 1000)}:R>`
+        value: toDiscordTimestamp(recoveryCase.closedAt)
       });
     }
 
     const recentActions = recoveryCase.actionLog
       .slice(-5)
       .reverse()
-      .map((log) => `<t:${Math.floor(new Date(log.at).getTime() / 1000)}:t> - \`${log.action}\` ${log.note ? `- ${log.note}` : ""}`)
+      .map((log) => `${toDiscordTimestamp(log.at, "t")} - \`${log.action}\`${log.note ? ` - ${log.note}` : ""}`)
       .join("\n");
 
     if (recentActions) {
       fields.push({
         inline: false,
-        name: "Recent Actions (last 5)",
+        name: "Recent Actions",
         value: recentActions
       });
     }
@@ -116,6 +162,11 @@ export const command: SlashCommand = {
       embed.setURL(recoveryCase.url);
     }
 
-    await interaction.editReply({ embeds: [embed] });
+    await interaction.editReply({
+      components: recoveryCase.closedAt || recoveryCase.silencedAt
+        ? []
+        : buildDelivereeExtensionManualComponents(recoveryCase.caseId),
+      embeds: [embed]
+    });
   }
 };
