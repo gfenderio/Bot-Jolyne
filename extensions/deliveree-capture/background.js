@@ -51,6 +51,38 @@ function fingerprintPageStateLog(pageState) {
   ].join("|");
 }
 
+function getActiveTab() {
+  return new Promise((resolve) => {
+    chrome.tabs.query({
+      active: true,
+      currentWindow: true
+    }, (tabs) => {
+      resolve(tabs?.[0]);
+    });
+  });
+}
+
+function sendMessageToTab(tabId, message) {
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(tabId, message, (response) => {
+      const lastError = chrome.runtime.lastError;
+
+      if (lastError) {
+        resolve({
+          error: lastError.message,
+          ok: false
+        });
+        return;
+      }
+
+      resolve(response || {
+        error: "empty_response",
+        ok: false
+      });
+    });
+  });
+}
+
 async function sendStatus(payload) {
   const settings = await getSettings();
   const payloadSummary = {
@@ -149,7 +181,7 @@ async function sendStatus(payload) {
   }
 }
 
-async function sendPageState(pageState) {
+async function sendPageState(pageState, options = {}) {
   const settings = await getSettings();
 
   if (!settings.token) {
@@ -194,7 +226,7 @@ async function sendPageState(pageState) {
     if (response.ok) {
       const fingerprint = fingerprintPageStateLog(pageState);
 
-      if (fingerprint !== lastPageStateSuccessLogFingerprint) {
+      if (options.forceLog || fingerprint !== lastPageStateSuccessLogFingerprint) {
         lastPageStateSuccessLogFingerprint = fingerprint;
         await appendLog("info", "page_state_finished", "Extension membaca halaman Deliveree.", {
           action: result.action,
@@ -221,6 +253,65 @@ async function sendPageState(pageState) {
       ok: false
     };
   }
+}
+
+async function testActiveDelivereePageStatus() {
+  const tab = await getActiveTab();
+  const tabUrl = tab?.url || "";
+
+  if (!tab?.id) {
+    await appendLog("error", "active_page_status_failed", "Tab aktif tidak bisa dibaca oleh extension.", {});
+    return {
+      error: "active_tab_unavailable",
+      ok: false
+    };
+  }
+
+  if (!tabUrl.startsWith("https://webapp.deliveree.com/")) {
+    await appendLog("warning", "active_page_not_deliveree", "Tab aktif bukan halaman Deliveree.", {
+      tabUrl
+    });
+    return {
+      error: "active_tab_not_deliveree",
+      ok: false
+    };
+  }
+
+  await appendLog("info", "active_page_status_started", "Membaca status halaman Deliveree aktif.", {
+    tabUrl
+  });
+
+  const collected = await sendMessageToTab(tab.id, {
+    type: "DELIVEREE_COLLECT_PAGE_STATE"
+  });
+
+  if (!collected?.ok || !collected.pageState) {
+    await appendLog("error", "active_page_status_failed", "Content script belum bisa membaca halaman Deliveree aktif.", {
+      error: collected?.error || "unknown_error",
+      tabUrl
+    });
+    return {
+      error: collected?.error || "page_state_unavailable",
+      ok: false
+    };
+  }
+
+  const result = await sendPageState(collected.pageState, {
+    forceLog: true
+  });
+
+  await appendLog(result.ok ? "info" : "error", "active_page_status_finished", "Test Intake membaca status halaman aktif.", {
+    bookingId: collected.pageState.bookingId,
+    error: result.error,
+    httpStatus: result.httpStatus,
+    ok: result.ok,
+    pageKind: collected.pageState.pageKind,
+    source: collected.source,
+    status: collected.pageState.status,
+    statusText: collected.pageState.statusText
+  });
+
+  return result;
 }
 
 async function sendControlRequest(endpoint, labels) {
@@ -283,8 +374,8 @@ async function sendControlRequest(endpoint, labels) {
   }
 }
 
-function testLocalIntake() {
-  return sendControlRequest("/deliveree/extension/health", {
+async function testLocalIntake() {
+  const result = await sendControlRequest("/deliveree/extension/health", {
     failedEvent: "test_intake_failed",
     failedMessage: "Gagal menghubungi local intake Jolyne.",
     finishedEvent: "test_intake_finished",
@@ -293,6 +384,12 @@ function testLocalIntake() {
     startedEvent: "test_intake_started",
     startedMessage: "Menguji koneksi local intake Jolyne."
   });
+
+  if (result.ok) {
+    await testActiveDelivereePageStatus();
+  }
+
+  return result;
 }
 
 function sendDiscordTest() {

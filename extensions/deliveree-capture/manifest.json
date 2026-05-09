@@ -3,7 +3,7 @@
   "name": "Jolyne Deliveree Capture",
   "version": "0.1.0",
   "description": "Read-only Deliveree order detector for local Jolyne intake.",
-  "permissions": ["storage"],
+  "permissions": ["activeTab", "storage"],
   "host_permissions": [
     "https://webapp.deliveree.com/*",
     "http://127.0.0.1/*",

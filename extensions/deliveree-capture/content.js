@@ -401,6 +401,41 @@ function sendCurrentStatus(options = {}) {
   });
 }
 
+function collectCurrentPageState() {
+  try {
+    const payload = buildPayload();
+
+    if (payload) {
+      return {
+        ok: true,
+        pageState: buildPageStateFromPayload(payload),
+        source: "booking_payload"
+      };
+    }
+
+    const pageState = getKnownPageState();
+
+    if (pageState) {
+      return {
+        ok: true,
+        pageState: buildIdlePageState(pageState.pageKind),
+        source: pageState.event
+      };
+    }
+
+    return {
+      ok: true,
+      pageState: buildIdlePageState("unknown_deliveree_page"),
+      source: "unknown_deliveree_page"
+    };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "unknown_error",
+      ok: false
+    };
+  }
+}
+
 function scheduleSend() {
   window.clearTimeout(debounceTimer);
   debounceTimer = window.setTimeout(sendCurrentStatus, SEND_DEBOUNCE_MS);
@@ -434,3 +469,12 @@ if (document.body) {
     once: true
   });
 }
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type !== "DELIVEREE_COLLECT_PAGE_STATE") {
+    return false;
+  }
+
+  sendResponse(collectCurrentPageState());
+  return true;
+});
