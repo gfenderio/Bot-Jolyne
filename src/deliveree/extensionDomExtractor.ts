@@ -3,6 +3,13 @@ import { DELIVEREE_WEB_STATUSES, type DelivereeWebStatus } from "./webClassifier
 
 export const DELIVEREE_EXTENSION_SCHEMA_VERSION = 1;
 
+export const DELIVEREE_EXTENSION_EVENT_TYPES = [
+  "order_created",
+  "order_failed"
+] as const;
+
+export type DelivereeExtensionEventType = (typeof DELIVEREE_EXTENSION_EVENT_TYPES)[number];
+
 export type DelivereeExtensionAnchorSnapshot = {
   href: string;
   text?: string;
@@ -28,6 +35,8 @@ export type DelivereeExtensionStatusPayload = {
   bookingId: string;
   destinationCount?: number;
   duplicateUrl?: string;
+  eventType?: DelivereeExtensionEventType;
+  failureReason?: string;
   jobNo?: string;
   observedAt: string;
   pageUrl: string;
@@ -42,6 +51,8 @@ export const delivereeExtensionStatusPayloadSchema = z.object({
   bookingId: z.string().min(1).max(64),
   destinationCount: z.number().int().nonnegative().optional(),
   duplicateUrl: z.string().url().optional(),
+  eventType: z.enum(DELIVEREE_EXTENSION_EVENT_TYPES).optional(),
+  failureReason: z.string().min(1).max(160).optional(),
   jobNo: z.string().min(1).max(120).optional(),
   observedAt: z.string().datetime(),
   pageUrl: z.string().url(),
@@ -110,6 +121,30 @@ function detectStatus(snapshot: DelivereeExtensionPageSnapshot): DelivereeWebSta
   }
 
   return "unknown";
+}
+
+function detectEventType(status: DelivereeWebStatus): DelivereeExtensionEventType | undefined {
+  if (status === "cancelled" || status === "no_driver_found") {
+    return "order_failed";
+  }
+
+  if (status === "searching_driver" || status === "driver_assigned") {
+    return "order_created";
+  }
+
+  return undefined;
+}
+
+function detectFailureReason(status: DelivereeWebStatus, snapshot: DelivereeExtensionPageSnapshot) {
+  if (status === "cancelled") {
+    return optionalString(snapshot.badgeText) ?? "Order dibatalkan.";
+  }
+
+  if (status === "no_driver_found") {
+    return "Tidak ada pengemudi ditemukan.";
+  }
+
+  return undefined;
 }
 
 function getDetailValue(snapshot: DelivereeExtensionPageSnapshot, label: string) {
@@ -192,16 +227,19 @@ export function extractDelivereeExtensionStatus(snapshot: DelivereeExtensionPage
     throw new Error("Tidak bisa menemukan booking ID Deliveree dari halaman.");
   }
 
+  const status = detectStatus(snapshot);
   const payload: DelivereeExtensionStatusPayload = {
     bookingId,
     destinationCount: parseInteger(getDetailValue(snapshot, "Tujuan")),
     duplicateUrl: findDuplicateUrl(snapshot, bookingId),
+    eventType: detectEventType(status),
+    failureReason: detectFailureReason(status, snapshot),
     jobNo: optionalString(getDetailValue(snapshot, "No. Job")),
     observedAt: snapshot.observedAt ?? new Date().toISOString(),
     pageUrl: snapshot.pageUrl,
     schemaVersion: DELIVEREE_EXTENSION_SCHEMA_VERSION,
     serviceType: optionalString(getDetailValue(snapshot, "Jenis Layanan")),
-    status: detectStatus(snapshot),
+    status,
     statusText: optionalString(snapshot.badgeText),
     totalDistanceKm: parseNumber(getDetailValue(snapshot, "Total Jarak"))
   };

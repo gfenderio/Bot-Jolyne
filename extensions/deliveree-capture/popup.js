@@ -10,6 +10,7 @@ const elements = {
   connectionState: document.querySelector("#connection-state"),
   copyLogs: document.querySelector("#copy-logs"),
   deviceId: document.querySelector("#device-id"),
+  eventType: document.querySelector("#event-type"),
   intakeUrl: document.querySelector("#intake-url"),
   lastSent: document.querySelector("#last-sent"),
   logs: document.querySelector("#logs"),
@@ -94,6 +95,7 @@ async function render() {
   elements.token.value = data.token;
   elements.bookingId.textContent = data.lastEvent?.bookingId || "-";
   elements.status.textContent = data.lastEvent?.status || "-";
+  elements.eventType.textContent = data.lastEvent?.eventType || "-";
   elements.lastSent.textContent = formatTime(data.lastResult?.at);
   elements.result.textContent = data.lastResult?.ok
     ? `${data.lastResult.action || "ok"} (${data.lastResult.httpStatus || 200})`

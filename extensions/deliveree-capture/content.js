@@ -1,5 +1,5 @@
 const SCHEMA_VERSION = 1;
-const SEND_DEBOUNCE_MS = 1500;
+const SEND_DEBOUNCE_MS = 1000;
 
 let lastFingerprint = "";
 let lastLogFingerprint = "";
@@ -135,6 +135,30 @@ function detectStatus() {
   return "unknown";
 }
 
+function detectEventType(status) {
+  if (["cancelled", "no_driver_found"].includes(status)) {
+    return "order_failed";
+  }
+
+  if (["searching_driver", "driver_assigned"].includes(status)) {
+    return "order_created";
+  }
+
+  return undefined;
+}
+
+function detectFailureReason(status, statusText) {
+  if (status === "cancelled") {
+    return optionalString(statusText) || "Order dibatalkan.";
+  }
+
+  if (status === "no_driver_found") {
+    return "Tidak ada pengemudi ditemukan.";
+  }
+
+  return undefined;
+}
+
 function optionalString(value) {
   const normalized = normalizeText(value);
   return normalized || undefined;
@@ -148,17 +172,21 @@ function buildPayload() {
   }
 
   const badgeText = optionalString(textOf(document.querySelector(".badge-status")));
+  const status = detectStatus();
+  const eventType = detectEventType(status);
 
   return {
     bookingId,
     destinationCount: parseInteger(getDetailValue("Tujuan")),
     duplicateUrl: findDuplicateUrl(bookingId),
+    eventType,
+    failureReason: detectFailureReason(status, badgeText),
     jobNo: optionalString(getDetailValue("No. Job")),
     observedAt: new Date().toISOString(),
     pageUrl: window.location.href,
     schemaVersion: SCHEMA_VERSION,
     serviceType: optionalString(getDetailValue("Jenis Layanan")),
-    status: detectStatus(),
+    status,
     statusText: badgeText,
     totalDistanceKm: parseNumber(getDetailValue("Total Jarak"))
   };
@@ -207,6 +235,7 @@ function getKnownPageState() {
 
 function fingerprintPayload(payload) {
   return [
+    payload.eventType || "no_event",
     payload.bookingId,
     payload.status,
     payload.duplicateUrl || "",
@@ -285,6 +314,21 @@ function sendCurrentStatus() {
   const fingerprint = fingerprintPayload(payload);
 
   if (fingerprint === lastFingerprint) {
+    return;
+  }
+
+  if (!payload.eventType) {
+    lastFingerprint = fingerprint;
+    sendContentLogOnce(
+      `non-mvp:${fingerprint}`,
+      "info",
+      "status_logged_only",
+      "Status Deliveree terbaca, tapi bukan sinyal MVP untuk Discord.",
+      {
+        bookingId: payload.bookingId,
+        status: payload.status
+      }
+    );
     return;
   }
 

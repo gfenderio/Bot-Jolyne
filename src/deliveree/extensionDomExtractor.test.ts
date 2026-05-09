@@ -87,6 +87,7 @@ test("Deliveree Extension Extractor - extracts completed order fixture", async (
   ));
 
   assert.strictEqual(payload.status, "completed");
+  assert.strictEqual(payload.eventType, undefined);
   assert.strictEqual(payload.bookingId, "19320032");
   assert.strictEqual(payload.duplicateUrl, "https://webapp.deliveree.com/bookings/19320032/book_again/?area_id=3");
   assert.strictEqual(payload.serviceType, "Mobil XL");
@@ -101,6 +102,8 @@ test("Deliveree Extension Extractor - extracts cancelled order fixture", async (
   ));
 
   assert.strictEqual(payload.status, "cancelled");
+  assert.strictEqual(payload.eventType, "order_failed");
+  assert.strictEqual(payload.failureReason, "Batal");
   assert.strictEqual(payload.bookingId, "19330506");
   assert.strictEqual(payload.duplicateUrl, "https://webapp.deliveree.com/bookings/19330506/book_again/?area_id=3");
   assert.strictEqual(payload.serviceType, "Van");
@@ -116,6 +119,30 @@ test("Deliveree Extension Extractor - handles unknown fixture without crashing",
   ));
 
   assert.strictEqual(payload.status, "unknown");
+  assert.strictEqual(payload.eventType, undefined);
   assert.strictEqual(payload.bookingId, "19339999");
   assert.strictEqual(payload.duplicateUrl, undefined);
+});
+
+test("Deliveree Extension Extractor - marks active booking as created signal", () => {
+  const payload = extractDelivereeExtensionStatus({
+    bodyText: "Segera #19330506 Memilih Tunggu sekitar 1-3 menit. Kode Pemesanan 19330506",
+    detailRows: [
+      {
+        label: "Kode Pemesanan",
+        value: "19330506"
+      },
+      {
+        label: "Jenis Layanan",
+        value: "Van"
+      }
+    ],
+    observedAt: "2026-05-08T07:00:00.000Z",
+    pageUrl: "https://webapp.deliveree.com/bookings/19330506",
+    titleText: "Segera #19330506"
+  });
+
+  assert.strictEqual(payload.bookingId, "19330506");
+  assert.strictEqual(payload.status, "searching_driver");
+  assert.strictEqual(payload.eventType, "order_created");
 });

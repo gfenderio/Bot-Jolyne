@@ -1,19 +1,16 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   EmbedBuilder,
   type Client,
   type MessageCreateOptions
 } from "discord.js";
 import { ZodError } from "zod";
 import { env } from "../config/env.js";
-import { createSignedDelivereeButtonId } from "../security/signedButton.js";
 import { createDelivereeCaseStore } from "./liveRuntime.js";
 import type { DelivereeRecoveryCase } from "./caseStore.js";
 import {
   parseDelivereeExtensionStatusPayload,
+  type DelivereeExtensionEventType,
   type DelivereeExtensionStatusPayload
 } from "./extensionDomExtractor.js";
 
@@ -60,39 +57,10 @@ setInterval(() => {
   rateLimiter.cleanup();
 }, 60_000).unref();
 
-function isDriverAssignedStatus(status: string) {
-  return status === "driver_assigned" || status === "on_delivery" || status === "arrived_at_pickup";
-}
-
-function getStuckDriverMinutes(recoveryCase: DelivereeRecoveryCase) {
-  const now = Date.now();
-  const lastChange = new Date(recoveryCase.lastStatusChangeAt).getTime();
-  return Math.floor((now - lastChange) / 1000 / 60);
-}
-
-function shouldSendStuckDriverAlert(recoveryCase: DelivereeRecoveryCase) {
-  if (!isDriverAssignedStatus(recoveryCase.status)) {
-    return false;
-  }
-
-  if (recoveryCase.stuckDriverAlertSentAt) {
-    return false;
-  }
-
-  if (recoveryCase.silencedAt) {
-    return false;
-  }
-
-  const stuckMinutes = getStuckDriverMinutes(recoveryCase);
-  return stuckMinutes >= env.DELIVEREE_STUCK_DRIVER_WARNING_MINUTES;
-}
-
 export type DelivereeExtensionIntakeAction =
-  | "booking_observed"
-  | "cancelled_alert"
   | "deduped"
-  | "status_changed"
-  | "stuck_driver_alert";
+  | "ignored"
+  | DelivereeExtensionEventType;
 
 export type DelivereeExtensionIntakeDecision = {
   action: DelivereeExtensionIntakeAction;
@@ -102,7 +70,7 @@ export type DelivereeExtensionIntakeDecision = {
 };
 
 export type DelivereeExtensionNotification = {
-  action: Exclude<DelivereeExtensionIntakeAction, "deduped">;
+  action: DelivereeExtensionEventType;
   deviceId: string;
   payload: DelivereeExtensionStatusPayload;
   recoveryCase: DelivereeRecoveryCase;
@@ -127,7 +95,6 @@ export interface DelivereeExtensionCaseStore {
     changed: boolean;
     recoveryCase: DelivereeRecoveryCase;
   }>;
-  markStuckDriverAlertSent(caseId: string): Promise<DelivereeRecoveryCase | undefined>;
 }
 
 export type DelivereeExtensionIntakeOptions = {
@@ -199,20 +166,33 @@ function assertAuthorized(request: IncomingMessage, options: DelivereeExtensionI
   return deviceId;
 }
 
+function getMvpEventType(payload: DelivereeExtensionStatusPayload): DelivereeExtensionEventType | undefined {
+  if (payload.eventType) {
+    return payload.eventType;
+  }
+
+  if (payload.status === "cancelled" || payload.status === "no_driver_found") {
+    return "order_failed";
+  }
+
+  if (payload.status === "searching_driver" || payload.status === "driver_assigned") {
+    return "order_created";
+  }
+
+  return undefined;
+}
+
 function getNotificationAction(
   changed: boolean,
-  recoveryCase: DelivereeRecoveryCase,
   payload: DelivereeExtensionStatusPayload
 ): DelivereeExtensionIntakeAction {
-  if (!changed) {
-    return "deduped";
+  const eventType = getMvpEventType(payload);
+
+  if (!eventType) {
+    return "ignored";
   }
 
-  if (payload.status === "cancelled") {
-    return "cancelled_alert";
-  }
-
-  return recoveryCase.actionLog.length === 1 ? "booking_observed" : "status_changed";
+  return changed ? eventType : "deduped";
 }
 
 export async function handleDelivereeExtensionStatusEvent(
@@ -225,25 +205,15 @@ export async function handleDelivereeExtensionStatusEvent(
     status: payload.status,
     url: payload.pageUrl
   });
-  const action = getNotificationAction(changed, recoveryCase, payload);
+  const action = getNotificationAction(changed, payload);
 
-  if (action !== "deduped") {
+  if (action !== "deduped" && action !== "ignored") {
     await options.notifier.send({
       action,
       deviceId,
       payload,
       recoveryCase
     });
-  }
-
-  if (shouldSendStuckDriverAlert(recoveryCase)) {
-    await options.notifier.send({
-      action: "stuck_driver_alert",
-      deviceId,
-      payload,
-      recoveryCase
-    });
-    await options.store.markStuckDriverAlertSent(recoveryCase.caseId);
   }
 
   return {
@@ -381,29 +351,15 @@ export function createDelivereeExtensionIntakeServer(options: DelivereeExtension
 
 function describeAction(action: DelivereeExtensionNotification["action"]) {
   const descriptions: Record<DelivereeExtensionNotification["action"], string> = {
-    booking_observed: "Order baru terdeteksi oleh extension lokal.",
-    cancelled_alert: "Order terdeteksi batal. Siapkan review replacement/reorder secara manual.",
-    status_changed: "Status order berubah sejak observasi sebelumnya.",
-    stuck_driver_alert: "Driver assigned tapi tidak ada progress. Perlu follow up atau reorder."
+    order_created: "Order Deliveree baru terdeteksi oleh extension lokal.",
+    order_failed: "Order Deliveree gagal. Perlu dicek manual oleh tim."
   };
 
   return descriptions[action];
 }
 
 function statusColor(notification: DelivereeExtensionNotification) {
-  if (notification.payload.status === "cancelled") {
-    return 0xeb5757;
-  }
-
-  if (notification.payload.status === "completed") {
-    return 0x27ae60;
-  }
-
-  if (notification.action === "stuck_driver_alert") {
-    return 0xf39c12;
-  }
-
-  return notification.action === "booking_observed" ? 0x2f80ed : 0xf2c94c;
+  return notification.action === "order_failed" ? 0xeb5757 : 0x2f80ed;
 }
 
 function fieldValue(value: string | number | undefined) {
@@ -416,6 +372,11 @@ function fieldValue(value: string | number | undefined) {
 
 export function buildDelivereeExtensionNotificationEmbed(notification: DelivereeExtensionNotification) {
   const fields = [
+    {
+      inline: true,
+      name: "Event",
+      value: `\`${notification.action}\``
+    },
     {
       inline: true,
       name: "Status",
@@ -448,20 +409,11 @@ export function buildDelivereeExtensionNotificationEmbed(notification: Deliveree
     }
   ];
 
-  if (notification.action === "stuck_driver_alert") {
-    const stuckMinutes = getStuckDriverMinutes(notification.recoveryCase);
-    fields.push({
-      inline: true,
-      name: "Stuck Duration",
-      value: `${stuckMinutes} menit`
-    });
-  }
-
-  if (notification.payload.duplicateUrl) {
+  if (notification.payload.failureReason) {
     fields.push({
       inline: false,
-      name: "Duplicate URL",
-      value: notification.payload.duplicateUrl
+      name: "Reason",
+      value: notification.payload.failureReason
     });
   }
 
@@ -499,67 +451,12 @@ export function buildDelivereeExtensionConnectionTestEmbed(notification: Deliver
     .setTimestamp(new Date(notification.observedAt));
 }
 
-function buildDelivereeRecoveryButtons(caseId: string, action: DelivereeExtensionNotification["action"]) {
-  if (!env.DELIVEREE_BUTTON_SIGNING_SECRET) {
-    return [];
-  }
-
-  const buttons = [];
-
-  if (action === "cancelled_alert" || action === "stuck_driver_alert") {
-    buttons.push(
-      new ButtonBuilder()
-        .setCustomId(createSignedDelivereeButtonId({
-          action: "manual_reorder",
-          caseId,
-          secret: env.DELIVEREE_BUTTON_SIGNING_SECRET
-        }))
-        .setLabel("Sudah Reorder Manual")
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId(createSignedDelivereeButtonId({
-          action: "need_followup",
-          caseId,
-          secret: env.DELIVEREE_BUTTON_SIGNING_SECRET
-        }))
-        .setLabel("Butuh Follow Up")
-        .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId(createSignedDelivereeButtonId({
-          action: "ignore",
-          caseId,
-          secret: env.DELIVEREE_BUTTON_SIGNING_SECRET
-        }))
-        .setLabel("Abaikan")
-        .setStyle(ButtonStyle.Secondary)
-    );
-  }
-
-  buttons.push(
-    new ButtonBuilder()
-      .setCustomId(createSignedDelivereeButtonId({
-        action: "refresh",
-        caseId,
-        secret: env.DELIVEREE_BUTTON_SIGNING_SECRET
-      }))
-      .setLabel("Refresh Status")
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  if (buttons.length === 0) {
-    return [];
-  }
-
-  return [new ActionRowBuilder<ButtonBuilder>().addComponents(buttons)];
-}
-
 export class DiscordBotDelivereeExtensionNotifier implements DelivereeExtensionNotificationSender {
   constructor(private readonly client: Client<true>) {}
 
   async send(notification: DelivereeExtensionNotification) {
     try {
       await this.sendToAlertChannel({
-        components: buildDelivereeRecoveryButtons(notification.recoveryCase.caseId, notification.action),
         embeds: [buildDelivereeExtensionNotificationEmbed(notification)]
       });
     } catch (error) {

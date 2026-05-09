@@ -160,7 +160,7 @@ Command ini membuka browser Playwright dengan persistent profile di `DELIVEREE_P
 
 ## Deliveree Extension Lokal
 
-Tahap awal recovery Deliveree memakai Chrome extension lokal yang read-only. Extension berjalan di browser staff yang sudah login Deliveree, membaca detail aman dari halaman order, lalu mengirim event ke endpoint lokal Jolyne. Jolyne mengirim notifikasi ke `DELIVEREE_ALERT_CHANNEL_ID` memakai Discord bot, bukan webhook baru.
+Tahap MVP Deliveree memakai Chrome extension lokal yang read-only. Extension berjalan di browser staff yang sudah login Deliveree, membaca detail aman dari halaman order aktif, lalu hanya mengirim sinyal penting ke endpoint lokal Jolyne. Jolyne mengirim notifikasi ke `DELIVEREE_ALERT_CHANNEL_ID` memakai Discord bot, bukan webhook baru.
 
 Konfigurasi `.env` lokal:
 
@@ -188,7 +188,7 @@ npm run dev
    - Token: sama dengan `DELIVEREE_EXTENSION_TOKEN`
 5. Buka halaman `https://webapp.deliveree.com/bookings/<id>`.
 
-Data yang dikirim sengaja minimal: booking ID, status, URL halaman, duplicate URL, jenis layanan, jarak, jumlah tujuan, dan No. Job. Extension tidak mengirim nomor telepon, alamat lengkap, foto, signature, cookie, password, OTP, atau data pembayaran. Extension juga tidak klik tombol Deliveree apa pun.
+Data yang dikirim sengaja minimal: event MVP, booking ID, status, URL halaman, reason gagal bila terbaca, jenis layanan, jarak, jumlah tujuan, dan No. Job. Extension tidak mengirim nomor telepon, alamat lengkap, foto, signature, cookie, password, OTP, atau data pembayaran. Extension juga tidak klik tombol Deliveree apa pun.
 
 Halaman utama `https://webapp.deliveree.com/bookings/new` dan draft pemesanan seperti `https://webapp.deliveree.com/bookings/new?ftl=true` dicatat sebagai log lokal saja. Kartu `Pesanan Terbaru` di halaman utama tidak dianggap sebagai booking aktif, sehingga tidak memicu alert Discord.
 
@@ -198,10 +198,10 @@ Gunakan `Test Intake` di popup untuk mengecek apakah endpoint lokal Jolyne hidup
 
 Rule notifikasi tahap 1:
 
-- Booking baru terdeteksi: kirim satu notifikasi ringan.
-- Status berubah: kirim notifikasi.
-- Status `cancelled`: kirim alert prioritas dengan duplicate URL jika ada.
-- Booking dan status yang sama berulang: disimpan sebagai observasi, tapi tidak mengirim spam Discord.
+- `order_created`: booking ID asli sudah muncul dan status aktif awal terbaca, seperti `searching_driver` atau `driver_assigned`.
+- `order_failed`: booking ID asli sudah muncul dan status gagal terbaca, seperti `cancelled` atau `no_driver_found`.
+- Status normal lain seperti `completed`, `unknown`, dan halaman draft hanya masuk log lokal popup.
+- Event booking dan status yang sama berulang disimpan sebagai observasi, tapi tidak mengirim spam Discord.
 
 ## Struktur
 

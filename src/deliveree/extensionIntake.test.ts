@@ -158,14 +158,18 @@ test("Deliveree Extension Intake - Discord test sends a test notification", asyn
 
 test("Deliveree Extension Intake - accepts valid payload and dedupes repeated status", async () => {
   await withTestServer(async ({ notifier, post }) => {
-    const first = await post(buildPayload());
+    const first = await post(buildPayload({
+      eventType: "order_created"
+    }));
     const firstBody = await first.json() as { action: string; deduped: boolean; ok: boolean };
-    const second = await post(buildPayload());
+    const second = await post(buildPayload({
+      eventType: "order_created"
+    }));
     const secondBody = await second.json() as { action: string; deduped: boolean; ok: boolean };
 
     assert.strictEqual(first.status, 200);
     assert.strictEqual(firstBody.ok, true);
-    assert.strictEqual(firstBody.action, "booking_observed");
+    assert.strictEqual(firstBody.action, "order_created");
     assert.strictEqual(firstBody.deduped, false);
     assert.strictEqual(second.status, 200);
     assert.strictEqual(secondBody.action, "deduped");
@@ -174,10 +178,14 @@ test("Deliveree Extension Intake - accepts valid payload and dedupes repeated st
   });
 });
 
-test("Deliveree Extension Intake - notifies status changes and cancelled alerts", async () => {
+test("Deliveree Extension Intake - notifies order failure after created signal", async () => {
   await withTestServer(async ({ notifier, post }) => {
-    await post(buildPayload());
+    await post(buildPayload({
+      eventType: "order_created"
+    }));
     const cancelled = await post(buildPayload({
+      eventType: "order_failed",
+      failureReason: "Batal",
       observedAt: "2026-05-08T07:05:00.000Z",
       status: "cancelled",
       statusText: "Batal"
@@ -186,10 +194,27 @@ test("Deliveree Extension Intake - notifies status changes and cancelled alerts"
 
     assert.strictEqual(cancelled.status, 200);
     assert.strictEqual(cancelledBody.ok, true);
-    assert.strictEqual(cancelledBody.action, "cancelled_alert");
+    assert.strictEqual(cancelledBody.action, "order_failed");
     assert.strictEqual(cancelledBody.deduped, false);
     assert.strictEqual(notifier.notifications.length, 2);
-    assert.strictEqual(notifier.notifications[1].action, "cancelled_alert");
+    assert.strictEqual(notifier.notifications[1].action, "order_failed");
     assert.strictEqual(notifier.notifications[1].payload.duplicateUrl, "https://webapp.deliveree.com/bookings/19330506/book_again/?area_id=3");
+  });
+});
+
+test("Deliveree Extension Intake - ignores non-MVP statuses", async () => {
+  await withTestServer(async ({ notifier, post }) => {
+    const response = await post(buildPayload({
+      eventType: undefined,
+      status: "completed",
+      statusText: "Selesai"
+    }));
+    const body = await response.json() as { action: string; deduped: boolean; ok: boolean };
+
+    assert.strictEqual(response.status, 200);
+    assert.strictEqual(body.ok, true);
+    assert.strictEqual(body.action, "ignored");
+    assert.strictEqual(body.deduped, false);
+    assert.strictEqual(notifier.notifications.length, 0);
   });
 });

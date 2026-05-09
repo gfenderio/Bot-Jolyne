@@ -46,6 +46,8 @@ async function sendStatus(payload) {
     bookingId: payload.bookingId,
     destinationCount: payload.destinationCount,
     duplicateUrlDetected: Boolean(payload.duplicateUrl),
+    eventType: payload.eventType,
+    failureReason: payload.failureReason,
     jobNo: payload.jobNo,
     serviceType: payload.serviceType,
     status: payload.status,
@@ -55,6 +57,7 @@ async function sendStatus(payload) {
   await chrome.storage.local.set({
     lastEvent: {
       bookingId: payload.bookingId,
+      eventType: payload.eventType,
       observedAt: payload.observedAt,
       pageUrl: payload.pageUrl,
       status: payload.status
@@ -62,8 +65,8 @@ async function sendStatus(payload) {
   });
   await appendLog(
     "info",
-    "status_detected",
-    `Detected Deliveree #${payload.bookingId} as ${payload.status}.`,
+    "mvp_signal_detected",
+    `Detected Deliveree ${payload.eventType} for #${payload.bookingId}.`,
     payloadSummary
   );
 
@@ -75,6 +78,7 @@ async function sendStatus(payload) {
     await saveLastResult(result);
     await appendLog("error", "send_skipped", "Token extension belum diisi di popup.", {
       bookingId: payload.bookingId,
+      eventType: payload.eventType,
       status: payload.status
     });
     return result;
@@ -83,6 +87,7 @@ async function sendStatus(payload) {
   try {
     await appendLog("info", "send_started", "Mengirim status ke local intake Jolyne.", {
       bookingId: payload.bookingId,
+      eventType: payload.eventType,
       intakeUrl: normalizeBaseUrl(settings.intakeUrl),
       status: payload.status
     });
@@ -109,6 +114,7 @@ async function sendStatus(payload) {
       action: result.action,
       bookingId: payload.bookingId,
       deduped: result.deduped,
+      eventType: payload.eventType,
       error: result.error,
       httpStatus: response.status,
       ok: result.ok,
@@ -123,6 +129,7 @@ async function sendStatus(payload) {
     await saveLastResult(result);
     await appendLog("error", "send_failed", "Gagal menghubungi local intake Jolyne.", {
       bookingId: payload.bookingId,
+      eventType: payload.eventType,
       error: result.error,
       intakeUrl: normalizeBaseUrl(settings.intakeUrl),
       status: payload.status
