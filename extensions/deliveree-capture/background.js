@@ -138,6 +138,61 @@ async function sendStatus(payload) {
   }
 }
 
+async function sendPageState(pageState) {
+  const settings = await getSettings();
+
+  if (!settings.token) {
+    await appendLog("error", "page_state_skipped", "Token extension belum diisi di popup.", {
+      pageKind: pageState.pageKind,
+      status: pageState.status
+    });
+    return {
+      error: "token_not_configured",
+      ok: false
+    };
+  }
+
+  try {
+    const response = await fetch(`${normalizeBaseUrl(settings.intakeUrl)}/deliveree/extension/page-state`, {
+      body: JSON.stringify(pageState),
+      headers: {
+        "Authorization": `Bearer ${settings.token}`,
+        "Content-Type": "application/json",
+        "X-Deliveree-Device-Id": settings.deviceId
+      },
+      method: "POST"
+    });
+    const body = await response.json().catch(() => ({
+      error: "invalid_response",
+      ok: false
+    }));
+
+    if (!response.ok) {
+      await appendLog("error", "page_state_failed", "Jolyne gagal menerima page state.", {
+        error: body.error,
+        httpStatus: response.status,
+        pageKind: pageState.pageKind,
+        status: pageState.status
+      });
+    }
+
+    return {
+      ...body,
+      httpStatus: response.status
+    };
+  } catch (error) {
+    await appendLog("error", "page_state_network_failed", "Gagal mengirim page state ke Jolyne.", {
+      error: error instanceof Error ? error.message : "network_error",
+      pageKind: pageState.pageKind,
+      status: pageState.status
+    });
+    return {
+      error: error instanceof Error ? error.message : "network_error",
+      ok: false
+    };
+  }
+}
+
 async function sendControlRequest(endpoint, labels) {
   const settings = await getSettings();
 
@@ -242,6 +297,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message?.type === "DELIVEREE_TEST_DISCORD") {
     sendDiscordTest().then(sendResponse);
+    return true;
+  }
+
+  if (message?.type === "DELIVEREE_PAGE_STATE") {
+    sendPageState(message.pageState).then(sendResponse);
     return true;
   }
 

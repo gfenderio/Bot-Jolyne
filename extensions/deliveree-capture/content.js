@@ -1,9 +1,12 @@
 const SCHEMA_VERSION = 1;
+const HEARTBEAT_MS = 15000;
 const SEND_DEBOUNCE_MS = 1000;
 
 let lastFingerprint = "";
 let lastLogFingerprint = "";
+let lastPageStateFingerprint = "";
 let debounceTimer;
+let heartbeatTimer;
 
 function textOf(element) {
   return (element?.innerText || element?.textContent || "").replace(/\s+/g, " ").trim();
@@ -211,6 +214,7 @@ function getKnownPageState() {
     return {
       details,
       event: "front_page_detected",
+      pageKind: "front_page",
       message: "Halaman utama Deliveree terdeteksi. Belum ada booking ID aktif untuk dikirim."
     };
   }
@@ -226,11 +230,35 @@ function getKnownPageState() {
     return {
       details,
       event: "draft_page_detected",
+      pageKind: "draft_page",
       message: "Draft pemesanan Deliveree terdeteksi. Extension hanya mencatat lokal dan tidak mengirim ke Jolyne."
     };
   }
 
   return undefined;
+}
+
+function buildPageStateFromPayload(payload) {
+  return {
+    bookingId: payload.bookingId,
+    eventType: payload.eventType,
+    failureReason: payload.failureReason,
+    observedAt: payload.observedAt,
+    pageKind: "booking_detail",
+    pageUrl: payload.pageUrl,
+    schemaVersion: SCHEMA_VERSION,
+    status: payload.status,
+    statusText: payload.statusText
+  };
+}
+
+function buildIdlePageState(pageKind) {
+  return {
+    observedAt: new Date().toISOString(),
+    pageKind,
+    pageUrl: window.location.href,
+    schemaVersion: SCHEMA_VERSION
+  };
 }
 
 function fingerprintPayload(payload) {
@@ -244,6 +272,30 @@ function fingerprintPayload(payload) {
     payload.destinationCount ?? "",
     payload.jobNo || ""
   ].join("|");
+}
+
+function fingerprintPageState(pageState) {
+  return [
+    pageState.pageKind,
+    pageState.bookingId || "",
+    pageState.status || "",
+    pageState.eventType || "",
+    pageState.pageUrl
+  ].join("|");
+}
+
+function sendPageState(pageState, options = {}) {
+  const fingerprint = fingerprintPageState(pageState);
+
+  if (!options.force && fingerprint === lastPageStateFingerprint) {
+    return;
+  }
+
+  lastPageStateFingerprint = fingerprint;
+  chrome.runtime.sendMessage({
+    pageState,
+    type: "DELIVEREE_PAGE_STATE"
+  });
 }
 
 function sendContentLog(level, event, message, details = {}) {
@@ -265,7 +317,7 @@ function sendContentLogOnce(fingerprint, level, event, message, details = {}) {
   sendContentLog(level, event, message, details);
 }
 
-function sendCurrentStatus() {
+function sendCurrentStatus(options = {}) {
   let payload;
 
   try {
@@ -288,6 +340,9 @@ function sendCurrentStatus() {
     const pageState = getKnownPageState();
 
     if (pageState) {
+      sendPageState(buildIdlePageState(pageState.pageKind), {
+        force: options.forcePageState
+      });
       sendContentLogOnce(
         `${pageState.event}:${window.location.pathname}:${window.location.search}`,
         "info",
@@ -298,6 +353,9 @@ function sendCurrentStatus() {
       return;
     }
 
+    sendPageState(buildIdlePageState("unknown_deliveree_page"), {
+      force: options.forcePageState
+    });
     sendContentLogOnce(
       `no-booking:${window.location.pathname}:${window.location.search}`,
       "warning",
@@ -310,6 +368,10 @@ function sendCurrentStatus() {
     );
     return;
   }
+
+  sendPageState(buildPageStateFromPayload(payload), {
+    force: options.forcePageState
+  });
 
   const fingerprint = fingerprintPayload(payload);
 
@@ -350,6 +412,12 @@ function startObserver() {
   }
 
   scheduleSend();
+  window.clearInterval(heartbeatTimer);
+  heartbeatTimer = window.setInterval(() => {
+    sendCurrentStatus({
+      forcePageState: true
+    });
+  }, HEARTBEAT_MS);
 
   const observer = new MutationObserver(scheduleSend);
   observer.observe(document.body, {

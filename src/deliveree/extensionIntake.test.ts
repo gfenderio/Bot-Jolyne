@@ -6,7 +6,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { JsonDelivereeCaseStore } from "./caseStore.js";
 import {
+  clearDelivereeExtensionPageStates,
   createDelivereeExtensionIntakeServer,
+  getLatestDelivereeExtensionPageState,
   type DelivereeExtensionConnectionTestNotification,
   type DelivereeExtensionNotification,
   type DelivereeExtensionNotificationSender
@@ -89,6 +91,7 @@ async function withTestServer<T>(
       postPath
     });
   } finally {
+    clearDelivereeExtensionPageStates();
     await new Promise<void>((resolve, reject) => {
       server.close((error) => {
         if (error) {
@@ -153,6 +156,53 @@ test("Deliveree Extension Intake - Discord test sends a test notification", asyn
     assert.strictEqual(notifier.notifications.length, 0);
     assert.strictEqual(notifier.connectionTests.length, 1);
     assert.strictEqual(notifier.connectionTests[0].deviceId, "yugi-browser");
+  });
+});
+
+test("Deliveree Extension Intake - records latest page state heartbeat", async () => {
+  await withTestServer(async ({ notifier, postPath }) => {
+    const response = await postPath("/deliveree/extension/page-state", {
+      observedAt: "2026-05-08T07:00:00.000Z",
+      pageKind: "front_page",
+      pageUrl: "https://webapp.deliveree.com/bookings/new",
+      schemaVersion: 1
+    });
+    const body = await response.json() as { action: string; ok: boolean; pageKind: string };
+    const latest = getLatestDelivereeExtensionPageState("yugi-browser");
+
+    assert.strictEqual(response.status, 200);
+    assert.strictEqual(body.ok, true);
+    assert.strictEqual(body.action, "page_state_recorded");
+    assert.strictEqual(body.pageKind, "front_page");
+    assert.strictEqual(latest?.pageKind, "front_page");
+    assert.strictEqual(latest?.deviceId, "yugi-browser");
+    assert.strictEqual(notifier.notifications.length, 0);
+  });
+});
+
+test("Deliveree Extension Intake - keeps status start time while heartbeat status is unchanged", async () => {
+  await withTestServer(async ({ postPath }) => {
+    await postPath("/deliveree/extension/page-state", {
+      bookingId: "19330506",
+      observedAt: "2026-05-08T07:00:00.000Z",
+      pageKind: "booking_detail",
+      pageUrl: "https://webapp.deliveree.com/bookings/19330506",
+      schemaVersion: 1,
+      status: "searching_driver"
+    });
+    await postPath("/deliveree/extension/page-state", {
+      bookingId: "19330506",
+      observedAt: "2026-05-08T07:05:00.000Z",
+      pageKind: "booking_detail",
+      pageUrl: "https://webapp.deliveree.com/bookings/19330506",
+      schemaVersion: 1,
+      status: "searching_driver"
+    });
+
+    const latest = getLatestDelivereeExtensionPageState("yugi-browser");
+
+    assert.strictEqual(latest?.status, "searching_driver");
+    assert.strictEqual(latest?.statusStartedAt, "2026-05-08T07:00:00.000Z");
   });
 });
 

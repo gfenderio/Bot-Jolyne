@@ -10,6 +10,15 @@ export const DELIVEREE_EXTENSION_EVENT_TYPES = [
 
 export type DelivereeExtensionEventType = (typeof DELIVEREE_EXTENSION_EVENT_TYPES)[number];
 
+export const DELIVEREE_EXTENSION_PAGE_KINDS = [
+  "booking_detail",
+  "draft_page",
+  "front_page",
+  "unknown_deliveree_page"
+] as const;
+
+export type DelivereeExtensionPageKind = (typeof DELIVEREE_EXTENSION_PAGE_KINDS)[number];
+
 export type DelivereeExtensionAnchorSnapshot = {
   href: string;
   text?: string;
@@ -61,6 +70,30 @@ export const delivereeExtensionStatusPayloadSchema = z.object({
   status: z.enum(DELIVEREE_WEB_STATUSES),
   statusText: z.string().min(1).max(100).optional(),
   totalDistanceKm: z.number().nonnegative().optional()
+}).strict();
+
+export type DelivereeExtensionPageStatePayload = {
+  bookingId?: string;
+  eventType?: DelivereeExtensionEventType;
+  failureReason?: string;
+  observedAt: string;
+  pageKind: DelivereeExtensionPageKind;
+  pageUrl: string;
+  schemaVersion: typeof DELIVEREE_EXTENSION_SCHEMA_VERSION;
+  status?: DelivereeWebStatus;
+  statusText?: string;
+};
+
+export const delivereeExtensionPageStatePayloadSchema = z.object({
+  bookingId: z.string().min(1).max(64).optional(),
+  eventType: z.enum(DELIVEREE_EXTENSION_EVENT_TYPES).optional(),
+  failureReason: z.string().min(1).max(160).optional(),
+  observedAt: z.string().datetime(),
+  pageKind: z.enum(DELIVEREE_EXTENSION_PAGE_KINDS),
+  pageUrl: z.string().url(),
+  schemaVersion: z.literal(DELIVEREE_EXTENSION_SCHEMA_VERSION),
+  status: z.enum(DELIVEREE_WEB_STATUSES).optional(),
+  statusText: z.string().min(1).max(100).optional()
 }).strict();
 
 function normalizeText(value: string | undefined) {
@@ -249,4 +282,8 @@ export function extractDelivereeExtensionStatus(snapshot: DelivereeExtensionPage
 
 export function parseDelivereeExtensionStatusPayload(value: unknown) {
   return delivereeExtensionStatusPayloadSchema.parse(value);
+}
+
+export function parseDelivereeExtensionPageStatePayload(value: unknown) {
+  return delivereeExtensionPageStatePayloadSchema.parse(value);
 }

@@ -196,6 +196,14 @@ Popup extension menyimpan log lokal terbatas untuk troubleshooting. Gunakan tomb
 
 Gunakan `Test Intake` di popup untuk mengecek apakah endpoint lokal Jolyne hidup dan token/device ID diterima. Gunakan `Send Discord Test` hanya saat ingin membuktikan alur penuh Chrome extension -> Jolyne -> Discord; tombol ini akan mengirim pesan test ke `DELIVEREE_ALERT_CHANNEL_ID`.
 
+Command test lokal:
+
+- `/status`: membaca heartbeat terakhir dari Chrome extension dan mengirim embed ringkas.
+- Jika Deliveree belum terbuka atau heartbeat sudah stale, Jolyne akan menampilkan bahwa halaman Deliveree belum terdeteksi.
+- Jika Deliveree terbuka di front page atau draft pemesanan, Jolyne menampilkan status idle.
+- Jika booking sedang mencari driver, Jolyne menampilkan durasi status berdasarkan pertama kali status itu terlihat.
+- Jika order gagal karena no driver atau cancelled, Jolyne menampilkan status gagal/cancelled dan reason bila terbaca.
+
 Rule notifikasi tahap 1:
 
 - `order_created`: booking ID asli sudah muncul dan status aktif awal terbaca, seperti `searching_driver` atau `driver_assigned`.

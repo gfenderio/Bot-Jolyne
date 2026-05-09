@@ -9,10 +9,18 @@ import { env } from "../config/env.js";
 import { createDelivereeCaseStore } from "./liveRuntime.js";
 import type { DelivereeRecoveryCase } from "./caseStore.js";
 import {
+  parseDelivereeExtensionPageStatePayload,
   parseDelivereeExtensionStatusPayload,
   type DelivereeExtensionEventType,
+  type DelivereeExtensionPageStatePayload,
   type DelivereeExtensionStatusPayload
 } from "./extensionDomExtractor.js";
+
+export type StoredDelivereeExtensionPageState = DelivereeExtensionPageStatePayload & {
+  deviceId: string;
+  receivedAt: string;
+  statusStartedAt?: string;
+};
 
 class SimpleRateLimiter {
   private requests = new Map<string, number[]>();
@@ -52,10 +60,69 @@ class SimpleRateLimiter {
 }
 
 const rateLimiter = new SimpleRateLimiter(60_000, 60);
+const pageStates = new Map<string, StoredDelivereeExtensionPageState>();
 
 setInterval(() => {
   rateLimiter.cleanup();
 }, 60_000).unref();
+
+function hasSameStatusContext(
+  previous: StoredDelivereeExtensionPageState | undefined,
+  next: DelivereeExtensionPageStatePayload
+) {
+  return Boolean(
+    previous
+    && previous.pageKind === next.pageKind
+    && previous.bookingId === next.bookingId
+    && previous.status === next.status
+  );
+}
+
+export function recordDelivereeExtensionPageState(
+  deviceId: string,
+  pageState: DelivereeExtensionPageStatePayload
+) {
+  const previous = pageStates.get(deviceId);
+  const now = new Date().toISOString();
+  const stored: StoredDelivereeExtensionPageState = {
+    ...pageState,
+    deviceId,
+    receivedAt: now,
+    statusStartedAt: hasSameStatusContext(previous, pageState)
+      ? previous?.statusStartedAt
+      : pageState.observedAt
+  };
+
+  pageStates.set(deviceId, stored);
+  return stored;
+}
+
+export function getLatestDelivereeExtensionPageState(deviceId?: string) {
+  if (deviceId) {
+    return pageStates.get(deviceId);
+  }
+
+  return [...pageStates.values()]
+    .sort((left, right) => new Date(right.receivedAt).getTime() - new Date(left.receivedAt).getTime())[0];
+}
+
+export function clearDelivereeExtensionPageStates() {
+  pageStates.clear();
+}
+
+function toPageStatePayload(payload: DelivereeExtensionStatusPayload): DelivereeExtensionPageStatePayload {
+  return {
+    bookingId: payload.bookingId,
+    eventType: payload.eventType,
+    failureReason: payload.failureReason,
+    observedAt: payload.observedAt,
+    pageKind: "booking_detail",
+    pageUrl: payload.pageUrl,
+    schemaVersion: payload.schemaVersion,
+    status: payload.status,
+    statusText: payload.statusText
+  };
+}
 
 export type DelivereeExtensionIntakeAction =
   | "deduped"
@@ -200,6 +267,7 @@ export async function handleDelivereeExtensionStatusEvent(
   deviceId: string,
   options: Pick<DelivereeExtensionIntakeOptions, "notifier" | "store">
 ): Promise<DelivereeExtensionIntakeDecision> {
+  recordDelivereeExtensionPageState(deviceId, toPageStatePayload(payload));
   const { changed, recoveryCase } = await options.store.upsertObservation({
     bookingId: payload.bookingId,
     status: payload.status,
@@ -264,6 +332,20 @@ async function handleDelivereeExtensionDiscordTest(
   } as const;
 }
 
+async function handleDelivereeExtensionPageState(body: string, deviceId: string) {
+  const pageState = parseDelivereeExtensionPageStatePayload(parseJsonBody(body));
+  const stored = recordDelivereeExtensionPageState(deviceId, pageState);
+
+  return {
+    action: "page_state_recorded",
+    deviceId,
+    ok: true,
+    pageKind: stored.pageKind,
+    serverTime: stored.receivedAt,
+    status: stored.status
+  } as const;
+}
+
 export async function handleDelivereeExtensionHttpRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -279,6 +361,7 @@ export async function handleDelivereeExtensionHttpRequest(
   const pathname = getRequestPathname(request);
   const validPaths = [
     "/deliveree/extension/health",
+    "/deliveree/extension/page-state",
     "/deliveree/extension/status",
     "/deliveree/extension/test-discord"
   ];
@@ -313,6 +396,12 @@ export async function handleDelivereeExtensionHttpRequest(
     }
 
     const body = await readRequestBody(request);
+
+    if (pathname === "/deliveree/extension/page-state") {
+      sendJson(response, 200, await handleDelivereeExtensionPageState(body, deviceId));
+      return;
+    }
+
     const payload = parseDelivereeExtensionStatusPayload(parseJsonBody(body));
     const decision = await handleDelivereeExtensionStatusEvent(payload, deviceId, options);
 
