@@ -1,8 +1,20 @@
 import { env } from "./config/env.js";
-import { createDelivereeExtensionIntakeServer, DelivereeExtensionDiscordTestDisabledError, type DelivereeExtensionConnectionTestNotification, type DelivereeExtensionNotification, type DelivereeExtensionNotificationSender } from "./deliveree/extensionIntake.js";
+import {
+  createDelivereeExtensionIntakeServer,
+  DelivereeExtensionDiscordTestDisabledError,
+  DiscordRestDelivereeExtensionNotifier,
+  type DelivereeExtensionConnectionTestNotification,
+  type DelivereeExtensionNotification,
+  type DelivereeExtensionNotificationSender
+} from "./deliveree/extensionIntake.js";
 import { createDelivereeCaseStore } from "./deliveree/liveRuntime.js";
 
 class ConsoleDelivereeExtensionNotifier implements DelivereeExtensionNotificationSender {
+  constructor(
+    private readonly delegate?: DelivereeExtensionNotificationSender,
+    private readonly mode = "intake_only_no_discord_send"
+  ) {}
+
   async send(notification: DelivereeExtensionNotification) {
     console.log(JSON.stringify({
       action: notification.action,
@@ -15,15 +27,38 @@ class ConsoleDelivereeExtensionNotifier implements DelivereeExtensionNotificatio
       pageUrl: notification.payload.pageUrl,
       status: notification.payload.status
     }));
+
+    if (!this.delegate) {
+      return;
+    }
+
+    try {
+      await this.delegate.send(notification);
+      console.log(JSON.stringify({
+        action: notification.action,
+        bookingId: notification.payload.bookingId,
+        deviceId: notification.deviceId,
+        event: "deliveree_extension_discord_rest_sent",
+        status: notification.payload.status
+      }));
+    } catch (error) {
+      console.error("Deliveree extension REST notifier gagal mengirim alert Discord.", error);
+    }
   }
 
   async sendConnectionTest(notification: DelivereeExtensionConnectionTestNotification) {
     console.log(JSON.stringify({
       deviceId: notification.deviceId,
       event: "deliveree_extension_connection_test",
-      mode: "intake_only_no_discord_send",
+      mode: this.mode,
       observedAt: notification.observedAt
     }));
+
+    if (this.delegate) {
+      await this.delegate.sendConnectionTest(notification);
+      return;
+    }
+
     throw new DelivereeExtensionDiscordTestDisabledError("Intake-only runner tidak mengirim Discord test. Gunakan full Jolyne runtime untuk test Discord.");
   }
 }
@@ -54,9 +89,27 @@ if (!env.DELIVEREE_EXTENSION_TOKEN) {
   throw new Error("DELIVEREE_EXTENSION_TOKEN wajib diisi untuk menjalankan Deliveree intake-only server.");
 }
 
+function createNotifier() {
+  if (!env.DELIVEREE_INTAKE_DISCORD_ENABLED) {
+    return new ConsoleDelivereeExtensionNotifier();
+  }
+
+  if (!env.DISCORD_TOKEN) {
+    throw new Error("DISCORD_TOKEN wajib diisi jika DELIVEREE_INTAKE_DISCORD_ENABLED=true.");
+  }
+
+  return new ConsoleDelivereeExtensionNotifier(
+    new DiscordRestDelivereeExtensionNotifier({
+      botToken: env.DISCORD_TOKEN,
+      channelId: env.DELIVEREE_ALERT_CHANNEL_ID
+    }),
+    "intake_only_discord_rest"
+  );
+}
+
 const server = createDelivereeExtensionIntakeServer({
   allowedDeviceIds: env.DELIVEREE_EXTENSION_ALLOWED_DEVICE_IDS,
-  notifier: new ConsoleDelivereeExtensionNotifier(),
+  notifier: createNotifier(),
   onPageState(state, context) {
     const key = pageStateLogKey(state);
     const fingerprint = pageStateLogFingerprint(state);
@@ -87,7 +140,7 @@ const server = createDelivereeExtensionIntakeServer({
 server.listen(env.DELIVEREE_EXTENSION_PORT, "127.0.0.1", () => {
   console.log(`Deliveree intake-only aktif di http://127.0.0.1:${env.DELIVEREE_EXTENSION_PORT}.`);
   console.log(`Allowed devices: ${env.DELIVEREE_EXTENSION_ALLOWED_DEVICE_IDS.join(", ")}.`);
-  console.log("Mode: local extension intake only, tanpa Discord gateway login.");
+  console.log(`Mode: local extension intake only, tanpa Discord gateway login. Discord REST: ${env.DELIVEREE_INTAKE_DISCORD_ENABLED ? "enabled" : "disabled"}.`);
 });
 
 server.on("error", (error) => {

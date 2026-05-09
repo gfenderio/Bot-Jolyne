@@ -191,7 +191,7 @@ export class DelivereeExtensionDiscordTestDisabledError extends Error {
 }
 
 function writeCorsHeaders(response: ServerResponse) {
-  response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Deliveree-Device-Id");
+  response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Deliveree-Device-Id, X-Deliveree-Manual-Test");
   response.setHeader("Access-Control-Allow-Methods", "OPTIONS, POST");
   response.setHeader("Access-Control-Allow-Origin", "*");
 }
@@ -599,6 +599,45 @@ export class DiscordBotDelivereeExtensionNotifier implements DelivereeExtensionN
     }
 
     await channel.send(message);
+  }
+}
+
+type DiscordRestFetch = typeof fetch;
+
+export class DiscordRestDelivereeExtensionNotifier implements DelivereeExtensionNotificationSender {
+  constructor(private readonly options: {
+    botToken: string;
+    channelId: string;
+    fetchImpl?: DiscordRestFetch;
+  }) {}
+
+  async send(notification: DelivereeExtensionNotification) {
+    await this.sendToAlertChannel({
+      embeds: [buildDelivereeExtensionNotificationEmbed(notification).toJSON()]
+    });
+  }
+
+  async sendConnectionTest(notification: DelivereeExtensionConnectionTestNotification) {
+    await this.sendToAlertChannel({
+      embeds: [buildDelivereeExtensionConnectionTestEmbed(notification).toJSON()]
+    });
+  }
+
+  private async sendToAlertChannel(message: { embeds: unknown[] }) {
+    const fetchImpl = this.options.fetchImpl ?? fetch;
+    const response = await fetchImpl(`https://discord.com/api/v10/channels/${this.options.channelId}/messages`, {
+      body: JSON.stringify(message),
+      headers: {
+        "Authorization": `Bot ${this.options.botToken}`,
+        "Content-Type": "application/json"
+      },
+      method: "POST"
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      throw new Error(`Discord REST send failed: HTTP ${response.status}${errorText ? ` ${errorText}` : ""}`);
+    }
   }
 }
 

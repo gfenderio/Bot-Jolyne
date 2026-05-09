@@ -9,6 +9,7 @@ import {
   clearDelivereeExtensionPageStates,
   createDelivereeExtensionIntakeServer,
   DelivereeExtensionDiscordTestDisabledError,
+  DiscordRestDelivereeExtensionNotifier,
   getLatestDelivereeExtensionPageState,
   type StoredDelivereeExtensionPageState,
   type DelivereeExtensionConnectionTestNotification,
@@ -165,6 +166,57 @@ test("Deliveree Extension Intake - Discord test sends a test notification", asyn
     assert.strictEqual(notifier.connectionTests.length, 1);
     assert.strictEqual(notifier.connectionTests[0].deviceId, "yugi-browser");
   });
+});
+
+test("Deliveree Extension Intake - Discord REST notifier sends embeds without gateway", async () => {
+  const calls: Array<{
+    body: unknown;
+    headers: Headers;
+    method: string | undefined;
+    url: string;
+  }> = [];
+  const notifier = new DiscordRestDelivereeExtensionNotifier({
+    botToken: "discord-token",
+    channelId: "1501899831268868106",
+    fetchImpl: async (input, init) => {
+      calls.push({
+        body: JSON.parse(String(init?.body)),
+        headers: new Headers(init?.headers),
+        method: init?.method,
+        url: String(input)
+      });
+      return new Response("{}", {
+        status: 200
+      });
+    }
+  });
+
+  await notifier.send({
+    action: "order_failed",
+    deviceId: "yugi-browser",
+    payload: buildPayload({
+      eventType: "order_failed",
+      failureReason: "BATAL",
+      status: "cancelled",
+      statusText: "BATAL"
+    }),
+    recoveryCase: {
+      actionLog: [],
+      bookingId: "19330506",
+      caseId: "19330506",
+      lastObservedAt: "2026-05-08T07:00:00.000Z",
+      lastStatusChangeAt: "2026-05-08T07:00:00.000Z",
+      retryCount: 0,
+      status: "cancelled",
+      url: "https://webapp.deliveree.com/bookings/19330506"
+    }
+  });
+
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(calls[0].url, "https://discord.com/api/v10/channels/1501899831268868106/messages");
+  assert.strictEqual(calls[0].method, "POST");
+  assert.strictEqual(calls[0].headers.get("Authorization"), "Bot discord-token");
+  assert.match(JSON.stringify(calls[0].body), /Deliveree #19330506/);
 });
 
 test("Deliveree Extension Intake - reports disabled Discord test explicitly", async () => {

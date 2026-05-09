@@ -114,6 +114,7 @@ const envSchema = z.object({
   DELIVEREE_EXTENSION_TOKEN: optionalString.pipe(
     z.string().min(32, "Token harus minimal 32 karakter untuk keamanan.").optional()
   ),
+  DELIVEREE_INTAKE_DISCORD_ENABLED: optionalBoolean,
   DELIVEREE_MONITOR_INTERVAL_SECONDS: pollIntervalSeconds.default(60),
   DELIVEREE_OWNER_USER_IDS: optionalStringList.default(["419213146209779713"]),
   DELIVEREE_PLAYWRIGHT_PROFILE_DIR: optionalString.default("data/deliveree-playwright-profile"),
