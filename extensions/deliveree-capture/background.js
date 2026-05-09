@@ -4,6 +4,7 @@ const DEFAULT_SETTINGS = {
   token: ""
 };
 const MAX_LOG_ENTRIES = 120;
+let lastPageStateSuccessLogFingerprint = "";
 
 function normalizeBaseUrl(value) {
   return (value || DEFAULT_SETTINGS.intakeUrl).replace(/\/+$/, "");
@@ -38,6 +39,16 @@ function saveLastResult(result) {
       at: new Date().toISOString()
     }
   });
+}
+
+function fingerprintPageStateLog(pageState) {
+  return [
+    pageState.pageKind || "",
+    pageState.bookingId || "",
+    pageState.status || "",
+    pageState.eventType || "",
+    pageState.pageUrl || ""
+  ].join("|");
 }
 
 async function sendStatus(payload) {
@@ -166,6 +177,10 @@ async function sendPageState(pageState) {
       error: "invalid_response",
       ok: false
     }));
+    const result = {
+      ...body,
+      httpStatus: response.status
+    };
 
     if (!response.ok) {
       await appendLog("error", "page_state_failed", "Jolyne gagal menerima page state.", {
@@ -176,10 +191,25 @@ async function sendPageState(pageState) {
       });
     }
 
-    return {
-      ...body,
-      httpStatus: response.status
-    };
+    if (response.ok) {
+      const fingerprint = fingerprintPageStateLog(pageState);
+
+      if (fingerprint !== lastPageStateSuccessLogFingerprint) {
+        lastPageStateSuccessLogFingerprint = fingerprint;
+        await appendLog("info", "page_state_finished", "Extension membaca halaman Deliveree.", {
+          action: result.action,
+          bookingId: pageState.bookingId,
+          eventType: pageState.eventType,
+          httpStatus: response.status,
+          ok: result.ok,
+          pageKind: pageState.pageKind,
+          status: pageState.status,
+          statusText: pageState.statusText
+        });
+      }
+    }
+
+    return result;
   } catch (error) {
     await appendLog("error", "page_state_network_failed", "Gagal mengirim page state ke Jolyne.", {
       error: error instanceof Error ? error.message : "network_error",
