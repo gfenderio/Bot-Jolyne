@@ -1,6 +1,6 @@
 import type { SlashCommand } from "../types/command.js";
 import { command as birthday } from "./birthday.js";
-import { command as birthdayNow, testCommand as birthdayNowTest } from "./birthday-now.js";
+import { command as birthdayNow } from "./birthday-now.js";
 import { command as delivereeCase } from "./deliveree-case.js";
 import { command as delivereeExtensionHealth } from "./deliveree-extension-health.js";
 import { command as delivereePause } from "./deliveree-pause.js";
@@ -10,7 +10,6 @@ import { command as delivereeSilence } from "./deliveree-silence.js";
 import { command as delivereeStatus } from "./deliveree-status.js";
 import { command as ping } from "./ping.js";
 import { command as server } from "./server.js";
-import { command as status } from "./status.js";
 import { command as whoami } from "./whoami.js";
 
 export const commands = new Map<string, SlashCommand>();
@@ -20,9 +19,7 @@ for (const command of [
   server,
   birthday,
   birthdayNow,
-  birthdayNowTest,
   whoami,
-  status,
   delivereeCase,
   delivereeExtensionHealth,
   delivereeStatus,
