@@ -10,6 +10,7 @@ import {
   createDelivereeExtensionIntakeServer,
   DelivereeExtensionDiscordTestDisabledError,
   getLatestDelivereeExtensionPageState,
+  type StoredDelivereeExtensionPageState,
   type DelivereeExtensionConnectionTestNotification,
   type DelivereeExtensionNotification,
   type DelivereeExtensionNotificationSender
@@ -49,15 +50,20 @@ function buildPayload(overrides: Partial<DelivereeExtensionStatusPayload> = {}):
 async function withTestServer<T>(
   callback: (context: {
     notifier: MemoryExtensionNotifier;
+    pageStates: StoredDelivereeExtensionPageState[];
     post: (payload: unknown, headers?: Record<string, string>) => Promise<Response>;
     postPath: (path: string, payload?: unknown, headers?: Record<string, string>) => Promise<Response>;
   }) => Promise<T>
 ) {
   const dir = await mkdtemp(join(tmpdir(), "jolyne-deliveree-extension-"));
   const notifier = new MemoryExtensionNotifier();
+  const pageStates: StoredDelivereeExtensionPageState[] = [];
   const server = createDelivereeExtensionIntakeServer({
     allowedDeviceIds: ["yugi-browser"],
     notifier,
+    onPageState(state) {
+      pageStates.push(state);
+    },
     store: new JsonDelivereeCaseStore(join(dir, "cases.json")),
     token: "test-token"
   });
@@ -88,6 +94,7 @@ async function withTestServer<T>(
   try {
     return await callback({
       notifier,
+      pageStates,
       post,
       postPath
     });
@@ -217,7 +224,7 @@ test("Deliveree Extension Intake - reports disabled Discord test explicitly", as
 });
 
 test("Deliveree Extension Intake - records latest page state heartbeat", async () => {
-  await withTestServer(async ({ notifier, postPath }) => {
+  await withTestServer(async ({ notifier, pageStates, postPath }) => {
     const response = await postPath("/deliveree/extension/page-state", {
       observedAt: "2026-05-08T07:00:00.000Z",
       pageKind: "front_page",
@@ -233,6 +240,8 @@ test("Deliveree Extension Intake - records latest page state heartbeat", async (
     assert.strictEqual(body.pageKind, "front_page");
     assert.strictEqual(latest?.pageKind, "front_page");
     assert.strictEqual(latest?.deviceId, "yugi-browser");
+    assert.strictEqual(pageStates.length, 1);
+    assert.strictEqual(pageStates[0].pageKind, "front_page");
     assert.strictEqual(notifier.notifications.length, 0);
   });
 });

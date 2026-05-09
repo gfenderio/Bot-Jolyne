@@ -167,6 +167,7 @@ export interface DelivereeExtensionCaseStore {
 export type DelivereeExtensionIntakeOptions = {
   allowedDeviceIds: string[];
   notifier: DelivereeExtensionNotificationSender;
+  onPageState?: (state: StoredDelivereeExtensionPageState) => Promise<void> | void;
   store: DelivereeExtensionCaseStore;
   token: string;
 };
@@ -338,9 +339,15 @@ async function handleDelivereeExtensionDiscordTest(
   } as const;
 }
 
-async function handleDelivereeExtensionPageState(body: string, deviceId: string) {
+async function handleDelivereeExtensionPageState(
+  body: string,
+  deviceId: string,
+  options: Pick<DelivereeExtensionIntakeOptions, "onPageState">
+) {
   const pageState = parseDelivereeExtensionPageStatePayload(parseJsonBody(body));
   const stored = recordDelivereeExtensionPageState(deviceId, pageState);
+
+  await options.onPageState?.(stored);
 
   return {
     action: "page_state_recorded",
@@ -404,7 +411,7 @@ export async function handleDelivereeExtensionHttpRequest(
     const body = await readRequestBody(request);
 
     if (pathname === "/deliveree/extension/page-state") {
-      sendJson(response, 200, await handleDelivereeExtensionPageState(body, deviceId));
+      sendJson(response, 200, await handleDelivereeExtensionPageState(body, deviceId, options));
       return;
     }
 

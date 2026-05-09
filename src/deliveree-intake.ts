@@ -35,6 +35,20 @@ if (!env.DELIVEREE_EXTENSION_TOKEN) {
 const server = createDelivereeExtensionIntakeServer({
   allowedDeviceIds: env.DELIVEREE_EXTENSION_ALLOWED_DEVICE_IDS,
   notifier: new ConsoleDelivereeExtensionNotifier(),
+  onPageState(state) {
+    console.log(JSON.stringify({
+      bookingId: state.bookingId,
+      deviceId: state.deviceId,
+      event: "deliveree_extension_page_state",
+      eventType: state.eventType,
+      pageKind: state.pageKind,
+      pageUrl: state.pageUrl,
+      receivedAt: state.receivedAt,
+      status: state.status,
+      statusStartedAt: state.statusStartedAt,
+      statusText: state.statusText
+    }));
+  },
   store: createDelivereeCaseStore(),
   token: env.DELIVEREE_EXTENSION_TOKEN
 });
