@@ -306,11 +306,6 @@ function getKnownPageState() {
 
   if (
     path === "/bookings/new"
-    && (
-      new window.URLSearchParams(search).get("ftl") === "true"
-      || document.querySelector(".BookingWizard, #step-wrapper")
-      || includesAny(bodyText, ["1. rute", "2. layanan", "3. rincian", "pesan pengemudi"])
-    )
   ) {
     return {
       details,
