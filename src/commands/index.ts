@@ -1,12 +1,6 @@
 import type { SlashCommand } from "../types/command.js";
 import { command as birthday } from "./birthday.js";
 import { command as birthdayNow } from "./birthday-now.js";
-import { command as delivereeCase } from "./deliveree-case.js";
-import { command as delivereeExtensionHealth } from "./deliveree-extension-health.js";
-import { command as delivereePause } from "./deliveree-pause.js";
-import { command as delivereePrepareReorder } from "./deliveree-prepare-reorder.js";
-import { command as delivereeResume } from "./deliveree-resume.js";
-import { command as delivereeSilence } from "./deliveree-silence.js";
 import { command as delivereeStatus } from "./deliveree-status.js";
 import { command as ping } from "./ping.js";
 import { command as server } from "./server.js";
@@ -20,13 +14,7 @@ for (const command of [
   birthday,
   birthdayNow,
   whoami,
-  delivereeCase,
-  delivereeExtensionHealth,
-  delivereeStatus,
-  delivereePause,
-  delivereeResume,
-  delivereePrepareReorder,
-  delivereeSilence
+  delivereeStatus
 ]) {
   commands.set(command.data.name, command);
 }
