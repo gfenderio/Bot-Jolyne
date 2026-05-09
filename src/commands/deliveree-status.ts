@@ -100,7 +100,7 @@ function describeState(state: StoredDelivereeExtensionPageState, nowMs: number) 
 function buildStatusEmbed(state: StoredDelivereeExtensionPageState | undefined) {
   const nowMs = Date.now();
 
-  if (!state || isStale(state, nowMs)) {
+  if (!state) {
     return new EmbedBuilder()
       .setColor(0x95a5a6)
       .setTitle("[Jolyne] Deliveree Status")
@@ -115,6 +115,7 @@ function buildStatusEmbed(state: StoredDelivereeExtensionPageState | undefined) 
       .setTimestamp();
   }
 
+  const stale = isStale(state, nowMs);
   const fields = [
     {
       inline: true,
@@ -123,7 +124,7 @@ function buildStatusEmbed(state: StoredDelivereeExtensionPageState | undefined) 
     },
     {
       inline: true,
-      name: "Last Seen",
+      name: "Heartbeat",
       value: `<t:${toUnixSeconds(state.receivedAt)}:R>`
     }
   ];
@@ -141,6 +142,14 @@ function buildStatusEmbed(state: StoredDelivereeExtensionPageState | undefined) 
       inline: true,
       name: "Status",
       value: `\`${state.status}\``
+    });
+  }
+
+  if (state.statusStartedAt) {
+    fields.push({
+      inline: true,
+      name: "Status Berubah",
+      value: `<t:${toUnixSeconds(state.statusStartedAt)}:R>`
     });
   }
 
@@ -196,11 +205,21 @@ function buildStatusEmbed(state: StoredDelivereeExtensionPageState | undefined) 
     ? `[Jolyne] Deliveree #${state.bookingId}`
     : "[Jolyne] Deliveree Status";
 
+  if (stale) {
+    fields.push({
+      inline: false,
+      name: "Action",
+      value: "Heartbeat sudah stale. Pastikan Chrome, tab Deliveree, extension, dan local intake masih aktif."
+    });
+  }
+
   return new EmbedBuilder()
-    .setColor(colorForState(state))
+    .setColor(stale ? 0x95a5a6 : colorForState(state))
     .setTitle(title)
     .setURL(state.pageUrl)
-    .setDescription(describeState(state, nowMs))
+    .setDescription(stale
+      ? `Data terakhir ada, tapi heartbeat sudah stale selama ${formatDuration(state.receivedAt, nowMs)}. Status terakhir: ${state.status ? `\`${state.status}\`` : "-"}`
+      : describeState(state, nowMs))
     .addFields(fields)
     .setFooter({
       text: "Source: Chrome extension lokal"

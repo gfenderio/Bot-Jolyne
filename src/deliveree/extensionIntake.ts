@@ -396,7 +396,8 @@ async function handleDelivereeExtensionPageState(
     ok: true,
     pageKind: stored.pageKind,
     serverTime: stored.receivedAt,
-    status: stored.status
+    status: stored.status,
+    statusStartedAt: stored.statusStartedAt
   } as const;
 }
 

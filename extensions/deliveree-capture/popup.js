@@ -37,6 +37,23 @@ function formatTime(value) {
   });
 }
 
+function formatElapsed(value) {
+  if (!value) {
+    return undefined;
+  }
+
+  const elapsedMs = Math.max(0, Date.now() - new Date(value).getTime());
+  const totalSeconds = Math.floor(elapsedMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes <= 0) {
+    return `${seconds} detik lalu`;
+  }
+
+  return `${minutes} menit ${seconds} detik lalu`;
+}
+
 function setConnectionState(result) {
   elements.connectionState.classList.remove("ok", "error");
 
@@ -146,6 +163,8 @@ function pageStatusFromLog(entry) {
     driverName: details.driverName,
     eventType: details.eventType || inferEventType(details.status),
     etaText: details.etaText,
+    lastHeartbeatAt: details.lastHeartbeatAt || entry.at,
+    lastStatusChangeAt: details.statusStartedAt,
     lateText: details.lateText,
     manualTest: entry.event === "active_page_status_finished",
     pageKind: details.pageKind,
@@ -223,9 +242,15 @@ function setSummary(pageStatus) {
     pageStatus.lateText,
     pageStatus.plateNumber ? `Plat ${pageStatus.plateNumber}` : undefined
   ].filter(Boolean).join(". ");
+  const heartbeatText = formatElapsed(pageStatus.lastHeartbeatAt || pageStatus.receivedAt);
+  const statusChangeText = formatElapsed(pageStatus.lastStatusChangeAt);
+  const health = [
+    heartbeatText ? `Heartbeat ${heartbeatText}` : undefined,
+    statusChangeText ? `status berubah ${statusChangeText}` : undefined
+  ].filter(Boolean).join(", ");
 
   elements.summaryBadge.textContent = signal;
-  elements.summaryText.textContent = `${humanPageKind(pageStatus.pageKind)} ${booking}. Status: ${status}.${extra ? ` ${extra}.` : ""} Source: ${pageStatus.manualTest ? "manual Test Intake" : "heartbeat extension"}.`;
+  elements.summaryText.textContent = `${humanPageKind(pageStatus.pageKind)} ${booking}. Status: ${status}.${extra ? ` ${extra}.` : ""}${health ? ` ${health}.` : ""} Source: ${pageStatus.manualTest ? "manual Test Intake" : "heartbeat extension"}.`;
 }
 
 async function render() {
@@ -245,7 +270,7 @@ async function render() {
   elements.bookingId.textContent = data.lastEvent?.bookingId || pageStatus?.bookingId || "-";
   elements.status.textContent = data.lastEvent?.status || pageStatus?.status || "-";
   elements.eventType.textContent = data.lastEvent?.eventType || pageStatus?.eventType || "-";
-  elements.lastSent.textContent = formatTime(data.lastResult?.at);
+  elements.lastSent.textContent = formatTime(pageStatus?.lastHeartbeatAt || pageStatus?.receivedAt || data.lastResult?.at);
   elements.result.textContent = data.lastResult?.ok
     ? `${data.lastResult.action || "ok"} (${data.lastResult.httpStatus || 200})`
     : data.lastResult?.error || "-";

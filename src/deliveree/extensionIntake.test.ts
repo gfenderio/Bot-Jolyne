@@ -308,7 +308,7 @@ test("Deliveree Extension Intake - keeps status start time while heartbeat statu
       schemaVersion: 1,
       status: "searching_driver"
     });
-    await postPath("/deliveree/extension/page-state", {
+    const second = await postPath("/deliveree/extension/page-state", {
       bookingId: "19330506",
       observedAt: "2026-05-08T07:05:00.000Z",
       pageKind: "booking_detail",
@@ -316,11 +316,13 @@ test("Deliveree Extension Intake - keeps status start time while heartbeat statu
       schemaVersion: 1,
       status: "searching_driver"
     });
+    const secondBody = await second.json() as { statusStartedAt: string };
 
     const latest = getLatestDelivereeExtensionPageState("yugi-browser");
 
     assert.strictEqual(latest?.status, "searching_driver");
     assert.strictEqual(latest?.statusStartedAt, "2026-05-08T07:00:00.000Z");
+    assert.strictEqual(secondBody.statusStartedAt, "2026-05-08T07:00:00.000Z");
   });
 });
 

@@ -41,7 +41,20 @@ function saveLastResult(result) {
   });
 }
 
-function saveLastPageStatus(pageState, result = {}, options = {}) {
+async function saveLastPageStatus(pageState, result = {}, options = {}) {
+  const data = await chrome.storage.local.get({
+    lastPageStatus: undefined
+  });
+  const previous = data.lastPageStatus;
+  const receivedAt = new Date().toISOString();
+  const sameStatusContext = previous
+    && previous.pageKind === pageState.pageKind
+    && previous.bookingId === pageState.bookingId
+    && previous.status === pageState.status;
+  const lastStatusChangeAt = result.statusStartedAt
+    || (sameStatusContext ? previous.lastStatusChangeAt || previous.receivedAt : pageState.observedAt)
+    || receivedAt;
+
   return chrome.storage.local.set({
     lastPageStatus: {
       bookingId: pageState.bookingId,
@@ -50,12 +63,14 @@ function saveLastPageStatus(pageState, result = {}, options = {}) {
       etaMinutes: pageState.etaMinutes,
       etaText: pageState.etaText,
       failureReason: pageState.failureReason,
+      lastHeartbeatAt: receivedAt,
+      lastStatusChangeAt,
       lateText: pageState.lateText,
       manualTest: Boolean(options.manualTest),
       pageKind: pageState.pageKind,
       pageUrl: pageState.pageUrl,
       plateNumber: pageState.plateNumber,
-      receivedAt: new Date().toISOString(),
+      receivedAt,
       resultAction: result.action,
       resultOk: result.ok,
       source: options.source,
@@ -275,6 +290,7 @@ async function sendPageState(pageState, options = {}) {
           pageKind: pageState.pageKind,
           plateNumber: pageState.plateNumber,
           status: pageState.status,
+          statusStartedAt: result.statusStartedAt,
           statusText: pageState.statusText
         });
       }
@@ -353,6 +369,7 @@ async function testActiveDelivereePageStatus() {
     plateNumber: collected.pageState.plateNumber,
     source: collected.source,
     status: collected.pageState.status,
+    statusStartedAt: result.statusStartedAt,
     statusText: collected.pageState.statusText,
     vehicleDescription: collected.pageState.vehicleDescription
   });

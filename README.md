@@ -204,7 +204,8 @@ Gunakan `Test Intake` di popup untuk mengecek apakah endpoint lokal Jolyne hidup
 Command test lokal:
 
 - `/deliveree-status`: membaca heartbeat terakhir dari Chrome extension dan mengirim embed ringkas.
-- Jika Deliveree belum terbuka atau heartbeat sudah stale, Jolyne akan menampilkan bahwa halaman Deliveree belum terdeteksi.
+- Jika Deliveree belum terbuka, Jolyne akan menampilkan bahwa halaman Deliveree belum terdeteksi.
+- Jika heartbeat sudah stale, Jolyne tetap menampilkan status terakhir plus peringatan agar Chrome/tab Deliveree/extension/local intake dicek.
 - Jika Deliveree terbuka di front page atau draft pemesanan, Jolyne menampilkan status idle.
 - Jika booking sedang mencari driver, Jolyne menampilkan durasi status berdasarkan pertama kali status itu terlihat.
 - Jika driver sudah berjalan, Jolyne bisa membaca state operasional seperti `going_to_pickup`, `waiting_pickup`, `going_to_destination`, `arrived_destination`, ETA, keterlambatan, driver, dan plat jika terlihat.
