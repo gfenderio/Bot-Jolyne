@@ -205,7 +205,7 @@ function getKnownPageState() {
   };
 
   if (
-    path === "/bookings/new"
+    (path === "/" || path === "/bookings/new")
     && (
       document.querySelector("#front-page-wrapper, #front-page-card-pesan-kendaraan")
       || includesAny(bodyText, ["layanan utama", "pesanan terbaru", "pesan kendaraan"])

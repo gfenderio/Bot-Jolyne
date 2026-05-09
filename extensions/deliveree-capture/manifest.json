@@ -5,7 +5,7 @@
   "description": "Read-only Deliveree order detector for local Jolyne intake.",
   "permissions": ["storage"],
   "host_permissions": [
-    "https://webapp.deliveree.com/bookings/*",
+    "https://webapp.deliveree.com/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
   ],
@@ -14,7 +14,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://webapp.deliveree.com/bookings/*"],
+      "matches": ["https://webapp.deliveree.com/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
     }
