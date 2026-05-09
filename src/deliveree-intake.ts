@@ -24,6 +24,7 @@ class ConsoleDelivereeExtensionNotifier implements DelivereeExtensionNotificatio
       mode: "intake_only_no_discord_send",
       observedAt: notification.observedAt
     }));
+    throw new Error("Intake-only runner tidak mengirim Discord test. Gunakan full Jolyne runtime untuk test Discord.");
   }
 }
 
