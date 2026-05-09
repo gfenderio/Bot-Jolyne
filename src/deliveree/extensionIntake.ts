@@ -167,7 +167,10 @@ export interface DelivereeExtensionCaseStore {
 export type DelivereeExtensionIntakeOptions = {
   allowedDeviceIds: string[];
   notifier: DelivereeExtensionNotificationSender;
-  onPageState?: (state: StoredDelivereeExtensionPageState) => Promise<void> | void;
+  onPageState?: (
+    state: StoredDelivereeExtensionPageState,
+    context: { manualTest: boolean }
+  ) => Promise<void> | void;
   store: DelivereeExtensionCaseStore;
   token: string;
 };
@@ -203,6 +206,10 @@ function sendJson(response: ServerResponse, statusCode: number, body: unknown) {
 
 function getHeaderValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function isTruthyHeader(value: string | string[] | undefined) {
+  return getHeaderValue(value)?.trim().toLowerCase() === "true";
 }
 
 async function readRequestBody(request: IncomingMessage, maxBytes = 64 * 1024) {
@@ -342,12 +349,13 @@ async function handleDelivereeExtensionDiscordTest(
 async function handleDelivereeExtensionPageState(
   body: string,
   deviceId: string,
-  options: Pick<DelivereeExtensionIntakeOptions, "onPageState">
+  options: Pick<DelivereeExtensionIntakeOptions, "onPageState">,
+  context: { manualTest: boolean }
 ) {
   const pageState = parseDelivereeExtensionPageStatePayload(parseJsonBody(body));
   const stored = recordDelivereeExtensionPageState(deviceId, pageState);
 
-  await options.onPageState?.(stored);
+  await options.onPageState?.(stored, context);
 
   return {
     action: "page_state_recorded",
@@ -411,7 +419,9 @@ export async function handleDelivereeExtensionHttpRequest(
     const body = await readRequestBody(request);
 
     if (pathname === "/deliveree/extension/page-state") {
-      sendJson(response, 200, await handleDelivereeExtensionPageState(body, deviceId, options));
+      sendJson(response, 200, await handleDelivereeExtensionPageState(body, deviceId, options, {
+        manualTest: isTruthyHeader(request.headers["x-deliveree-manual-test"])
+      }));
       return;
     }
 

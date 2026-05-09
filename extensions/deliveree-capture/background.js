@@ -41,6 +41,25 @@ function saveLastResult(result) {
   });
 }
 
+function saveLastPageStatus(pageState, result = {}, options = {}) {
+  return chrome.storage.local.set({
+    lastPageStatus: {
+      bookingId: pageState.bookingId,
+      eventType: pageState.eventType,
+      failureReason: pageState.failureReason,
+      manualTest: Boolean(options.manualTest),
+      pageKind: pageState.pageKind,
+      pageUrl: pageState.pageUrl,
+      receivedAt: new Date().toISOString(),
+      resultAction: result.action,
+      resultOk: result.ok,
+      source: options.source,
+      status: pageState.status,
+      statusText: pageState.statusText
+    }
+  });
+}
+
 function fingerprintPageStateLog(pageState) {
   return [
     pageState.pageKind || "",
@@ -201,7 +220,10 @@ async function sendPageState(pageState, options = {}) {
       headers: {
         "Authorization": `Bearer ${settings.token}`,
         "Content-Type": "application/json",
-        "X-Deliveree-Device-Id": settings.deviceId
+        "X-Deliveree-Device-Id": settings.deviceId,
+        ...(options.manualTest ? {
+          "X-Deliveree-Manual-Test": "true"
+        } : {})
       },
       method: "POST"
     });
@@ -224,6 +246,7 @@ async function sendPageState(pageState, options = {}) {
     }
 
     if (response.ok) {
+      await saveLastPageStatus(pageState, result, options);
       const fingerprint = fingerprintPageStateLog(pageState);
 
       if (options.forceLog || fingerprint !== lastPageStateSuccessLogFingerprint) {
@@ -297,7 +320,9 @@ async function testActiveDelivereePageStatus() {
   }
 
   const result = await sendPageState(collected.pageState, {
-    forceLog: true
+    forceLog: true,
+    manualTest: true,
+    source: collected.source
   });
 
   await appendLog(result.ok ? "info" : "error", "active_page_status_finished", "Test Intake membaca status halaman aktif.", {

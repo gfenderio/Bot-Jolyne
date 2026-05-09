@@ -28,6 +28,28 @@ class ConsoleDelivereeExtensionNotifier implements DelivereeExtensionNotificatio
   }
 }
 
+const loggedPageStateFingerprints = new Map<string, string>();
+
+function pageStateLogKey(state: { deviceId: string; pageUrl: string }) {
+  return `${state.deviceId}|${state.pageUrl}`;
+}
+
+function pageStateLogFingerprint(state: {
+  bookingId?: string;
+  eventType?: string;
+  pageKind: string;
+  status?: string;
+  statusText?: string;
+}) {
+  return [
+    state.pageKind,
+    state.bookingId || "",
+    state.status || "",
+    state.statusText || "",
+    state.eventType || ""
+  ].join("|");
+}
+
 if (!env.DELIVEREE_EXTENSION_TOKEN) {
   throw new Error("DELIVEREE_EXTENSION_TOKEN wajib diisi untuk menjalankan Deliveree intake-only server.");
 }
@@ -35,12 +57,21 @@ if (!env.DELIVEREE_EXTENSION_TOKEN) {
 const server = createDelivereeExtensionIntakeServer({
   allowedDeviceIds: env.DELIVEREE_EXTENSION_ALLOWED_DEVICE_IDS,
   notifier: new ConsoleDelivereeExtensionNotifier(),
-  onPageState(state) {
+  onPageState(state, context) {
+    const key = pageStateLogKey(state);
+    const fingerprint = pageStateLogFingerprint(state);
+
+    if (!context.manualTest && loggedPageStateFingerprints.get(key) === fingerprint) {
+      return;
+    }
+
+    loggedPageStateFingerprints.set(key, fingerprint);
     console.log(JSON.stringify({
       bookingId: state.bookingId,
       deviceId: state.deviceId,
       event: "deliveree_extension_page_state",
       eventType: state.eventType,
+      manualTest: context.manualTest,
       pageKind: state.pageKind,
       pageUrl: state.pageUrl,
       receivedAt: state.receivedAt,

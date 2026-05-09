@@ -17,6 +17,8 @@ const elements = {
   result: document.querySelector("#result"),
   save: document.querySelector("#save"),
   status: document.querySelector("#status"),
+  summaryBadge: document.querySelector("#summary-badge"),
+  summaryText: document.querySelector("#summary-text"),
   testDiscord: document.querySelector("#test-discord"),
   testIntake: document.querySelector("#test-intake"),
   token: document.querySelector("#token")
@@ -82,11 +84,78 @@ function formatLogs(logs) {
   return logs.map(formatLogEntry).join("\n");
 }
 
+function humanPageKind(pageKind) {
+  const labels = {
+    booking_detail: "Detail booking",
+    draft_page: "Draft order",
+    front_page: "Halaman utama",
+    unknown_deliveree_page: "Halaman Deliveree"
+  };
+
+  return labels[pageKind] || pageKind || "Belum diketahui";
+}
+
+function humanSignal(eventType, status) {
+  if (eventType === "order_failed") {
+    return "Order gagal";
+  }
+
+  if (eventType === "order_created") {
+    return "Order dibuat/aktif";
+  }
+
+  if (status === "completed") {
+    return "Selesai";
+  }
+
+  return "Tidak ada sinyal MVP";
+}
+
+function summaryBadgeClass(pageStatus) {
+  if (!pageStatus) {
+    return "";
+  }
+
+  if (pageStatus.eventType === "order_failed" || pageStatus.status === "cancelled" || pageStatus.status === "no_driver_found") {
+    return "fail";
+  }
+
+  if (pageStatus.eventType === "order_created" || pageStatus.status === "searching_driver" || pageStatus.status === "driver_assigned") {
+    return "warn";
+  }
+
+  return "ok";
+}
+
+function setSummary(pageStatus) {
+  elements.summaryBadge.classList.remove("ok", "warn", "fail");
+
+  if (!pageStatus) {
+    elements.summaryBadge.textContent = "Belum dicek";
+    elements.summaryText.textContent = "Buka halaman Deliveree, lalu klik Test Intake.";
+    return;
+  }
+
+  const badgeClass = summaryBadgeClass(pageStatus);
+
+  if (badgeClass) {
+    elements.summaryBadge.classList.add(badgeClass);
+  }
+
+  const booking = pageStatus.bookingId ? `#${pageStatus.bookingId}` : "tanpa booking aktif";
+  const status = pageStatus.statusText || pageStatus.status || "-";
+  const signal = humanSignal(pageStatus.eventType, pageStatus.status);
+
+  elements.summaryBadge.textContent = signal;
+  elements.summaryText.textContent = `${humanPageKind(pageStatus.pageKind)} ${booking}. Status: ${status}. Source: ${pageStatus.manualTest ? "manual Test Intake" : "heartbeat extension"}.`;
+}
+
 async function render() {
   const data = await chrome.storage.local.get({
     ...DEFAULT_SETTINGS,
     extensionLogs: [],
     lastEvent: undefined,
+    lastPageStatus: undefined,
     lastResult: undefined
   });
 
@@ -101,6 +170,7 @@ async function render() {
     ? `${data.lastResult.action || "ok"} (${data.lastResult.httpStatus || 200})`
     : data.lastResult?.error || "-";
   elements.logs.value = formatLogs(data.extensionLogs);
+  setSummary(data.lastPageStatus);
   setConnectionState(data.lastResult);
 }
 
