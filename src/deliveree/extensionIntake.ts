@@ -113,14 +113,20 @@ export function clearDelivereeExtensionPageStates() {
 function toPageStatePayload(payload: DelivereeExtensionStatusPayload): DelivereeExtensionPageStatePayload {
   return {
     bookingId: payload.bookingId,
+    driverName: payload.driverName,
     eventType: payload.eventType,
+    etaMinutes: payload.etaMinutes,
+    etaText: payload.etaText,
     failureReason: payload.failureReason,
+    lateText: payload.lateText,
     observedAt: payload.observedAt,
     pageKind: "booking_detail",
     pageUrl: payload.pageUrl,
+    plateNumber: payload.plateNumber,
     schemaVersion: payload.schemaVersion,
     status: payload.status,
-    statusText: payload.statusText
+    statusText: payload.statusText,
+    vehicleDescription: payload.vehicleDescription
   };
 }
 
@@ -256,7 +262,14 @@ function getMvpEventType(payload: DelivereeExtensionStatusPayload): DelivereeExt
     return "order_failed";
   }
 
-  if (payload.status === "searching_driver" || payload.status === "driver_assigned") {
+  if (
+    payload.status === "searching_driver"
+    || payload.status === "driver_assigned"
+    || payload.status === "going_to_pickup"
+    || payload.status === "waiting_pickup"
+    || payload.status === "going_to_destination"
+    || payload.status === "arrived_destination"
+  ) {
     return "order_created";
   }
 
@@ -265,12 +278,32 @@ function getMvpEventType(payload: DelivereeExtensionStatusPayload): DelivereeExt
 
 function getNotificationAction(
   changed: boolean,
-  payload: DelivereeExtensionStatusPayload
+  payload: DelivereeExtensionStatusPayload,
+  recoveryCase: DelivereeRecoveryCase
 ): DelivereeExtensionIntakeAction {
   const eventType = getMvpEventType(payload);
 
   if (!eventType) {
     return "ignored";
+  }
+
+  if (eventType === "order_created") {
+    const previousEntries = recoveryCase.actionLog.slice(0, -1);
+    const alreadyObservedActiveOrder = previousEntries.some((entry) => {
+      if (!entry.afterStatus) {
+        return false;
+      }
+
+      return getMvpEventType({
+        ...payload,
+        eventType: undefined,
+        status: entry.afterStatus
+      }) === "order_created";
+    });
+
+    if (alreadyObservedActiveOrder) {
+      return "deduped";
+    }
   }
 
   return changed ? eventType : "deduped";
@@ -287,7 +320,7 @@ export async function handleDelivereeExtensionStatusEvent(
     status: payload.status,
     url: payload.pageUrl
   });
-  const action = getNotificationAction(changed, payload);
+  const action = getNotificationAction(changed, payload, recoveryCase);
 
   if (action !== "deduped" && action !== "ignored") {
     await options.notifier.send({
@@ -529,6 +562,30 @@ export function buildDelivereeExtensionNotificationEmbed(notification: Deliveree
       value: fieldValue(notification.payload.jobNo)
     }
   ];
+
+  if (notification.payload.driverName) {
+    fields.push({
+      inline: true,
+      name: "Driver",
+      value: notification.payload.driverName
+    });
+  }
+
+  if (notification.payload.plateNumber) {
+    fields.push({
+      inline: true,
+      name: "Plat",
+      value: `\`${notification.payload.plateNumber}\``
+    });
+  }
+
+  if (notification.payload.etaText) {
+    fields.push({
+      inline: true,
+      name: "ETA",
+      value: notification.payload.etaText
+    });
+  }
 
   if (notification.payload.failureReason) {
     fields.push({

@@ -21,10 +21,14 @@ class ConsoleDelivereeExtensionNotifier implements DelivereeExtensionNotificatio
       bookingId: notification.payload.bookingId,
       caseId: notification.recoveryCase.caseId,
       deviceId: notification.deviceId,
+      driverName: notification.payload.driverName,
       event: "deliveree_extension_signal",
+      etaText: notification.payload.etaText,
       failureReason: notification.payload.failureReason,
+      lateText: notification.payload.lateText,
       observedAt: notification.payload.observedAt,
       pageUrl: notification.payload.pageUrl,
+      plateNumber: notification.payload.plateNumber,
       status: notification.payload.status
     }));
 
@@ -72,6 +76,9 @@ function pageStateLogKey(state: { deviceId: string; pageUrl: string }) {
 function pageStateLogFingerprint(state: {
   bookingId?: string;
   eventType?: string;
+  etaText?: string;
+  lateText?: string;
+  plateNumber?: string;
   pageKind: string;
   status?: string;
   statusText?: string;
@@ -81,7 +88,10 @@ function pageStateLogFingerprint(state: {
     state.bookingId || "",
     state.status || "",
     state.statusText || "",
-    state.eventType || ""
+    state.eventType || "",
+    state.etaText || "",
+    state.lateText || "",
+    state.plateNumber || ""
   ].join("|");
 }
 
@@ -124,9 +134,12 @@ const server = createDelivereeExtensionIntakeServer({
       deviceId: state.deviceId,
       event: "deliveree_extension_page_state",
       eventType: state.eventType,
+      etaText: state.etaText,
+      lateText: state.lateText,
       manualTest: context.manualTest,
       pageKind: state.pageKind,
       pageUrl: state.pageUrl,
+      plateNumber: state.plateNumber,
       receivedAt: state.receivedAt,
       status: state.status,
       statusStartedAt: state.statusStartedAt,

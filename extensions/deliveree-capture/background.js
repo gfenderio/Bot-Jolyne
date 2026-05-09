@@ -45,17 +45,23 @@ function saveLastPageStatus(pageState, result = {}, options = {}) {
   return chrome.storage.local.set({
     lastPageStatus: {
       bookingId: pageState.bookingId,
+      driverName: pageState.driverName,
       eventType: pageState.eventType,
+      etaMinutes: pageState.etaMinutes,
+      etaText: pageState.etaText,
       failureReason: pageState.failureReason,
+      lateText: pageState.lateText,
       manualTest: Boolean(options.manualTest),
       pageKind: pageState.pageKind,
       pageUrl: pageState.pageUrl,
+      plateNumber: pageState.plateNumber,
       receivedAt: new Date().toISOString(),
       resultAction: result.action,
       resultOk: result.ok,
       source: options.source,
       status: pageState.status,
-      statusText: pageState.statusText
+      statusText: pageState.statusText,
+      vehicleDescription: pageState.vehicleDescription
     }
   });
 }
@@ -66,6 +72,9 @@ function fingerprintPageStateLog(pageState) {
     pageState.bookingId || "",
     pageState.status || "",
     pageState.eventType || "",
+    pageState.etaText || "",
+    pageState.lateText || "",
+    pageState.plateNumber || "",
     pageState.pageUrl || ""
   ].join("|");
 }
@@ -107,10 +116,14 @@ async function sendStatus(payload) {
   const payloadSummary = {
     bookingId: payload.bookingId,
     destinationCount: payload.destinationCount,
+    driverName: payload.driverName,
     duplicateUrlDetected: Boolean(payload.duplicateUrl),
+    etaText: payload.etaText,
     eventType: payload.eventType,
     failureReason: payload.failureReason,
     jobNo: payload.jobNo,
+    lateText: payload.lateText,
+    plateNumber: payload.plateNumber,
     serviceType: payload.serviceType,
     status: payload.status,
     totalDistanceKm: payload.totalDistanceKm
@@ -255,9 +268,12 @@ async function sendPageState(pageState, options = {}) {
           action: result.action,
           bookingId: pageState.bookingId,
           eventType: pageState.eventType,
+          etaText: pageState.etaText,
           httpStatus: response.status,
+          lateText: pageState.lateText,
           ok: result.ok,
           pageKind: pageState.pageKind,
+          plateNumber: pageState.plateNumber,
           status: pageState.status,
           statusText: pageState.statusText
         });
@@ -327,13 +343,18 @@ async function testActiveDelivereePageStatus() {
 
   await appendLog(result.ok ? "info" : "error", "active_page_status_finished", "Test Intake membaca status halaman aktif.", {
     bookingId: collected.pageState.bookingId,
+    driverName: collected.pageState.driverName,
     error: result.error,
     httpStatus: result.httpStatus,
     ok: result.ok,
     pageKind: collected.pageState.pageKind,
+    etaText: collected.pageState.etaText,
+    lateText: collected.pageState.lateText,
+    plateNumber: collected.pageState.plateNumber,
     source: collected.source,
     status: collected.pageState.status,
-    statusText: collected.pageState.statusText
+    statusText: collected.pageState.statusText,
+    vehicleDescription: collected.pageState.vehicleDescription
   });
 
   return result;

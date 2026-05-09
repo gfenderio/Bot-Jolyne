@@ -7,6 +7,14 @@ import { getDelivereeAccessDeniedReason } from "../security/discordAccess.js";
 import type { SlashCommand } from "../types/command.js";
 
 const STALE_AFTER_MS = 45_000;
+const activeOrderStatuses = new Set([
+  "searching_driver",
+  "driver_assigned",
+  "going_to_pickup",
+  "waiting_pickup",
+  "going_to_destination",
+  "arrived_destination"
+]);
 
 function toUnixSeconds(value: string) {
   return Math.floor(new Date(value).getTime() / 1000);
@@ -34,7 +42,7 @@ function colorForState(state: StoredDelivereeExtensionPageState) {
     return 0xeb5757;
   }
 
-  if (state.status === "searching_driver" || state.status === "driver_assigned") {
+  if (state.status && activeOrderStatuses.has(state.status)) {
     return 0xf2c94c;
   }
 
@@ -58,12 +66,32 @@ function describeState(state: StoredDelivereeExtensionPageState, nowMs: number) 
     return `Driver sudah terdeteksi selama ${formatDuration(state.statusStartedAt ?? state.observedAt, nowMs)}.`;
   }
 
+  if (state.status === "going_to_pickup") {
+    return `Driver sedang menuju lokasi penjemputan selama ${formatDuration(state.statusStartedAt ?? state.observedAt, nowMs)}.`;
+  }
+
+  if (state.status === "waiting_pickup") {
+    return `Driver menunggu proses pickup selama ${formatDuration(state.statusStartedAt ?? state.observedAt, nowMs)}.`;
+  }
+
+  if (state.status === "going_to_destination") {
+    return `Driver sedang menuju tujuan${state.etaText ? ` dengan ETA ${state.etaText}` : ""}.`;
+  }
+
+  if (state.status === "arrived_destination") {
+    return "Driver sudah sampai di tujuan. Pantau sampai order selesai.";
+  }
+
   if (state.status === "no_driver_found") {
     return "Order gagal karena belum mendapatkan driver.";
   }
 
   if (state.status === "cancelled") {
     return "Order terdeteksi cancelled.";
+  }
+
+  if (state.status === "completed") {
+    return "Order Deliveree sudah selesai.";
   }
 
   return "Deliveree terbuka dan extension mengirim status terakhir.";
@@ -116,11 +144,43 @@ function buildStatusEmbed(state: StoredDelivereeExtensionPageState | undefined) 
     });
   }
 
-  if (state.status === "searching_driver" || state.status === "driver_assigned") {
+  if (state.status && activeOrderStatuses.has(state.status)) {
     fields.push({
       inline: true,
       name: "Durasi Status",
       value: formatDuration(state.statusStartedAt ?? state.observedAt, nowMs)
+    });
+  }
+
+  if (state.driverName) {
+    fields.push({
+      inline: true,
+      name: "Driver",
+      value: state.driverName
+    });
+  }
+
+  if (state.plateNumber) {
+    fields.push({
+      inline: true,
+      name: "Plat",
+      value: `\`${state.plateNumber}\``
+    });
+  }
+
+  if (state.etaText) {
+    fields.push({
+      inline: true,
+      name: "ETA",
+      value: state.etaText
+    });
+  }
+
+  if (state.lateText) {
+    fields.push({
+      inline: true,
+      name: "Keterlambatan",
+      value: state.lateText
     });
   }
 

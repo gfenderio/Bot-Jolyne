@@ -68,6 +68,12 @@ function findBookingId() {
     return titleMatch[1];
   }
 
+  const completePageMatch = textOf(document.body).match(/\bBooking\s+([A-Za-z0-9-]+)\s+is complete\b/i);
+
+  if (completePageMatch) {
+    return completePageMatch[1];
+  }
+
   const pathBookingId = window.location.pathname.match(/\/bookings\/([^/?#]+)/)?.[1];
 
   if (!pathBookingId || ["new", "book_again"].includes(pathBookingId.toLowerCase())) {
@@ -104,7 +110,11 @@ function detectStatus() {
     return "cancelled";
   }
 
-  if (badge?.classList.contains("badge-status--completed") || /\bselesai\b/.test(badgeText)) {
+  if (
+    badge?.classList.contains("badge-status--completed")
+    || /\bselesai\b/.test(badgeText)
+    || /\bbooking\s+[a-z0-9-]+\s+is complete\b/i.test(document.body?.innerText || document.body?.textContent || "")
+  ) {
     return "completed";
   }
 
@@ -118,6 +128,22 @@ function detectStatus() {
 
   if (bodyText.includes("tidak bisa menemukan driver")) {
     return "no_driver_found";
+  }
+
+  if (includesAny(bodyText, ["di tujuan", "di lokasi akhir pada", "arrived at destination"])) {
+    return "arrived_destination";
+  }
+
+  if (includesAny(bodyText, ["menuju tujuan", "going to destination"])) {
+    return "going_to_destination";
+  }
+
+  if (includesAny(bodyText, ["menuju penjemputan", "going to pickup"])) {
+    return "going_to_pickup";
+  }
+
+  if (includesAny(bodyText, ["menunggu penjemputan", "waiting pickup", "waiting for pickup"])) {
+    return "waiting_pickup";
   }
 
   if (includesAny(bodyText, ["memilih", "mencari pengemudi", "tidak ada info pengemudi", "mengonfirmasi"])) {
@@ -143,7 +169,14 @@ function detectEventType(status) {
     return "order_failed";
   }
 
-  if (["searching_driver", "driver_assigned"].includes(status)) {
+  if ([
+    "searching_driver",
+    "driver_assigned",
+    "going_to_pickup",
+    "waiting_pickup",
+    "going_to_destination",
+    "arrived_destination"
+  ].includes(status)) {
     return "order_created";
   }
 
@@ -167,6 +200,58 @@ function optionalString(value) {
   return normalized || undefined;
 }
 
+function firstMatch(text, patterns) {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+
+    if (match?.[1]) {
+      return normalizeText(match[1]);
+    }
+  }
+
+  return undefined;
+}
+
+function findDriverName(bodyText) {
+  return firstMatch(bodyText, [
+    /\bPengemudi\s+(.+?)\s+(?:star|★|Pickup|Small Pickup|Mobil|Van|Suzuki|Daihatsu|Toyota)\b/i,
+    /\bYour Driver\s+(.+?)\s+(?:Small Pickup|Pickup|Mobil|Van)\b/i
+  ])?.replace(/^Pengemudi\s+/i, "");
+}
+
+function findPlateNumber(bodyText) {
+  return firstMatch(bodyText, [
+    /\b([A-Z]{1,2}\s?\d{3,4}\s?[A-Z]{1,3})\b/i
+  ])?.replace(/\s+/g, "").toUpperCase();
+}
+
+function findVehicleDescription(bodyText) {
+  return firstMatch(bodyText, [
+    /\b((?:Pickup|Small Pickup|Mobil|Van)[^#]{0,80}?(?:Suzuki|Daihatsu|Toyota|Mitsubishi|Honda|Isuzu)[^#]{0,40}?)(?:\s+[A-Z]{1,2}\s?\d{3,4}\s?[A-Z]{1,3}|\s+Kode Pemesanan|\s+Contact|\s+visibility)/i,
+    /\b((?:Pickup|Small Pickup|Mobil|Van)[^#]{0,80})\s+(?:Kode Pemesanan|Contact|Pengemudi)/i
+  ]);
+}
+
+function findEta(bodyText) {
+  const match = bodyText.match(/\b(\d{1,3})\s*(MNT|MIN|MENIT)\b/i);
+
+  if (!match) {
+    return {};
+  }
+
+  return {
+    etaMinutes: Number(match[1]),
+    etaText: `${match[1]} ${match[2].toUpperCase()}`
+  };
+}
+
+function findLateText(bodyText) {
+  return firstMatch(bodyText, [
+    /\b(\d+\s*m\s*telat)\b/i,
+    /\b(\d+\s*menit\s*telat)\b/i
+  ]);
+}
+
 function buildPayload() {
   const bookingId = findBookingId();
 
@@ -175,23 +260,31 @@ function buildPayload() {
   }
 
   const badgeText = optionalString(textOf(document.querySelector(".badge-status")));
+  const bodyText = normalizeText(document.body?.innerText || document.body?.textContent || "");
   const status = detectStatus();
   const eventType = detectEventType(status);
+  const eta = findEta(bodyText);
 
   return {
     bookingId,
     destinationCount: parseInteger(getDetailValue("Tujuan")),
+    driverName: findDriverName(bodyText),
     duplicateUrl: findDuplicateUrl(bookingId),
+    etaMinutes: eta.etaMinutes,
+    etaText: eta.etaText,
     eventType,
     failureReason: detectFailureReason(status, badgeText),
     jobNo: optionalString(getDetailValue("No. Job")),
+    lateText: findLateText(bodyText),
     observedAt: new Date().toISOString(),
     pageUrl: window.location.href,
+    plateNumber: findPlateNumber(bodyText),
     schemaVersion: SCHEMA_VERSION,
     serviceType: optionalString(getDetailValue("Jenis Layanan")),
     status,
     statusText: badgeText,
-    totalDistanceKm: parseNumber(getDetailValue("Total Jarak"))
+    totalDistanceKm: parseNumber(getDetailValue("Total Jarak")),
+    vehicleDescription: findVehicleDescription(bodyText)
   };
 }
 
@@ -241,14 +334,20 @@ function getKnownPageState() {
 function buildPageStateFromPayload(payload) {
   return {
     bookingId: payload.bookingId,
+    driverName: payload.driverName,
     eventType: payload.eventType,
+    etaMinutes: payload.etaMinutes,
+    etaText: payload.etaText,
     failureReason: payload.failureReason,
+    lateText: payload.lateText,
     observedAt: payload.observedAt,
     pageKind: "booking_detail",
     pageUrl: payload.pageUrl,
+    plateNumber: payload.plateNumber,
     schemaVersion: SCHEMA_VERSION,
     status: payload.status,
-    statusText: payload.statusText
+    statusText: payload.statusText,
+    vehicleDescription: payload.vehicleDescription
   };
 }
 
@@ -270,7 +369,10 @@ function fingerprintPayload(payload) {
     payload.serviceType || "",
     payload.totalDistanceKm ?? "",
     payload.destinationCount ?? "",
-    payload.jobNo || ""
+    payload.jobNo || "",
+    payload.etaText || "",
+    payload.lateText || "",
+    payload.plateNumber || ""
   ].join("|");
 }
 
@@ -280,6 +382,9 @@ function fingerprintPageState(pageState) {
     pageState.bookingId || "",
     pageState.status || "",
     pageState.eventType || "",
+    pageState.etaText || "",
+    pageState.lateText || "",
+    pageState.plateNumber || "",
     pageState.pageUrl
   ].join("|");
 }

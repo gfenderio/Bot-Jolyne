@@ -108,6 +108,10 @@ function humanSignal(eventType, status) {
     return "Selesai";
   }
 
+  if (["going_to_pickup", "waiting_pickup", "going_to_destination", "arrived_destination"].includes(status)) {
+    return "Order berjalan";
+  }
+
   return "Tidak ada sinyal MVP";
 }
 
@@ -116,7 +120,14 @@ function inferEventType(status) {
     return "order_failed";
   }
 
-  if (status === "searching_driver" || status === "driver_assigned") {
+  if ([
+    "searching_driver",
+    "driver_assigned",
+    "going_to_pickup",
+    "waiting_pickup",
+    "going_to_destination",
+    "arrived_destination"
+  ].includes(status)) {
     return "order_created";
   }
 
@@ -132,13 +143,18 @@ function pageStatusFromLog(entry) {
 
   return {
     bookingId: details.bookingId,
+    driverName: details.driverName,
     eventType: details.eventType || inferEventType(details.status),
+    etaText: details.etaText,
+    lateText: details.lateText,
     manualTest: entry.event === "active_page_status_finished",
     pageKind: details.pageKind,
+    plateNumber: details.plateNumber,
     receivedAt: entry.at,
     source: details.source,
     status: details.status,
-    statusText: details.statusText
+    statusText: details.statusText,
+    vehicleDescription: details.vehicleDescription
   };
 }
 
@@ -167,7 +183,17 @@ function summaryBadgeClass(pageStatus) {
     return "fail";
   }
 
-  if (pageStatus.eventType === "order_created" || pageStatus.status === "searching_driver" || pageStatus.status === "driver_assigned") {
+  if (
+    pageStatus.eventType === "order_created"
+    || [
+      "searching_driver",
+      "driver_assigned",
+      "going_to_pickup",
+      "waiting_pickup",
+      "going_to_destination",
+      "arrived_destination"
+    ].includes(pageStatus.status)
+  ) {
     return "warn";
   }
 
@@ -192,9 +218,14 @@ function setSummary(pageStatus) {
   const booking = pageStatus.bookingId ? `#${pageStatus.bookingId}` : "tanpa booking aktif";
   const status = pageStatus.statusText || pageStatus.status || "-";
   const signal = humanSignal(pageStatus.eventType, pageStatus.status);
+  const extra = [
+    pageStatus.etaText ? `ETA ${pageStatus.etaText}` : undefined,
+    pageStatus.lateText,
+    pageStatus.plateNumber ? `Plat ${pageStatus.plateNumber}` : undefined
+  ].filter(Boolean).join(". ");
 
   elements.summaryBadge.textContent = signal;
-  elements.summaryText.textContent = `${humanPageKind(pageStatus.pageKind)} ${booking}. Status: ${status}. Source: ${pageStatus.manualTest ? "manual Test Intake" : "heartbeat extension"}.`;
+  elements.summaryText.textContent = `${humanPageKind(pageStatus.pageKind)} ${booking}. Status: ${status}.${extra ? ` ${extra}.` : ""} Source: ${pageStatus.manualTest ? "manual Test Intake" : "heartbeat extension"}.`;
 }
 
 async function render() {

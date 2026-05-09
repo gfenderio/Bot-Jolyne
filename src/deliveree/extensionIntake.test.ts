@@ -346,6 +346,34 @@ test("Deliveree Extension Intake - accepts valid payload and dedupes repeated st
   });
 });
 
+test("Deliveree Extension Intake - does not repeat order_created for normal route progress", async () => {
+  await withTestServer(async ({ notifier, post }) => {
+    const first = await post(buildPayload({
+      eventType: "order_created",
+      status: "searching_driver"
+    }));
+    const progress = await post(buildPayload({
+      etaMinutes: 11,
+      etaText: "11 MNT",
+      eventType: "order_created",
+      lateText: "46m telat",
+      observedAt: "2026-05-08T07:05:00.000Z",
+      plateNumber: "B9847FAZ",
+      status: "going_to_destination",
+      statusText: undefined
+    }));
+    const progressBody = await progress.json() as { action: string; deduped: boolean; ok: boolean };
+
+    assert.strictEqual(first.status, 200);
+    assert.strictEqual(progress.status, 200);
+    assert.strictEqual(progressBody.ok, true);
+    assert.strictEqual(progressBody.action, "deduped");
+    assert.strictEqual(progressBody.deduped, true);
+    assert.strictEqual(notifier.notifications.length, 1);
+    assert.strictEqual(notifier.notifications[0].action, "order_created");
+  });
+});
+
 test("Deliveree Extension Intake - notifies order failure after created signal", async () => {
   await withTestServer(async ({ notifier, post }) => {
     await post(buildPayload({

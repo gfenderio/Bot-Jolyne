@@ -124,6 +124,50 @@ test("Deliveree Extension Extractor - handles unknown fixture without crashing",
   assert.strictEqual(payload.duplicateUrl, undefined);
 });
 
+test("Deliveree Extension Extractor - extracts going-to-pickup state from live tracking fixture", async () => {
+  const payload = extractDelivereeExtensionStatus(await readFixture(
+    "extension-going-to-pickup-order.html",
+    "https://webapp.deliveree.com/bookings/19343630/tracking"
+  ));
+
+  assert.strictEqual(payload.bookingId, "19343630");
+  assert.strictEqual(payload.status, "going_to_pickup");
+  assert.strictEqual(payload.eventType, "order_created");
+  assert.strictEqual(payload.driverName, "Sonang Rezeki S. Hutagaol");
+  assert.strictEqual(payload.plateNumber, "B9847FAZ");
+  assert.match(payload.vehicleDescription ?? "", /Pickup Kecil/);
+  assert.strictEqual(payload.serviceType, "Pickup");
+  assert.strictEqual(payload.totalDistanceKm, 2);
+  assert.strictEqual(payload.destinationCount, 1);
+});
+
+test("Deliveree Extension Extractor - extracts ETA and late text from destination state", async () => {
+  const payload = extractDelivereeExtensionStatus(await readFixture(
+    "extension-going-to-destination-order.html",
+    "https://webapp.deliveree.com/bookings/19343630/tracking"
+  ));
+
+  assert.strictEqual(payload.bookingId, "19343630");
+  assert.strictEqual(payload.status, "going_to_destination");
+  assert.strictEqual(payload.eventType, "order_created");
+  assert.strictEqual(payload.etaMinutes, 11);
+  assert.strictEqual(payload.etaText, "11 MNT");
+  assert.strictEqual(payload.lateText, "46m telat");
+  assert.strictEqual(payload.driverName, "Sonang Rezeki S. Hutagaol");
+  assert.strictEqual(payload.plateNumber, "B9847FAZ");
+});
+
+test("Deliveree Extension Extractor - reads completed public follow page booking ID from body", async () => {
+  const payload = extractDelivereeExtensionStatus(await readFixture(
+    "extension-public-follow-complete.html",
+    "https://webapp.deliveree.com/bookings/42e739/follow"
+  ));
+
+  assert.strictEqual(payload.bookingId, "19343630");
+  assert.strictEqual(payload.status, "completed");
+  assert.strictEqual(payload.eventType, undefined);
+});
+
 test("Deliveree Extension Extractor - marks active booking as created signal", () => {
   const payload = extractDelivereeExtensionStatus({
     bodyText: "Segera #19330506 Memilih Tunggu sekitar 1-3 menit. Kode Pemesanan 19330506",

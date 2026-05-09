@@ -8,6 +8,21 @@ test("Deliveree Web Classifier - detects searching driver states", () => {
   assert.strictEqual(classifyDelivereePageText("Mencari pengemudi... Mengonfirmasi 03m50d").status, "searching_driver");
 });
 
+test("Deliveree Web Classifier - detects route progress states before generic top-nav text", () => {
+  assert.strictEqual(
+    classifyDelivereePageText("Mencari pengemudi... Menuju Penjemputan Status: Menunggu Penjemputan").status,
+    "going_to_pickup"
+  );
+  assert.strictEqual(
+    classifyDelivereePageText("Mencari pengemudi... Menuju Tujuan 11 MNT Estimasi Sekarang").status,
+    "going_to_destination"
+  );
+  assert.strictEqual(
+    classifyDelivereePageText("Mencari pengemudi... Di Tujuan Di Lokasi Akhir Pada Sekarang").status,
+    "arrived_destination"
+  );
+});
+
 test("Deliveree Web Classifier - detects no driver found modal", () => {
   const result = classifyDelivereePageText("Tidak bisa menemukan driver Coba Pesan Kembali Bantuan CS");
 

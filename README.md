@@ -207,13 +207,14 @@ Command test lokal:
 - Jika Deliveree belum terbuka atau heartbeat sudah stale, Jolyne akan menampilkan bahwa halaman Deliveree belum terdeteksi.
 - Jika Deliveree terbuka di front page atau draft pemesanan, Jolyne menampilkan status idle.
 - Jika booking sedang mencari driver, Jolyne menampilkan durasi status berdasarkan pertama kali status itu terlihat.
+- Jika driver sudah berjalan, Jolyne bisa membaca state operasional seperti `going_to_pickup`, `waiting_pickup`, `going_to_destination`, `arrived_destination`, ETA, keterlambatan, driver, dan plat jika terlihat.
 - Jika order gagal karena no driver atau cancelled, Jolyne menampilkan status gagal/cancelled dan reason bila terbaca.
 
 Rule notifikasi tahap 1:
 
 - `order_created`: booking ID asli sudah muncul dan status aktif awal terbaca, seperti `searching_driver` atau `driver_assigned`.
 - `order_failed`: booking ID asli sudah muncul dan status gagal terbaca, seperti `cancelled` atau `no_driver_found`.
-- Status normal lain seperti `completed`, `unknown`, dan halaman draft hanya masuk log lokal popup.
+- Status normal lain seperti `going_to_pickup`, `going_to_destination`, `arrived_destination`, `completed`, `unknown`, dan halaman draft hanya masuk log/status lokal.
 - Heartbeat page-state yang sama didedup di log server agar runner tidak berisik.
 - Manual `Test Intake` tetap muncul di log popup/server supaya debugging jelas.
 - Event booking dan status yang sama berulang disimpan sebagai observasi, tapi tidak mengirim spam Discord.
