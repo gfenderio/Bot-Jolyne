@@ -1,5 +1,5 @@
 import { env } from "./config/env.js";
-import { createDelivereeExtensionIntakeServer, type DelivereeExtensionConnectionTestNotification, type DelivereeExtensionNotification, type DelivereeExtensionNotificationSender } from "./deliveree/extensionIntake.js";
+import { createDelivereeExtensionIntakeServer, DelivereeExtensionDiscordTestDisabledError, type DelivereeExtensionConnectionTestNotification, type DelivereeExtensionNotification, type DelivereeExtensionNotificationSender } from "./deliveree/extensionIntake.js";
 import { createDelivereeCaseStore } from "./deliveree/liveRuntime.js";
 
 class ConsoleDelivereeExtensionNotifier implements DelivereeExtensionNotificationSender {
@@ -24,7 +24,7 @@ class ConsoleDelivereeExtensionNotifier implements DelivereeExtensionNotificatio
       mode: "intake_only_no_discord_send",
       observedAt: notification.observedAt
     }));
-    throw new Error("Intake-only runner tidak mengirim Discord test. Gunakan full Jolyne runtime untuk test Discord.");
+    throw new DelivereeExtensionDiscordTestDisabledError("Intake-only runner tidak mengirim Discord test. Gunakan full Jolyne runtime untuk test Discord.");
   }
 }
 

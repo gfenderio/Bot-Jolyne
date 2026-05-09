@@ -230,7 +230,7 @@ async function sendControlRequest(endpoint, labels) {
     };
 
     await saveLastResult(result);
-    await appendLog(response.ok ? "info" : "error", labels.finishedEvent, labels.finishedMessage, {
+    await appendLog(response.ok ? "info" : "error", labels.finishedEvent, response.ok ? labels.finishedMessage : body.error || labels.failedMessage, {
       action: result.action,
       deviceId: settings.deviceId,
       error: result.error,

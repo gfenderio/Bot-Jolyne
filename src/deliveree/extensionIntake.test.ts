@@ -8,6 +8,7 @@ import { JsonDelivereeCaseStore } from "./caseStore.js";
 import {
   clearDelivereeExtensionPageStates,
   createDelivereeExtensionIntakeServer,
+  DelivereeExtensionDiscordTestDisabledError,
   getLatestDelivereeExtensionPageState,
   type DelivereeExtensionConnectionTestNotification,
   type DelivereeExtensionNotification,
@@ -157,6 +158,62 @@ test("Deliveree Extension Intake - Discord test sends a test notification", asyn
     assert.strictEqual(notifier.connectionTests.length, 1);
     assert.strictEqual(notifier.connectionTests[0].deviceId, "yugi-browser");
   });
+});
+
+test("Deliveree Extension Intake - reports disabled Discord test explicitly", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "jolyne-deliveree-extension-"));
+  const server = createDelivereeExtensionIntakeServer({
+    allowedDeviceIds: ["yugi-browser"],
+    notifier: {
+      async send() {
+        return undefined;
+      },
+      async sendConnectionTest() {
+        throw new DelivereeExtensionDiscordTestDisabledError(
+          "Intake-only runner tidak mengirim Discord test. Gunakan full Jolyne runtime untuk test Discord."
+        );
+      }
+    },
+    store: new JsonDelivereeCaseStore(join(dir, "cases.json")),
+    token: "test-token"
+  });
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  const address = server.address() as AddressInfo;
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/deliveree/extension/test-discord`, {
+      headers: {
+        "Authorization": "Bearer test-token",
+        "X-Deliveree-Device-Id": "yugi-browser"
+      },
+      method: "POST"
+    });
+    const body = await response.json() as { code: string; error: string; ok: boolean };
+
+    assert.strictEqual(response.status, 409);
+    assert.strictEqual(body.ok, false);
+    assert.strictEqual(body.code, "discord_test_disabled");
+    assert.match(body.error, /Intake-only runner/);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
+    await rm(dir, {
+      force: true,
+      recursive: true
+    });
+  }
 });
 
 test("Deliveree Extension Intake - records latest page state heartbeat", async () => {

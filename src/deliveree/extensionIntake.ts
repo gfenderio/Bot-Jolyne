@@ -180,6 +180,12 @@ class HttpError extends Error {
   }
 }
 
+export class DelivereeExtensionDiscordTestDisabledError extends Error {
+  constructor(message = "Discord test tidak aktif di mode intake-only.") {
+    super(message);
+  }
+}
+
 function writeCorsHeaders(response: ServerResponse) {
   response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Deliveree-Device-Id");
   response.setHeader("Access-Control-Allow-Methods", "OPTIONS, POST");
@@ -409,6 +415,15 @@ export async function handleDelivereeExtensionHttpRequest(
   } catch (error) {
     if (error instanceof HttpError) {
       sendJson(response, error.statusCode, {
+        error: error.message,
+        ok: false
+      });
+      return;
+    }
+
+    if (error instanceof DelivereeExtensionDiscordTestDisabledError) {
+      sendJson(response, 409, {
+        code: "discord_test_disabled",
         error: error.message,
         ok: false
       });
