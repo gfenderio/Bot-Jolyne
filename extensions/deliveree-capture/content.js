@@ -1,3 +1,10 @@
+(() => {
+if (window.__JOLYNE_DELIVEREE_CAPTURE_LOADED__) {
+  return;
+}
+
+window.__JOLYNE_DELIVEREE_CAPTURE_LOADED__ = true;
+
 const SCHEMA_VERSION = 1;
 const HEARTBEAT_MS = 15000;
 const SEND_DEBOUNCE_MS = 1000;
@@ -298,21 +305,6 @@ function getKnownPageState() {
   };
 
   if (
-    (path === "/" || path === "/bookings/new")
-    && (
-      document.querySelector("#front-page-wrapper, #front-page-card-pesan-kendaraan")
-      || includesAny(bodyText, ["layanan utama", "pesanan terbaru", "pesan kendaraan"])
-    )
-  ) {
-    return {
-      details,
-      event: "front_page_detected",
-      pageKind: "front_page",
-      message: "Halaman utama Deliveree terdeteksi. Belum ada booking ID aktif untuk dikirim."
-    };
-  }
-
-  if (
     path === "/bookings/new"
     && (
       new window.URLSearchParams(search).get("ftl") === "true"
@@ -325,6 +317,21 @@ function getKnownPageState() {
       event: "draft_page_detected",
       pageKind: "draft_page",
       message: "Draft pemesanan Deliveree terdeteksi. Extension hanya mencatat lokal dan tidak mengirim ke Jolyne."
+    };
+  }
+
+  if (
+    path === "/"
+    && (
+      document.querySelector("#front-page-wrapper, #front-page-card-pesan-kendaraan")
+      || includesAny(bodyText, ["layanan utama", "pesanan terbaru", "pesan kendaraan"])
+    )
+  ) {
+    return {
+      details,
+      event: "front_page_detected",
+      pageKind: "front_page",
+      message: "Halaman utama Deliveree terdeteksi. Belum ada booking ID aktif untuk dikirim."
     };
   }
 
@@ -583,3 +590,4 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   sendResponse(collectCurrentPageState());
   return true;
 });
+})();

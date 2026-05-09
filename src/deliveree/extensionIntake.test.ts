@@ -279,7 +279,7 @@ test("Deliveree Extension Intake - records latest page state heartbeat", async (
   await withTestServer(async ({ notifier, pageStates, postPath }) => {
     const response = await postPath("/deliveree/extension/page-state", {
       observedAt: "2026-05-08T07:00:00.000Z",
-      pageKind: "front_page",
+      pageKind: "draft_page",
       pageUrl: "https://webapp.deliveree.com/bookings/new",
       schemaVersion: 1
     });
@@ -289,11 +289,11 @@ test("Deliveree Extension Intake - records latest page state heartbeat", async (
     assert.strictEqual(response.status, 200);
     assert.strictEqual(body.ok, true);
     assert.strictEqual(body.action, "page_state_recorded");
-    assert.strictEqual(body.pageKind, "front_page");
-    assert.strictEqual(latest?.pageKind, "front_page");
+    assert.strictEqual(body.pageKind, "draft_page");
+    assert.strictEqual(latest?.pageKind, "draft_page");
     assert.strictEqual(latest?.deviceId, "yugi-browser");
     assert.strictEqual(pageStates.length, 1);
-    assert.strictEqual(pageStates[0].pageKind, "front_page");
+    assert.strictEqual(pageStates[0].pageKind, "draft_page");
     assert.strictEqual(notifier.notifications.length, 0);
   });
 });

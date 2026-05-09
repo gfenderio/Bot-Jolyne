@@ -126,6 +126,74 @@ function sendMessageToTab(tabId, message) {
   });
 }
 
+function canFallbackInjectContentScript(error) {
+  return /Could not establish connection|Receiving end does not exist/i.test(error || "");
+}
+
+function injectContentScript(tabId) {
+  return new Promise((resolve) => {
+    if (!chrome.scripting?.executeScript) {
+      resolve({
+        error: "scripting_api_unavailable",
+        ok: false
+      });
+      return;
+    }
+
+    chrome.scripting.executeScript({
+      files: ["content.js"],
+      target: {
+        tabId
+      }
+    }, () => {
+      const lastError = chrome.runtime.lastError;
+
+      if (lastError) {
+        resolve({
+          error: lastError.message,
+          ok: false
+        });
+        return;
+      }
+
+      resolve({
+        ok: true
+      });
+    });
+  });
+}
+
+async function collectPageStateFromTab(tabId) {
+  const firstAttempt = await sendMessageToTab(tabId, {
+    type: "DELIVEREE_COLLECT_PAGE_STATE"
+  });
+
+  if (firstAttempt?.ok && firstAttempt.pageState) {
+    return firstAttempt;
+  }
+
+  if (!canFallbackInjectContentScript(firstAttempt?.error)) {
+    return firstAttempt;
+  }
+
+  const injection = await injectContentScript(tabId);
+
+  if (!injection.ok) {
+    return {
+      error: injection.error || firstAttempt.error || "content_script_injection_failed",
+      ok: false
+    };
+  }
+
+  await appendLog("info", "active_page_content_injected", "Content script Deliveree diinject ke tab aktif.", {
+    tabId
+  });
+
+  return sendMessageToTab(tabId, {
+    type: "DELIVEREE_COLLECT_PAGE_STATE"
+  });
+}
+
 async function sendStatus(payload) {
   const settings = await getSettings();
   const payloadSummary = {
@@ -336,9 +404,7 @@ async function testActiveDelivereePageStatus() {
     tabUrl
   });
 
-  const collected = await sendMessageToTab(tab.id, {
-    type: "DELIVEREE_COLLECT_PAGE_STATE"
-  });
+  const collected = await collectPageStateFromTab(tab.id);
 
   if (!collected?.ok || !collected.pageState) {
     await appendLog("error", "active_page_status_failed", "Content script belum bisa membaca halaman Deliveree aktif.", {
