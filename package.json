@@ -12,7 +12,8 @@
     "commands:deploy": "tsx src/deploy-commands.ts",
     "deliveree:login": "tsx src/deliveree-login.ts",
     "deliveree:intake": "node dist/deliveree-intake.js",
-    "deliveree:extension:pack": "node scripts/pack-deliveree-extension.js"
+    "deliveree:extension:pack": "node scripts/pack-deliveree-extension.js",
+    "kyou:scanner-extension:pack": "node scripts/pack-kyou-item-scanner-extension.js"
   },
   "dependencies": {
     "discord.js": "^14.18.0",

@@ -235,6 +235,38 @@ Manual case tracking MVP:
 - Tombol manual hanya mencatat keputusan/status case di Jolyne. Tombol ini tidak membuka Playwright, tidak klik Deliveree, tidak submit order, dan tidak membuat reorder otomatis.
 - Dalam mode `npm run deliveree:intake` yang hanya mengirim Discord REST, tombol Discord baru bisa diproses jika runtime Discord bot yang aktif menjalankan branch/kode yang sama dan memakai case store yang sama. Untuk local-only testing tanpa full bot lokal, gunakan file case store dan popup/log sebagai bukti dulu.
 
+## Kyou Item Scanner Extension
+
+Extension `Kyou Item Scanner Opener` dipakai untuk scanner keyboard-wedge. Saat scanner membaca kode angka lalu mengirim `Enter`, tab aktif langsung redirect ke halaman item Kyou.
+
+Default:
+
+- Kode contoh: `219402`
+- URL tujuan: `https://kyou.id/items/219402`
+- Host aktif: `https://kyou.id/*` dan `https://old.kyou.id/*`
+- Mode default: redirect tab aktif, bukan buka tab baru.
+
+Cara pack:
+
+```bash
+npm run kyou:scanner-extension:pack
+```
+
+Cara pakai:
+
+1. Buka `chrome://extensions`.
+2. Aktifkan Developer mode.
+3. Pilih `Load unpacked`.
+4. Pilih folder `dist/kyou-item-scanner-opener`.
+5. Buka halaman `https://kyou.id/` atau `https://old.kyou.id/`.
+6. Scan kode produk, misalnya `219402`.
+
+Catatan:
+
+- Extension hanya trigger jika input berupa angka dan diakhiri `Enter`.
+- Extension mengabaikan scan saat cursor sedang berada di `input`, `textarea`, `select`, atau field editable agar tidak mengganggu form.
+- Setting popup menyediakan enable/disable, base URL, minimal digit, dan reset buffer.
+
 ## Struktur
 
 ```text
@@ -249,4 +281,5 @@ src/
   index.ts
 extensions/
   deliveree-capture/  Chrome extension read-only untuk endpoint lokal
+  kyou-item-scanner-opener/  Chrome extension untuk buka item Kyou dari scanner
 ```

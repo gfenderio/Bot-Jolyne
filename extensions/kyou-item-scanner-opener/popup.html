@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Kyou Scanner</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <h1>Kyou Scanner</h1>
+      <p class="muted">Scan kode item lalu Enter. Tab aktif akan redirect ke halaman item.</p>
+
+      <label class="row">
+        <span>Enabled</span>
+        <input id="enabled" type="checkbox">
+      </label>
+
+      <label>
+        Base URL
+        <input id="base-url" type="url" placeholder="https://kyou.id/items/">
+      </label>
+
+      <label>
+        Minimal digit
+        <input id="min-digits" min="1" step="1" type="number">
+      </label>
+
+      <label>
+        Reset buffer (ms)
+        <input id="reset-after-ms" min="100" step="50" type="number">
+      </label>
+
+      <div class="actions">
+        <button id="save" type="button">Save</button>
+        <button id="test" class="secondary" type="button">Test 219402</button>
+      </div>
+
+      <section>
+        <h2>Last Scan</h2>
+        <p id="last-scan" class="muted">Belum ada scan.</p>
+      </section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

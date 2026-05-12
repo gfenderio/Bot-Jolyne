@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Kyou Item Scanner Opener",
+  "version": "0.1.0",
+  "description": "Open Kyou item pages from keyboard-wedge barcode scanner input.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://kyou.id/*",
+    "https://old.kyou.id/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://kyou.id/*",
+        "https://old.kyou.id/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Kyou Scanner"
+  }
+}
