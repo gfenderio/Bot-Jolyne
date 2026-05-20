@@ -291,9 +291,12 @@ function getMvpEventType(payload: DelivereeExtensionStatusPayload): DelivereeExt
     return "order_failed";
   }
 
+  if (payload.status === "driver_assigned") {
+    return "driver_assigned_after_retry";
+  }
+
   if (
     payload.status === "searching_driver"
-    || payload.status === "driver_assigned"
     || payload.status === "going_to_pickup"
     || payload.status === "waiting_pickup"
     || payload.status === "going_to_destination"
@@ -694,7 +697,9 @@ export function buildDelivereeExtensionNotificationEmbed(notification: Deliveree
     }
   ];
 
-  if (notification.payload.driverName) {
+  const showDriverDetails = ["driver_assigned", "going_to_pickup", "waiting_pickup", "going_to_destination", "arrived_destination"].includes(notification.payload.status);
+
+  if (notification.payload.driverName && showDriverDetails) {
     fields.push({
       inline: true,
       name: "Driver",
@@ -702,7 +707,15 @@ export function buildDelivereeExtensionNotificationEmbed(notification: Deliveree
     });
   }
 
-  if (notification.payload.plateNumber) {
+  if (notification.payload.vehicleDescription && showDriverDetails) {
+    fields.push({
+      inline: true,
+      name: "Kendaraan",
+      value: notification.payload.vehicleDescription
+    });
+  }
+
+  if (notification.payload.plateNumber && showDriverDetails) {
     fields.push({
       inline: true,
       name: "Plat",

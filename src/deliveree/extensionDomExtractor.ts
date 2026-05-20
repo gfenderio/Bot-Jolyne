@@ -341,14 +341,16 @@ function findDriverName(snapshot: DelivereeExtensionPageSnapshot) {
   const bodyText = normalizeText(snapshot.bodyText);
   return firstMatch(bodyText, [
     /\bPengemudi\s+(.+?)\s+(?:star|★|Pickup|Small Pickup|Mobil|Van|Suzuki|Daihatsu|Toyota)\b/i,
-    /\bYour Driver\s+(.+?)\s+(?:Small Pickup|Pickup|Mobil|Van)\b/i
+    /\bYour Driver\s+(.+?)\s+(?:Small Pickup|Pickup|Mobil|Van)\b/i,
+    /\bPengemudi:\s*(.+?)\s*Kendaraan:\b/i
   ])?.replace(/^Pengemudi\s+/i, "");
 }
 
 function findPlateNumber(snapshot: DelivereeExtensionPageSnapshot) {
   const bodyText = normalizeText(snapshot.bodyText);
   return firstMatch(bodyText, [
-    /\b([A-Z]{1,2}\s?\d{3,4}\s?[A-Z]{1,3})\b/i
+    /\b([A-Z]{1,2}\s?\d{3,4}\s?[A-Z]{1,3})\b/i,
+    /\bPlat\s*(?:Nomor)?:\s*([A-Z]{1,2}\s?\d{3,4}\s?[A-Z]{1,3})\b/i
   ])?.replace(/\s+/g, "").toUpperCase();
 }
 
@@ -356,7 +358,8 @@ function findVehicleDescription(snapshot: DelivereeExtensionPageSnapshot) {
   const bodyText = normalizeText(snapshot.bodyText);
   return firstMatch(bodyText, [
     /\b((?:Pickup|Small Pickup|Mobil|Van)[^#]{0,80}?(?:Suzuki|Daihatsu|Toyota|Mitsubishi|Honda|Isuzu)[^#]{0,40}?)(?:\s+[A-Z]{1,2}\s?\d{3,4}\s?[A-Z]{1,3}|\s+Kode Pemesanan|\s+Contact|\s+visibility)/i,
-    /\b((?:Pickup|Small Pickup|Mobil|Van)[^#]{0,80})\s+(?:Kode Pemesanan|Contact|Pengemudi)/i
+    /\b((?:Pickup|Small Pickup|Mobil|Van)[^#]{0,80})\s+(?:Kode Pemesanan|Contact|Pengemudi)/i,
+    /\bKendaraan:\s*([^\n#]+?)\s*(?:Plat|Plate)\b/i
   ]);
 }
 
@@ -390,10 +393,12 @@ export function extractDelivereeExtensionStatus(snapshot: DelivereeExtensionPage
 
   const status = detectStatus(snapshot);
   const eta = findEta(snapshot);
+  const hasDriver = ["driver_assigned", "going_to_pickup", "waiting_pickup", "going_to_destination", "arrived_destination"].includes(status);
+
   const payload: DelivereeExtensionStatusPayload = {
     bookingId,
     destinationCount: parseInteger(getDetailValue(snapshot, "Tujuan")),
-    driverName: findDriverName(snapshot),
+    driverName: hasDriver ? findDriverName(snapshot) : undefined,
     duplicateUrl: findDuplicateUrl(snapshot, bookingId),
     etaMinutes: eta.etaMinutes,
     etaText: eta.etaText,
@@ -403,13 +408,13 @@ export function extractDelivereeExtensionStatus(snapshot: DelivereeExtensionPage
     lateText: findLateText(snapshot),
     observedAt: snapshot.observedAt ?? new Date().toISOString(),
     pageUrl: snapshot.pageUrl,
-    plateNumber: findPlateNumber(snapshot),
+    plateNumber: hasDriver ? findPlateNumber(snapshot) : undefined,
     schemaVersion: DELIVEREE_EXTENSION_SCHEMA_VERSION,
     serviceType: optionalString(getDetailValue(snapshot, "Jenis Layanan")),
     status,
     statusText: optionalString(snapshot.badgeText),
     totalDistanceKm: parseNumber(getDetailValue(snapshot, "Total Jarak")),
-    vehicleDescription: findVehicleDescription(snapshot)
+    vehicleDescription: hasDriver ? findVehicleDescription(snapshot) : undefined
   };
 
   return delivereeExtensionStatusPayloadSchema.parse(payload);

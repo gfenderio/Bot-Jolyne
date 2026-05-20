@@ -265,20 +265,23 @@ function firstMatch(text, patterns) {
 function findDriverName(bodyText) {
   return firstMatch(bodyText, [
     /\bPengemudi\s+(.+?)\s+(?:star|★|Pickup|Small Pickup|Mobil|Van|Suzuki|Daihatsu|Toyota)\b/i,
-    /\bYour Driver\s+(.+?)\s+(?:Small Pickup|Pickup|Mobil|Van)\b/i
+    /\bYour Driver\s+(.+?)\s+(?:Small Pickup|Pickup|Mobil|Van)\b/i,
+    /\bPengemudi:\s*(.+?)\s*Kendaraan:\b/i
   ])?.replace(/^Pengemudi\s+/i, "");
 }
 
 function findPlateNumber(bodyText) {
   return firstMatch(bodyText, [
-    /\b([A-Z]{1,2}\s?\d{3,4}\s?[A-Z]{1,3})\b/i
+    /\b([A-Z]{1,2}\s?\d{3,4}\s?[A-Z]{1,3})\b/i,
+    /\bPlat\s*(?:Nomor)?:\s*([A-Z]{1,2}\s?\d{3,4}\s?[A-Z]{1,3})\b/i
   ])?.replace(/\s+/g, "").toUpperCase();
 }
 
 function findVehicleDescription(bodyText) {
   return firstMatch(bodyText, [
     /\b((?:Pickup|Small Pickup|Mobil|Van)[^#]{0,80}?(?:Suzuki|Daihatsu|Toyota|Mitsubishi|Honda|Isuzu)[^#]{0,40}?)(?:\s+[A-Z]{1,2}\s?\d{3,4}\s?[A-Z]{1,3}|\s+Kode Pemesanan|\s+Contact|\s+visibility)/i,
-    /\b((?:Pickup|Small Pickup|Mobil|Van)[^#]{0,80})\s+(?:Kode Pemesanan|Contact|Pengemudi)/i
+    /\b((?:Pickup|Small Pickup|Mobil|Van)[^#]{0,80})\s+(?:Kode Pemesanan|Contact|Pengemudi)/i,
+    /\bKendaraan:\s*([^\n#]+?)\s*(?:Plat|Plate)\b/i
   ]);
 }
 
@@ -315,10 +318,12 @@ function buildPayload() {
   const eventType = detectEventType(status);
   const eta = findEta(bodyText);
 
+  const hasDriver = ["driver_assigned", "going_to_pickup", "waiting_pickup", "going_to_destination", "arrived_destination"].includes(status);
+
   return {
     bookingId,
     destinationCount: parseInteger(getDetailValue("Tujuan")),
-    driverName: findDriverName(bodyText),
+    driverName: hasDriver ? findDriverName(bodyText) : undefined,
     duplicateUrl: findDuplicateUrl(bookingId),
     etaMinutes: eta.etaMinutes,
     etaText: eta.etaText,
@@ -328,13 +333,13 @@ function buildPayload() {
     lateText: findLateText(bodyText),
     observedAt: new Date().toISOString(),
     pageUrl: window.location.href,
-    plateNumber: findPlateNumber(bodyText),
+    plateNumber: hasDriver ? findPlateNumber(bodyText) : undefined,
     schemaVersion: SCHEMA_VERSION,
     serviceType: optionalString(getDetailValue("Jenis Layanan")),
     status,
     statusText: badgeText,
     totalDistanceKm: parseNumber(getDetailValue("Total Jarak")),
-    vehicleDescription: findVehicleDescription(bodyText)
+    vehicleDescription: hasDriver ? findVehicleDescription(bodyText) : undefined
   };
 }
 
@@ -803,6 +808,26 @@ if (typeof chrome !== "undefined" && chrome?.runtime?.onMessage) {
     const mockHtml = `
       <div id="simulated-mock-booking" style="opacity: 0; pointer-events: none; position: absolute; z-index: -1;">
         <h2 class="title">#MOCK-7777</h2>
+        <div class="DetailBooking__Other">
+          <table>
+            <tr>
+              <td>Jenis Layanan</td>
+              <td>Pickup (1 Ton)</td>
+            </tr>
+            <tr>
+              <td>Total Jarak</td>
+              <td>14.8 km</td>
+            </tr>
+            <tr>
+              <td>Tujuan</td>
+              <td>2</td>
+            </tr>
+            <tr>
+              <td>No. Job</td>
+              <td>JB-9999999</td>
+            </tr>
+          </table>
+        </div>
       </div>
     `;
     document.body.insertAdjacentHTML('beforeend', mockHtml);
