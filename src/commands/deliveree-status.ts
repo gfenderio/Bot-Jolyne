@@ -1,4 +1,4 @@
-﻿import { EmbedBuilder, SlashCommandBuilder } from "discord.js";
+import { EmbedBuilder, SlashCommandBuilder } from "discord.js";
 import {
   getLatestDelivereeExtensionPageState,
   type StoredDelivereeExtensionPageState
@@ -9,6 +9,7 @@ import type { SlashCommand } from "../types/command.js";
 const STALE_AFTER_MS = 45_000;
 const activeOrderStatuses = new Set([
   "searching_driver",
+  "active_booking",
   "driver_assigned",
   "going_to_pickup",
   "waiting_pickup",
@@ -60,6 +61,10 @@ function describeState(state: StoredDelivereeExtensionPageState, nowMs: number) 
 
   if (state.status === "searching_driver") {
     return `Order sedang mencari driver selama ${formatDuration(state.statusStartedAt ?? state.observedAt, nowMs)}.`;
+  }
+
+  if (state.status === "active_booking") {
+    return `Order aktif terbaca selama ${formatDuration(state.statusStartedAt ?? state.observedAt, nowMs)}.`;
   }
 
   if (state.status === "driver_assigned") {
@@ -142,6 +147,14 @@ function buildStatusEmbed(state: StoredDelivereeExtensionPageState | undefined) 
       inline: true,
       name: "Status",
       value: `\`${state.status}\``
+    });
+  }
+
+  if (state.statusText) {
+    fields.push({
+      inline: false,
+      name: "Info Status",
+      value: state.statusText
     });
   }
 
@@ -249,5 +262,3 @@ export const command: SlashCommand = {
     });
   }
 };
-
-

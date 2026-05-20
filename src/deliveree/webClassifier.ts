@@ -1,4 +1,4 @@
-﻿export const DELIVEREE_WEB_STATUSES = [
+export const DELIVEREE_WEB_STATUSES = [
   "cancelled",
   "captcha_or_security_challenge",
   "completed",
@@ -7,6 +7,7 @@
   "going_to_destination",
   "going_to_pickup",
   "arrived_destination",
+  "active_booking",
   "waiting_pickup",
   "login_required",
   "no_driver_found",
@@ -194,5 +195,3 @@ export function classifyDelivereePageText(rawText: string): DelivereePageClassif
     summary: "Sistem belum mengenali state halaman Deliveree."
   };
 }
-
-

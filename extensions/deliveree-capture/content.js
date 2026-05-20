@@ -1,4 +1,4 @@
-﻿(() => {
+(() => {
 if (window.__KYOU_DELIVEREE_CAPTURE_LOADED__) {
   return;
 }
@@ -152,6 +152,41 @@ function parseInteger(value) {
   return parsed === undefined ? undefined : Math.trunc(parsed);
 }
 
+function findActiveHomepageOrder() {
+  const orderItems = Array.from(document.querySelectorAll(".Dropdown-Devina-Group"));
+  const order = orderItems.find((item) => /Pemesanan\s+#\w+/i.test(textOf(item)));
+
+  if (!order) {
+    return undefined;
+  }
+
+  const item = order.closest(".Dropdown-Menu-Item") || order;
+  const bookingId = textOf(order.querySelector("b")).match(/Pemesanan\s+#([A-Za-z0-9-]+)/i)?.[1]
+    || textOf(order).match(/Pemesanan\s+#([A-Za-z0-9-]+)/i)?.[1];
+
+  if (!bookingId) {
+    return undefined;
+  }
+
+  const address = optionalString(textOf(order.querySelector("span")));
+  const timeLeft = optionalString(textOf(item.querySelector(".Dropdown-Devina-Time b")));
+  const subtitle = optionalString(textOf(document.querySelector(".TitleSubtitle-subtitle")));
+  const statusText = [subtitle, timeLeft ? `${timeLeft} left` : undefined, address]
+    .filter(Boolean)
+    .join(" ? ");
+  const status = subtitle && normalizeKey(subtitle).includes("mencari")
+    ? "searching_driver"
+    : "active_booking";
+
+  return {
+    address,
+    bookingId,
+    status,
+    statusText: statusText || undefined,
+    timeLeft
+  };
+}
+
 function findBookingId() {
   const detailBookingId = getDetailValue("Kode Pemesanan");
 
@@ -171,6 +206,12 @@ function findBookingId() {
     return completePageMatch[1];
   }
 
+  const numericPathBookingId = window.location.pathname.match(/\/bookings\/(\d+)/)?.[1];
+
+  if (numericPathBookingId) {
+    return numericPathBookingId;
+  }
+
   const pathBookingId = window.location.pathname.match(/\/bookings\/([^/?#]+)/)?.[1];
 
   if (!pathBookingId || ["new", "book_again"].includes(pathBookingId.toLowerCase())) {
@@ -178,6 +219,11 @@ function findBookingId() {
   }
 
   return pathBookingId;
+}
+
+function isBookingDetailPage() {
+  const bookingId = findBookingId();
+  return Boolean(bookingId) && /^\/bookings\//.test(window.location.pathname);
 }
 
 function findDuplicateUrl(bookingId) {
@@ -253,6 +299,10 @@ function detectStatus() {
     return "searching_driver";
   }
 
+  if (isBookingDetailPage()) {
+    return "active_booking";
+  }
+
 
   if (includesAny(bodyText, ["1. rute", "2. layanan", "3. rincian", "pesan pengemudi"])) {
     return "draft_prepared";
@@ -269,6 +319,7 @@ function detectEventType(status) {
   if ([
     "searching_driver",
     "driver_assigned",
+    "active_booking",
     "going_to_pickup",
     "waiting_pickup",
     "going_to_destination",
@@ -353,6 +404,21 @@ function findLateText(bodyText) {
 }
 
 function buildPayload() {
+  const homepageOrder = findActiveHomepageOrder();
+
+  if (homepageOrder) {
+    return {
+      bookingId: homepageOrder.bookingId,
+      eventType: "order_created",
+      failureReason: homepageOrder.address ? `Alamat aktif: ${homepageOrder.address}` : undefined,
+      observedAt: new Date().toISOString(),
+      pageUrl: new window.URL(`/bookings/${homepageOrder.bookingId}`, window.location.href).toString(),
+      schemaVersion: SCHEMA_VERSION,
+      status: homepageOrder.status,
+      statusText: homepageOrder.statusText
+    };
+  }
+
   const bookingId = findBookingId();
 
   if (!bookingId) {
@@ -625,25 +691,40 @@ function sendCurrentStatus(options = {}) {
 
 
 function sendForcedCurrentStatus(eventType, statusOverride) {
-  const payload = buildPayload();
-  if (!payload) return;
-
-  if (statusOverride) {
-    payload.status = statusOverride;
-  }
-
-  if (eventType) {
-    payload.eventType = eventType;
-  }
+  const status = statusOverride || "searching_driver";
+  const isDriverFound = status === "driver_assigned";
+  const payload = {
+    bookingId: "MOCK-7777",
+    destinationCount: 2,
+    eventType,
+    jobNo: "JB-9999999",
+    observedAt: new Date().toISOString(),
+    pageUrl: window.location.href,
+    retryAttempt,
+    schemaVersion: SCHEMA_VERSION,
+    serviceType: "Pickup (1 Ton)",
+    status,
+    statusText: status === "searching_driver"
+      ? "Mencari Driver"
+      : status === "no_driver_found"
+        ? "Tidak bisa menemukan driver"
+        : "Driver Ditemukan",
+    totalDistanceKm: 14.8,
+    ...(isDriverFound ? {
+      driverName: "Budi Santoso",
+      plateNumber: "B9876CKY",
+      vehicleDescription: "Pickup Mitsubishi L300"
+    } : {})
+  };
 
   if (eventType === "driver_assigned_after_retry") {
-    payload.retryAttempt = retryAttempt;
     payload.retryTotalDurationSeconds = retryStartedAt
       ? Math.floor((Date.now() - retryStartedAt.getTime()) / 1000)
       : 0;
   }
 
   lastFingerprint = "";
+  lastPageStateFingerprint = "";
   sendPageState(buildPageStateFromPayload(payload), { force: true });
   safeSendMessage({ payload, type: "DELIVEREE_STATUS" });
 }
@@ -1074,14 +1155,3 @@ if (runtime?.onMessage?.addListener) {
   }
 }
 })();
-
-
-
-
-
-
-
-
-
-
-

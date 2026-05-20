@@ -201,6 +201,7 @@ function detectStatus(snapshot: DelivereeExtensionPageSnapshot): DelivereeWebSta
     return "searching_driver";
   }
 
+
   if (
     includesAny(bodyText, ["driver", "pengemudi"])
     && includesAny(bodyText, ["plat", "kendaraan", "dalam perjalanan", "arrived", "pickup"])
@@ -223,6 +224,7 @@ function detectEventType(status: DelivereeWebStatus): DelivereeExtensionEventTyp
   if (
     status === "searching_driver"
     || status === "driver_assigned"
+    || status === "active_booking"
     || status === "going_to_pickup"
     || status === "waiting_pickup"
     || status === "going_to_destination"
@@ -290,6 +292,11 @@ function findBookingId(snapshot: DelivereeExtensionPageSnapshot) {
 
   if (completePageMatch) {
     return completePageMatch[1];
+  }
+
+  const numericUrlMatch = snapshot.pageUrl.match(/\/bookings\/(\d+)/);
+  if (numericUrlMatch?.[1]) {
+    return numericUrlMatch[1];
   }
 
   const urlMatch = snapshot.pageUrl.match(/\/bookings\/([^/?#]+)/);

@@ -1,4 +1,4 @@
-﻿import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -168,6 +168,13 @@ export interface DelivereeExtensionNotificationSender {
 }
 
 export interface DelivereeExtensionCaseStore {
+  listCases?(): Promise<DelivereeRecoveryCase[]>;
+  appendActionLog?(caseId: string, entry: {
+    action: string;
+    at?: string;
+    nonce?: string;
+    note?: string;
+  }): Promise<DelivereeRecoveryCase | undefined>;
   upsertObservation(input: {
     bookingId: string;
     destinationCount?: number;
@@ -285,6 +292,13 @@ async function handleDelivereeExtensionCommands(
   deviceId: string,
   store: DelivereeExtensionCaseStore
 ) {
+  if (!store.listCases || !store.appendActionLog) {
+    return {
+      command: null,
+      ok: true
+    };
+  }
+
   const cases = await store.listCases();
   const candidates = cases
     .filter((recoveryCase) => recoveryCase.deviceId === deviceId)
@@ -342,6 +356,7 @@ function getMvpEventType(payload: DelivereeExtensionStatusPayload): DelivereeExt
 
   if (
     payload.status === "searching_driver"
+    || payload.status === "active_booking"
     || payload.status === "going_to_pickup"
     || payload.status === "waiting_pickup"
     || payload.status === "going_to_destination"
@@ -733,6 +748,11 @@ export function buildDelivereeExtensionNotificationEmbed(notification: Deliveree
     },
     {
       inline: true,
+      name: "Info Status",
+      value: fieldValue(notification.payload.statusText)
+    },
+    {
+      inline: true,
       name: "Device",
       value: `\`${notification.deviceId}\``
     },
@@ -1026,7 +1046,3 @@ function closeServer(server: Server) {
     }
   });
 }
-
-
-
-
