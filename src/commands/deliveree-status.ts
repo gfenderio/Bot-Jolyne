@@ -1,4 +1,5 @@
 import { EmbedBuilder, SlashCommandBuilder } from "discord.js";
+import { createDelivereeCaseStore } from "../deliveree/liveRuntime.js";
 import {
   getLatestDelivereeExtensionPageState,
   type StoredDelivereeExtensionPageState
@@ -100,6 +101,40 @@ function describeState(state: StoredDelivereeExtensionPageState, nowMs: number) 
   }
 
   return "Deliveree terbuka dan extension mengirim status terakhir.";
+}
+
+async function getLatestStoredCaseState(): Promise<StoredDelivereeExtensionPageState | undefined> {
+  const cases = await createDelivereeCaseStore().listCases();
+  const latest = cases
+    .filter((recoveryCase) => recoveryCase.deviceId && recoveryCase.lastHeartbeatAt)
+    .sort((left, right) => String(right.lastHeartbeatAt).localeCompare(String(left.lastHeartbeatAt)))[0];
+
+  if (!latest?.deviceId || !latest.lastHeartbeatAt) {
+    return undefined;
+  }
+
+  return {
+    bookingId: latest.bookingId,
+    deviceId: latest.deviceId,
+    driverName: latest.driverName,
+    etaText: latest.etaText,
+    failureReason: latest.failureReason,
+    lateText: latest.lateText,
+    observedAt: latest.lastObservedAt,
+    pageKind: latest.lastPageKind ?? "booking_detail",
+    pageUrl: latest.url,
+    plateNumber: latest.plateNumber,
+    receivedAt: latest.lastHeartbeatAt,
+    schemaVersion: 1,
+    status: latest.status,
+    statusStartedAt: latest.lastStatusChangeAt,
+    statusText: latest.statusText,
+    vehicleDescription: latest.vehicleDescription
+  };
+}
+
+async function getStatusState() {
+  return getLatestDelivereeExtensionPageState() ?? await getLatestStoredCaseState();
 }
 
 function buildStatusEmbed(state: StoredDelivereeExtensionPageState | undefined) {
@@ -257,7 +292,7 @@ export const command: SlashCommand = {
     }
 
     await interaction.reply({
-      embeds: [buildStatusEmbed(getLatestDelivereeExtensionPageState())],
+      embeds: [buildStatusEmbed(await getStatusState())],
       flags: ["Ephemeral"]
     });
   }
