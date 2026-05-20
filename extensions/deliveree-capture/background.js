@@ -1,10 +1,12 @@
-const DEFAULT_SETTINGS = {
+﻿const DEFAULT_SETTINGS = {
   deviceId: "yugi-browser",
   intakeUrl: "http://127.0.0.1:3001",
   token: ""
 };
 const MAX_LOG_ENTRIES = 120;
 let lastPageStateSuccessLogFingerprint = "";
+let lastCommandPollAt = 0;
+let commandPollInFlight = false;
 
 function normalizeBaseUrl(value) {
   return (value || DEFAULT_SETTINGS.intakeUrl).replace(/\/+$/, "");
@@ -124,6 +126,17 @@ function sendMessageToTab(tabId, message) {
       });
     });
   });
+}
+
+async function notifyDelivereeTabs(message) {
+  const tabs = await chrome.tabs.query({
+    url: "https://webapp.deliveree.com/*"
+  });
+
+  await Promise.all((tabs || []).map((tab) => {
+    if (!tab.id) return Promise.resolve();
+    return sendMessageToTab(tab.id, message);
+  }));
 }
 
 function canFallbackInjectContentScript(error) {
@@ -278,6 +291,7 @@ async function sendStatus(payload) {
       ok: result.ok,
       status: payload.status
     });
+    await pollExtensionCommands();
     return result;
   } catch (error) {
     const result = {
@@ -363,6 +377,8 @@ async function sendPageState(pageState, options = {}) {
         });
       }
     }
+
+    await pollExtensionCommands();
 
     return result;
   } catch (error) {
@@ -503,6 +519,66 @@ async function sendControlRequest(endpoint, labels) {
   }
 }
 
+async function pollExtensionCommands(options = {}) {
+  const now = Date.now();
+  if (!options.force && now - lastCommandPollAt < 5000) {
+    return { ok: true, skipped: true };
+  }
+  if (commandPollInFlight) {
+    return { ok: true, skipped: true };
+  }
+
+  commandPollInFlight = true;
+  lastCommandPollAt = now;
+
+  try {
+    const settings = await getSettings();
+    if (!settings.token) {
+      return { error: "token_not_configured", ok: false };
+    }
+
+    const response = await fetch(`${normalizeBaseUrl(settings.intakeUrl)}/deliveree/extension/commands`, {
+      headers: {
+        "Authorization": `Bearer ${settings.token}`,
+        "X-Deliveree-Device-Id": settings.deviceId
+      },
+      method: "GET"
+    });
+    const body = await response.json().catch(() => ({
+      error: "invalid_response",
+      ok: false
+    }));
+
+    if (!response.ok || !body.command) {
+      return { ...body, httpStatus: response.status };
+    }
+
+    if (body.command.type === "disable_auto_retry") {
+      await chrome.storage.local.set({
+        autoRetry: false
+      });
+      await notifyDelivereeTabs({
+        reason: body.command.reason || "Auto Retry dimatikan dari Discord",
+        type: "DELIVEREE_DISABLE_AUTO_RETRY"
+      });
+      await appendLog("warning", "auto_retry_disabled_from_discord", "Auto Retry dimatikan dari tombol Discord.", {
+        bookingId: body.command.bookingId,
+        caseId: body.command.caseId,
+        deviceId: settings.deviceId
+      });
+    }
+
+    return { ...body, httpStatus: response.status };
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : "network_error",
+      ok: false
+    };
+  } finally {
+    commandPollInFlight = false;
+  }
+}
+
 async function testLocalIntake() {
   const result = await sendControlRequest("/deliveree/extension/health", {
     failedEvent: "test_intake_failed",
@@ -556,6 +632,16 @@ async function simulateModalInActiveTab(scenario) {
   return sendMessageToTab(tab.id, { type: "DELIVEREE_SIMULATE_MODAL", scenario });
 }
 
+
+chrome.alarms?.create?.("deliveree-command-poll", {
+  periodInMinutes: 0.25
+});
+
+chrome.alarms?.onAlarm?.addListener?.((alarm) => {
+  if (alarm.name === "deliveree-command-poll") {
+    pollExtensionCommands({ force: true });
+  }
+});
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "DELIVEREE_LOG") {
     appendLog(
@@ -601,3 +687,4 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   sendStatus(message.payload).then(sendResponse);
   return true;
 });
+

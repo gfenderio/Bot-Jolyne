@@ -1,4 +1,4 @@
-import { EmbedBuilder, SlashCommandBuilder } from "discord.js";
+﻿import { EmbedBuilder, SlashCommandBuilder } from "discord.js";
 import { buildDelivereeExtensionManualComponents } from "../deliveree/extensionIntake.js";
 import { createDelivereeCaseStore } from "../deliveree/liveRuntime.js";
 import { getDelivereeAccessDeniedReason } from "../security/discordAccess.js";
@@ -153,7 +153,7 @@ export const command: SlashCommand = {
 
     const embed = new EmbedBuilder()
       .setColor(recoveryCase.closedAt ? 0x95a5a6 : recoveryCase.silencedAt ? 0xf39c12 : 0x3498db)
-      .setTitle(`[Jolyne] Deliveree Case #${recoveryCase.bookingId}`)
+      .setTitle(`Kyou Deliveree Case #${recoveryCase.bookingId}`)
       .setDescription(`Case ID: \`${recoveryCase.caseId}\``)
       .addFields(fields)
       .setTimestamp();
@@ -170,3 +170,4 @@ export const command: SlashCommand = {
     });
   }
 };
+

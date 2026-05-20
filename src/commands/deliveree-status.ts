@@ -1,4 +1,4 @@
-import { EmbedBuilder, SlashCommandBuilder } from "discord.js";
+﻿import { EmbedBuilder, SlashCommandBuilder } from "discord.js";
 import {
   getLatestDelivereeExtensionPageState,
   type StoredDelivereeExtensionPageState
@@ -103,7 +103,7 @@ function buildStatusEmbed(state: StoredDelivereeExtensionPageState | undefined) 
   if (!state) {
     return new EmbedBuilder()
       .setColor(0x95a5a6)
-      .setTitle("[Jolyne] Deliveree Status")
+      .setTitle("Kyou Deliveree Status")
       .setDescription("Deliveree belum terdeteksi terbuka dari extension lokal.")
       .addFields([
         {
@@ -202,8 +202,8 @@ function buildStatusEmbed(state: StoredDelivereeExtensionPageState | undefined) 
   }
 
   const title = state.bookingId
-    ? `[Jolyne] Deliveree #${state.bookingId}`
-    : "[Jolyne] Deliveree Status";
+    ? `Kyou Deliveree #${state.bookingId}`
+    : "Kyou Deliveree Status";
 
   if (stale) {
     fields.push({
@@ -249,3 +249,5 @@ export const command: SlashCommand = {
     });
   }
 };
+
+

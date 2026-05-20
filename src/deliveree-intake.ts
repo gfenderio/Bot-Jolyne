@@ -1,4 +1,4 @@
-import { env } from "./config/env.js";
+﻿import { env } from "./config/env.js";
 import {
   createDelivereeExtensionIntakeServer,
   DelivereeExtensionDiscordTestDisabledError,
@@ -63,7 +63,7 @@ class ConsoleDelivereeExtensionNotifier implements DelivereeExtensionNotificatio
       return;
     }
 
-    throw new DelivereeExtensionDiscordTestDisabledError("Intake-only runner tidak mengirim Discord test. Gunakan full Jolyne runtime untuk test Discord.");
+    throw new DelivereeExtensionDiscordTestDisabledError("Intake-only runner tidak mengirim Discord test. Gunakan runtime bot utama untuk test Discord.");
   }
 }
 
@@ -174,3 +174,4 @@ function shutdown() {
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+

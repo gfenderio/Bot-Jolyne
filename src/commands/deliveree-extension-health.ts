@@ -1,4 +1,4 @@
-import { EmbedBuilder, SlashCommandBuilder } from "discord.js";
+﻿import { EmbedBuilder, SlashCommandBuilder } from "discord.js";
 import type { SlashCommand } from "../types/command.js";
 import { env } from "../config/env.js";
 import { getDelivereeAccessDeniedReason } from "../security/discordAccess.js";
@@ -57,7 +57,7 @@ export const command: SlashCommand = {
       {
         inline: true,
         name: "Extension Enabled",
-        value: env.DELIVEREE_EXTENSION_ENABLED ? "✅ Yes" : "❌ No"
+        value: env.DELIVEREE_EXTENSION_ENABLED ? "âœ… Yes" : "âŒ No"
       }
     ];
 
@@ -83,7 +83,7 @@ export const command: SlashCommand = {
 
     const embed = new EmbedBuilder()
       .setColor(0x3498db)
-      .setTitle("[Jolyne] Deliveree Extension Health")
+      .setTitle("Kyou Deliveree Extension Health")
       .setDescription("Status extension device dan recovery cases.")
       .addFields(fields)
       .setTimestamp();
@@ -91,3 +91,4 @@ export const command: SlashCommand = {
     await interaction.editReply({ embeds: [embed] });
   }
 };
+

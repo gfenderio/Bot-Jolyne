@@ -1,4 +1,4 @@
-import assert from "node:assert";
+﻿import assert from "node:assert";
 import { mkdtemp, rm } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -10,6 +10,7 @@ import {
   createDelivereeExtensionIntakeServer,
   DelivereeExtensionDiscordTestDisabledError,
   DiscordRestDelivereeExtensionNotifier,
+  buildDelivereeExtensionNotificationEmbed,
   buildDelivereeExtensionManualComponents,
   getLatestDelivereeExtensionPageState,
   type StoredDelivereeExtensionPageState,
@@ -52,6 +53,7 @@ function buildPayload(overrides: Partial<DelivereeExtensionStatusPayload> = {}):
 async function withTestServer<T>(
   callback: (context: {
     notifier: MemoryExtensionNotifier;
+    getPath: (path: string, headers?: Record<string, string>) => Promise<Response>;
     pageStates: StoredDelivereeExtensionPageState[];
     post: (payload: unknown, headers?: Record<string, string>) => Promise<Response>;
     postPath: (path: string, payload?: unknown, headers?: Record<string, string>) => Promise<Response>;
@@ -94,10 +96,19 @@ async function withTestServer<T>(
     payload,
     headers
   );
+  const getPath = (path: string, headers: Record<string, string> = {}) => fetch(`${baseUrl}${path}`, {
+    headers: {
+      "Authorization": "Bearer test-token",
+      "X-Deliveree-Device-Id": "yugi-browser",
+      ...headers
+    },
+    method: "GET"
+  });
 
   try {
     return await callback({
       notifier,
+      getPath,
       pageStates,
       post,
       postPath,
@@ -154,6 +165,62 @@ test("Deliveree Extension Intake - health check validates local connection only"
     assert.match(body.serverTime, /^\d{4}-\d{2}-\d{2}T/);
     assert.strictEqual(notifier.notifications.length, 0);
     assert.strictEqual(notifier.connectionTests.length, 0);
+  });
+});
+
+test("Deliveree Extension Intake - extension command delivers Discord auto retry shutdown once", async () => {
+  await withTestServer(async ({ getPath, post, store }) => {
+    await post(buildPayload({
+      eventType: "driver_retry_clicked",
+      retryAttempt: 1,
+      status: "no_driver_found"
+    }));
+    await store.appendActionLog("19330506", {
+      action: "turn_off_auto_retry",
+      at: "2026-05-08T07:01:00.000Z",
+      nonce: "nonce-disable",
+      note: "Staff mematikan Auto Retry dari tombol Discord.",
+      userId: "419213146209779713"
+    });
+
+    const firstResponse = await getPath("/deliveree/extension/commands");
+    const firstBody = await firstResponse.json() as {
+      command: { bookingId: string; type: string } | null;
+      ok: boolean;
+    };
+
+    assert.strictEqual(firstResponse.status, 200);
+    assert.strictEqual(firstBody.ok, true);
+    assert.strictEqual(firstBody.command?.type, "disable_auto_retry");
+    assert.strictEqual(firstBody.command?.bookingId, "19330506");
+
+    const secondResponse = await getPath("/deliveree/extension/commands");
+    const secondBody = await secondResponse.json() as { command: unknown; ok: boolean };
+
+    assert.strictEqual(secondResponse.status, 200);
+    assert.strictEqual(secondBody.ok, true);
+    assert.strictEqual(secondBody.command, null);
+  });
+});
+
+test("Deliveree Extension Intake - retry clicked notifies every retry attempt", async () => {
+  await withTestServer(async ({ notifier, post, store }) => {
+    const response = await post(buildPayload({
+      eventType: "driver_retry_clicked",
+      retryAttempt: 1,
+      retryDelayUsed: 9,
+      retryDurationSeconds: 9,
+      status: "no_driver_found"
+    }));
+    const body = await response.json() as { action: string; deduped?: boolean; ok: boolean };
+    const recoveryCase = await store.getCase("19330506");
+
+    assert.strictEqual(response.status, 200);
+    assert.strictEqual(body.ok, true);
+    assert.strictEqual(body.action, "driver_retry_clicked");
+    assert.strictEqual(notifier.notifications.length, 1);
+    assert.strictEqual(notifier.notifications[0].action, "driver_retry_clicked");
+    assert.strictEqual(recoveryCase?.retryAttempt, 1);
   });
 });
 
@@ -224,7 +291,7 @@ test("Deliveree Extension Intake - Discord REST notifier sends embeds without ga
 });
 
 test("Deliveree Extension Intake - builds safe manual case controls only", () => {
-  const components = buildDelivereeExtensionManualComponents("19330506", "test-secret-for-buttons");
+  const components = buildDelivereeExtensionManualComponents("19330506");
   const json = JSON.stringify(components.map((component) => component.toJSON()));
 
   assert.match(json, /Turn Off Auto Retry/);
@@ -246,7 +313,7 @@ test("Deliveree Extension Intake - reports disabled Discord test explicitly", as
       },
       async sendConnectionTest() {
         throw new DelivereeExtensionDiscordTestDisabledError(
-          "Intake-only runner tidak mengirim Discord test. Gunakan full Jolyne runtime untuk test Discord."
+          "Intake-only runner tidak mengirim Discord test. Gunakan runtime bot utama untuk test Discord."
         );
       }
     },
@@ -403,6 +470,29 @@ test("Deliveree Extension Intake - accepts valid payload and dedupes repeated st
     assert.strictEqual(secondBody.action, "deduped");
     assert.strictEqual(secondBody.deduped, true);
     assert.strictEqual(notifier.notifications.length, 1);
+    assert.strictEqual(notifier.notifications[0].action, "order_created");
+  });
+});
+
+test("Deliveree Extension Intake - new order notification tells operator it will be monitored", async () => {
+  await withTestServer(async ({ notifier, post }) => {
+    await post(buildPayload({
+      eventType: "order_created",
+      jobNo: "JB-1234567",
+      pageUrl: "https://webapp.deliveree.com/bookings/19330506",
+      serviceType: "Pickup (1 Ton)",
+      status: "searching_driver",
+      totalDistanceKm: 14.8
+    }));
+
+    const embed = buildDelivereeExtensionNotificationEmbed(notifier.notifications[0]).toJSON();
+    const serialized = JSON.stringify(embed);
+
+    assert.match(serialized, /Akan kupantau ya/);
+    assert.match(serialized, /Pantauan/);
+    assert.match(serialized, /JB-1234567/);
+    assert.match(serialized, /14\.8 km/);
+    assert.match(serialized, /https:\/\/webapp\.deliveree\.com\/bookings\/19330506/);
   });
 });
 
@@ -474,3 +564,6 @@ test("Deliveree Extension Intake - ignores non-MVP statuses", async () => {
     assert.strictEqual(notifier.notifications.length, 0);
   });
 });
+
+
+

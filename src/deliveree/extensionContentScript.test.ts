@@ -1,10 +1,11 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 
 type ContentPageState = {
+  status?: string;
   pageKind?: string;
   pageUrl?: string;
 };
@@ -136,4 +137,39 @@ test("Deliveree extension content script still classifies root page as front pag
   assert.strictEqual(response.ok, true);
   assert.strictEqual(response.source, "front_page_detected");
   assert.strictEqual(response.pageState?.pageKind, "front_page");
+});
+
+test("Deliveree extension content script does not treat failed driver modal as driver assigned", () => {
+  const response = collectContentPageState({
+    bodyText: [
+      "#MOCK-7777",
+      "Tidak bisa menemukan driver",
+      "Maaf, saat ini seluruh pengemudi kami sedang sibuk melayani pemesanan lain.",
+      "Silakan coba memesan kembali.",
+      "Jenis Layanan Pickup (1 Ton)",
+      "Coba Pesan Kembali"
+    ].join("\n"),
+    pathname: "/bookings/7777"
+  });
+
+  assert.strictEqual(response.ok, true);
+  assert.strictEqual(response.pageState?.status, "no_driver_found");
+});
+
+test("Deliveree extension content script treats driver evidence as assigned even if old failed text remains", () => {
+  const response = collectContentPageState({
+    bodyText: [
+      "#MOCK-7777",
+      "Tidak bisa menemukan driver",
+      "Driver Ditemukan!",
+      "Pengemudi: Budi Santoso",
+      "Kendaraan: Pickup Mitsubishi L300",
+      "Plat Nomor: B 9876 CKY",
+      "Jenis Layanan Pickup (1 Ton)"
+    ].join("\n"),
+    pathname: "/bookings/7777"
+  });
+
+  assert.strictEqual(response.ok, true);
+  assert.strictEqual(response.pageState?.status, "driver_assigned");
 });

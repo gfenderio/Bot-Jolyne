@@ -1,4 +1,4 @@
-export const DELIVEREE_WEB_STATUSES = [
+﻿export const DELIVEREE_WEB_STATUSES = [
   "cancelled",
   "captcha_or_security_challenge",
   "completed",
@@ -191,7 +191,8 @@ export function classifyDelivereePageText(rawText: string): DelivereePageClassif
     finalActionVisible,
     recommendedAction: "Kirim screenshot untuk review manual sebelum action apa pun.",
     status: "unknown",
-    summary: "Jolyne belum mengenali state halaman Deliveree."
+    summary: "Sistem belum mengenali state halaman Deliveree."
   };
 }
+
 

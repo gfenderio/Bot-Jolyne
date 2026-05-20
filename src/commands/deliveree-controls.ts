@@ -1,7 +1,6 @@
-import type { ButtonInteraction } from "discord.js";
+﻿import type { ButtonInteraction } from "discord.js";
 import { env } from "../config/env.js";
 import { getDelivereeAccessDeniedReason } from "../security/discordAccess.js";
-import { delivereeButtonReplayGuard } from "../security/buttonReplayGuard.js";
 import { parseSignedDelivereeButtonId } from "../security/signedButton.js";
 import { createDelivereeCaseStore, createDelivereeWebClient } from "../deliveree/liveRuntime.js";
 import { getDelivereeRuntimeMode } from "../deliveree/runtimeControl.js";
@@ -15,14 +14,6 @@ export async function handleDelivereeButtonInteraction(interaction: ButtonIntera
     return false;
   }
 
-  if (!env.DELIVEREE_BUTTON_SIGNING_SECRET) {
-    await interaction.reply({
-      content: "Deliveree button signing secret belum dikonfigurasi.",
-      flags: ["Ephemeral"]
-    });
-    return true;
-  }
-
   const deniedReason = getDelivereeAccessDeniedReason(interaction);
 
   if (deniedReason) {
@@ -33,16 +24,26 @@ export async function handleDelivereeButtonInteraction(interaction: ButtonIntera
     return true;
   }
 
-  const parsed = parseSignedDelivereeButtonId(interaction.customId, env.DELIVEREE_BUTTON_SIGNING_SECRET);
+  const staticTurnOffMatch = /^deliv:turn_off_auto_retry:([^:]+)$/.exec(interaction.customId);
+  const parsed = staticTurnOffMatch
+    ? {
+        action: "turn_off_auto_retry" as const,
+        caseId: staticTurnOffMatch[1],
+        expiresAt: Math.floor((Date.now() + 60_000) / 1000),
+        nonce: `turn-off-auto-retry-${Date.now()}`
+      }
+    : parseSignedDelivereeButtonId(
+        interaction.customId,
+        env.DELIVEREE_BUTTON_SIGNING_SECRET || "kyou-deliveree-local-extension-button-v1"
+      );
 
-  if (!parsed || !delivereeButtonReplayGuard.consume(parsed)) {
+  if (!parsed) {
     await interaction.reply({
-      content: "Action Deliveree ditolak karena button invalid, expired, atau sudah pernah dipakai.",
+      content: "Action Deliveree ditolak karena button invalid atau expired.",
       flags: ["Ephemeral"]
     });
     return true;
   }
-
   const store = createDelivereeCaseStore();
   const recoveryCase = await store.getCase(parsed.caseId);
 
@@ -109,6 +110,20 @@ export async function handleDelivereeButtonInteraction(interaction: ButtonIntera
     return true;
   }
 
+  if (parsed.action === "turn_off_auto_retry") {
+    await store.appendActionLog(parsed.caseId, {
+      action: "turn_off_auto_retry",
+      nonce: parsed.nonce,
+      note: "Staff mematikan Auto Retry dari tombol Discord.",
+      userId: interaction.user.id
+    });
+    await interaction.reply({
+      content: `Auto Retry untuk Deliveree #${recoveryCase.bookingId} akan dimatikan saat extension ${recoveryCase.deviceId || "terkait"} tersambung ke local intake.`,
+      flags: ["Ephemeral"]
+    });
+    return true;
+  }
+
   await interaction.deferReply({
     flags: ["Ephemeral"]
   });
@@ -141,7 +156,7 @@ export async function handleDelivereeButtonInteraction(interaction: ButtonIntera
   }
 
   if (getDelivereeRuntimeMode() !== "prepare_reorder") {
-    await interaction.editReply("Prepare reorder masih dikunci. Set `DELIVEREE_ACTION_MODE=prepare_reorder` setelah read-only monitor terbukti aman.");
+    await interaction.editReply("Prepare reorder masih dikunci. Set `DELIVEREE_ACTION_MODE=prepare_reorder` hanya jika workflow ini sudah disetujui untuk dipakai.");
     return true;
   }
 
@@ -163,3 +178,5 @@ export async function handleDelivereeButtonInteraction(interaction: ButtonIntera
   ].join("\n"));
   return true;
 }
+
+

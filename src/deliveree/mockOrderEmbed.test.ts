@@ -1,4 +1,4 @@
-import assert from "node:assert";
+﻿import assert from "node:assert";
 import { test } from "node:test";
 import { buildMockOrderMessage } from "./mockOrderEmbed.js";
 import type { DelivereeOrderSnapshot } from "./types.js";
@@ -29,7 +29,7 @@ test("Mock Order Embed - includes recovery controls", () => {
   });
   const embed = message.embeds[0].toJSON();
 
-  assert.strictEqual(embed.title, "[Jolyne] Deliveree Mock Order");
+  assert.strictEqual(embed.title, "Kyou Deliveree Mock Order");
   assert.match(JSON.stringify(embed), /Outcome Simulasi/);
   assert.deepStrictEqual(getButtonLabels(message), ["Refresh Status", "Reorder", "Cancel"]);
 });
@@ -50,3 +50,4 @@ test("Mock Order Embed - disables controls when completed", () => {
   assert.strictEqual(buttons[1].disabled, true);
   assert.strictEqual(buttons[2].disabled, true);
 });
+

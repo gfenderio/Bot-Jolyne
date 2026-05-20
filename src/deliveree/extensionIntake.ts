@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+﻿import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -9,7 +9,6 @@ import {
 } from "discord.js";
 import { ZodError } from "zod";
 import { env } from "../config/env.js";
-import { createSignedDelivereeButtonId } from "../security/signedButton.js";
 import { createDelivereeCaseStore } from "./liveRuntime.js";
 import type { DelivereeRecoveryCase } from "./caseStore.js";
 import {
@@ -282,6 +281,52 @@ function assertAuthorized(request: IncomingMessage, options: DelivereeExtensionI
   return deviceId;
 }
 
+async function handleDelivereeExtensionCommands(
+  deviceId: string,
+  store: DelivereeExtensionCaseStore
+) {
+  const cases = await store.listCases();
+  const candidates = cases
+    .filter((recoveryCase) => recoveryCase.deviceId === deviceId)
+    .flatMap((recoveryCase) => recoveryCase.actionLog
+      .filter((entry) => entry.action === "turn_off_auto_retry" && entry.nonce)
+      .map((entry) => ({ entry, recoveryCase })))
+    .sort((left, right) => right.entry.at.localeCompare(left.entry.at));
+
+  for (const candidate of candidates) {
+    const consumed = candidate.recoveryCase.actionLog.some((entry) => (
+      entry.action === "auto_retry_disable_command_consumed"
+      && entry.nonce === candidate.entry.nonce
+    ));
+
+    if (consumed) {
+      continue;
+    }
+
+    await store.appendActionLog(candidate.recoveryCase.caseId, {
+      action: "auto_retry_disable_command_consumed",
+      nonce: candidate.entry.nonce,
+      note: `Disable Auto Retry command delivered to ${deviceId}.`
+    });
+
+    return {
+      command: {
+        bookingId: candidate.recoveryCase.bookingId,
+        caseId: candidate.recoveryCase.caseId,
+        issuedAt: candidate.entry.at,
+        reason: "Auto Retry dimatikan dari Discord.",
+        type: "disable_auto_retry"
+      },
+      ok: true
+    };
+  }
+
+  return {
+    command: null,
+    ok: true
+  };
+}
+
 function getMvpEventType(payload: DelivereeExtensionStatusPayload): DelivereeExtensionEventType | undefined {
   if (payload.eventType) {
     return payload.eventType;
@@ -292,7 +337,7 @@ function getMvpEventType(payload: DelivereeExtensionStatusPayload): DelivereeExt
   }
 
   if (payload.status === "driver_assigned") {
-    return "driver_assigned_after_retry";
+    return "order_created";
   }
 
   if (
@@ -516,13 +561,14 @@ export async function handleDelivereeExtensionHttpRequest(
 
   const pathname = getRequestPathname(request);
   const validPaths = [
+    "/deliveree/extension/commands",
     "/deliveree/extension/health",
     "/deliveree/extension/page-state",
     "/deliveree/extension/status",
     "/deliveree/extension/test-discord"
   ];
 
-  if (request.method !== "POST" || !validPaths.includes(pathname)) {
+  if (!validPaths.includes(pathname) || !["GET", "POST"].includes(request.method || "")) {
     sendJson(response, 404, {
       error: "not_found",
       ok: false
@@ -536,6 +582,27 @@ export async function handleDelivereeExtensionHttpRequest(
     if (!rateLimiter.check(deviceId)) {
       sendJson(response, 429, {
         error: "rate_limit_exceeded",
+        ok: false
+      });
+      return;
+    }
+
+    if (pathname === "/deliveree/extension/commands") {
+      if (request.method !== "GET") {
+        sendJson(response, 405, {
+          error: "method_not_allowed",
+          ok: false
+        });
+        return;
+      }
+
+      sendJson(response, 200, await handleDelivereeExtensionCommands(deviceId, options.store));
+      return;
+    }
+
+    if (request.method !== "POST") {
+      sendJson(response, 405, {
+        error: "method_not_allowed",
         ok: false
       });
       return;
@@ -608,11 +675,11 @@ export function createDelivereeExtensionIntakeServer(options: DelivereeExtension
 function describeAction(action: DelivereeExtensionNotification["action"]) {
   const descriptions: Record<DelivereeExtensionNotification["action"], string> = {
     driver_assigned_after_retry: "Auto Retry berhasil! Driver ditemukan.",
-    driver_retry_clicked: "Auto Retry sedang menekan tombol 'Coba Pesan Kembali'.",
-    driver_retry_detected: "Deliveree kehabisan driver. Jolyne siap melakukan Auto Retry jika aktif.",
+    driver_retry_clicked: "Driver masih belum ditemukan. Sudah kucoba pesan kembali, akan kulanjutkan pantau retry berikutnya.",
+    driver_retry_detected: "Deliveree kehabisan driver. Auto Retry siap berjalan jika aktif.",
     driver_retry_page_changed: "Halaman berubah dari modal Retry. Auto Retry dipause sementara.",
     driver_retry_paused: "Auto Retry dipause. Cek status di popup atau halaman.",
-    order_created: "Order Deliveree baru terdeteksi oleh extension lokal.",
+    order_created: "Order baru sudah terbaca. Akan kupantau ya sampai statusnya aman atau butuh tindakan.",
     order_failed: "Order Deliveree gagal. Perlu dicek manual oleh tim."
   };
 
@@ -636,22 +703,11 @@ function fieldValue(value: string | number | undefined) {
   return String(value);
 }
 
-export function buildDelivereeExtensionManualComponents(
-  caseId: string,
-  secret = env.DELIVEREE_BUTTON_SIGNING_SECRET
-) {
-  if (!secret) {
-    return [];
-  }
-
+export function buildDelivereeExtensionManualComponents(caseId: string) {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
-        .setCustomId(createSignedDelivereeButtonId({
-          action: "turn_off_auto_retry",
-          caseId,
-          secret
-        }))
+        .setCustomId(`deliv:turn_off_auto_retry:${caseId}`)
         .setLabel("Turn Off Auto Retry")
         .setStyle(ButtonStyle.Danger)
     )
@@ -660,6 +716,11 @@ export function buildDelivereeExtensionManualComponents(
 
 export function buildDelivereeExtensionNotificationEmbed(notification: DelivereeExtensionNotification) {
   const fields = [
+    {
+      inline: true,
+      name: "Booking",
+      value: `#${notification.payload.bookingId}`
+    },
     {
       inline: true,
       name: "Event",
@@ -731,6 +792,22 @@ export function buildDelivereeExtensionNotificationEmbed(notification: Deliveree
     });
   }
 
+  if (notification.action === "order_created") {
+    fields.push({
+      inline: false,
+      name: "Pantauan",
+      value: "Extension lokal akan lanjut kirim heartbeat. Kalau driver gagal ditemukan, status berubah, atau butuh retry, Discord akan dikabari lagi."
+    });
+  }
+
+  if (notification.payload.pageUrl) {
+    fields.push({
+      inline: false,
+      name: "Halaman",
+      value: notification.payload.pageUrl
+    });
+  }
+
   if (notification.payload.failureReason && !notification.action.startsWith("driver_retry_")) {
     fields.push({
       inline: false,
@@ -788,11 +865,11 @@ export function buildDelivereeExtensionNotificationEmbed(notification: Deliveree
 
   return new EmbedBuilder()
     .setColor(statusColor(notification))
-    .setTitle(`🚨 Kyou Deliveree: Order Alert #${notification.payload.bookingId}`)
+    .setTitle(`ðŸš¨ Kyou Deliveree: Order Alert #${notification.payload.bookingId}`)
     .setDescription(describeAction(notification.action))
     .addFields(fields)
     .setFooter({
-      text: "Source: local Chrome extension, read-only"
+      text: "Source: Kyou Deliveree Partner"
     })
     .setTimestamp(new Date(notification.payload.observedAt));
 }
@@ -807,7 +884,7 @@ export function buildDelivereeExtensionNotificationMessage(notification: Deliver
 export function buildDelivereeExtensionConnectionTestEmbed(notification: DelivereeExtensionConnectionTestNotification) {
   return new EmbedBuilder()
     .setColor(0x27ae60)
-    .setTitle("⚙️ Kyou Deliveree Extension Test OK")
+    .setTitle("âš™ï¸ Kyou Deliveree Extension Test OK")
     .setDescription("Chrome extension berhasil terhubung ke Kyou Deliveree dan Discord.")
     .addFields([
       {
@@ -818,7 +895,7 @@ export function buildDelivereeExtensionConnectionTestEmbed(notification: Deliver
       {
         inline: true,
         name: "Mode",
-        value: "`read-only local extension`"
+        value: "`Kyou Deliveree Partner`"
       }
     ])
     .setFooter({
@@ -949,3 +1026,7 @@ function closeServer(server: Server) {
     }
   });
 }
+
+
+
+

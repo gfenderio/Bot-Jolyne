@@ -1,4 +1,4 @@
-import {
+﻿import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
@@ -15,7 +15,7 @@ import type { DelivereeWebInspection } from "./webClient.js";
 function buildDelivereeEmbed(recoveryCase: DelivereeRecoveryCase, inspection: DelivereeWebInspection) {
   return new EmbedBuilder()
     .setColor(inspection.classification.status === "unknown" ? 0xf2c94c : 0x2f80ed)
-    .setTitle(`[Jolyne] Deliveree #${recoveryCase.bookingId}`)
+    .setTitle(`Kyou Deliveree #${recoveryCase.bookingId}`)
     .setDescription(inspection.classification.summary)
     .addFields(
       {
@@ -36,7 +36,7 @@ function buildDelivereeEmbed(recoveryCase: DelivereeRecoveryCase, inspection: De
       {
         name: "Safety",
         value: inspection.classification.finalActionVisible
-          ? "Final action terlihat. Jolyne tidak akan klik tombol final."
+          ? "Final action terlihat. Sistem tidak akan klik tombol final."
           : "Tidak ada final action yang ditandai classifier.",
         inline: false
       },
@@ -189,4 +189,6 @@ export function startDelivereeWebMonitor(client: Client<true>) {
     clearInterval(interval);
   };
 }
+
+
 

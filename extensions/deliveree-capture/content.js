@@ -1,4 +1,4 @@
-(() => {
+﻿(() => {
 if (window.__KYOU_DELIVEREE_CAPTURE_LOADED__) {
   return;
 }
@@ -16,21 +16,50 @@ let debounceTimer;
 let heartbeatTimer;
 let retryTimer;
 let mainObserver = null;
+let runtimeMessageListener = null;
+let storageChangeListener = null;
+let extensionContextDead = false;
+
+function getChromeRuntime() {
+  try {
+    return typeof chrome !== "undefined" ? chrome.runtime : null;
+  } catch {
+    return null;
+  }
+}
+
+function getChromeStorageLocal() {
+  try {
+    return typeof chrome !== "undefined" ? chrome.storage?.local : null;
+  } catch {
+    return null;
+  }
+}
+
+function getChromeStorageChanges() {
+  try {
+    return typeof chrome !== "undefined" ? chrome.storage?.onChanged : null;
+  } catch {
+    return null;
+  }
+}
 
 function isContextInvalidated() {
+  if (extensionContextDead) {
+    return true;
+  }
   try {
-    if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.id) {
-      return true;
-    }
-    chrome.runtime.getURL("");
-    return false;
+    const runtime = getChromeRuntime();
+    return !runtime || !runtime.id;
   } catch {
+    extensionContextDead = true;
     return true;
   }
 }
 
 function checkContextAndCleanup() {
   if (isContextInvalidated()) {
+    extensionContextDead = true;
     if (heartbeatTimer) {
       window.clearInterval(heartbeatTimer);
       heartbeatTimer = null;
@@ -47,6 +76,24 @@ function checkContextAndCleanup() {
       mainObserver.disconnect();
       mainObserver = null;
     }
+    try {
+      const runtime = getChromeRuntime();
+      if (runtimeMessageListener && runtime?.onMessage?.removeListener) {
+        runtime.onMessage.removeListener(runtimeMessageListener);
+      }
+    } catch {
+      // Extension context is already gone.
+    }
+    runtimeMessageListener = null;
+    try {
+      const storageChanges = getChromeStorageChanges();
+      if (storageChangeListener && storageChanges?.removeListener) {
+        storageChanges.removeListener(storageChangeListener);
+      }
+    } catch {
+      // Extension context is already gone.
+    }
+    storageChangeListener = null;
     return true;
   }
   return false;
@@ -176,6 +223,12 @@ function detectStatus() {
     return "login_required";
   }
 
+  if (
+    includesAny(bodyText, ["driver", "pengemudi"])
+    && includesAny(bodyText, ["plat", "nomor polisi", "kendaraan", "dalam perjalanan", "menuju penjemputan", "arrived at pickup"])
+  ) {
+    return "driver_assigned";
+  }
   if (bodyText.includes("tidak bisa menemukan driver")) {
     return "no_driver_found";
   }
@@ -200,12 +253,6 @@ function detectStatus() {
     return "searching_driver";
   }
 
-  if (
-    includesAny(bodyText, ["driver", "pengemudi"])
-    && includesAny(bodyText, ["plat", "kendaraan", "dalam perjalanan", "arrived", "pickup"])
-  ) {
-    return "driver_assigned";
-  }
 
   if (includesAny(bodyText, ["1. rute", "2. layanan", "3. rincian", "pesan pengemudi"])) {
     return "draft_prepared";
@@ -264,7 +311,7 @@ function firstMatch(text, patterns) {
 
 function findDriverName(bodyText) {
   return firstMatch(bodyText, [
-    /\bPengemudi\s+(.+?)\s+(?:star|★|Pickup|Small Pickup|Mobil|Van|Suzuki|Daihatsu|Toyota)\b/i,
+    /\bPengemudi\s+(.+?)\s+(?:star|â˜…|Pickup|Small Pickup|Mobil|Van|Suzuki|Daihatsu|Toyota)\b/i,
     /\bYour Driver\s+(.+?)\s+(?:Small Pickup|Pickup|Mobil|Van)\b/i,
     /\bPengemudi:\s*(.+?)\s*Kendaraan:\b/i
   ])?.replace(/^Pengemudi\s+/i, "");
@@ -440,14 +487,21 @@ function fingerprintPageState(pageState) {
 }
 
 function safeSendMessage(message) {
-  if (checkContextAndCleanup()) return;
+  if (extensionContextDead || checkContextAndCleanup()) return;
   try {
-    const promise = chrome.runtime.sendMessage(message);
-    if (promise && typeof promise.catch === "function") {
-      promise.catch(() => {});
-    }
+    const runtime = getChromeRuntime();
+    if (!runtime?.sendMessage) return;
+    runtime.sendMessage(message, () => {
+      try {
+        if (runtime.lastError) {
+          // Consume Chrome runtime error so it does not surface as an unchecked callback error.
+        }
+      } catch {
+        extensionContextDead = true;
+      }
+    });
   } catch {
-    // Context invalidated, swallow silently
+    extensionContextDead = true;
   }
 }
 
@@ -543,7 +597,7 @@ function sendCurrentStatus(options = {}) {
 
   const fingerprint = fingerprintPayload(payload);
 
-  if (fingerprint === lastFingerprint) {
+  if (!options.forceStatus && fingerprint === lastFingerprint) {
     return;
   }
 
@@ -569,6 +623,30 @@ function sendCurrentStatus(options = {}) {
   });
 }
 
+
+function sendForcedCurrentStatus(eventType, statusOverride) {
+  const payload = buildPayload();
+  if (!payload) return;
+
+  if (statusOverride) {
+    payload.status = statusOverride;
+  }
+
+  if (eventType) {
+    payload.eventType = eventType;
+  }
+
+  if (eventType === "driver_assigned_after_retry") {
+    payload.retryAttempt = retryAttempt;
+    payload.retryTotalDurationSeconds = retryStartedAt
+      ? Math.floor((Date.now() - retryStartedAt.getTime()) / 1000)
+      : 0;
+  }
+
+  lastFingerprint = "";
+  sendPageState(buildPageStateFromPayload(payload), { force: true });
+  safeSendMessage({ payload, type: "DELIVEREE_STATUS" });
+}
 function collectCurrentPageState() {
   try {
     const payload = buildPayload();
@@ -643,6 +721,10 @@ function findRetryButton() {
 
 function processAutoRetry(status) {
   if (!autoRetryEnabled) {
+    if (retryTimer) {
+      window.clearTimeout(retryTimer);
+      retryTimer = null;
+    }
     if (retryStartedAt) {
       stopRetry("Auto Retry dinonaktifkan", "driver_retry_paused");
     }
@@ -729,18 +811,34 @@ function startObserver() {
 
   if (checkContextAndCleanup()) return;
 
-  globalThis.chrome?.storage?.local?.get({ autoRetry: false }, (data) => {
-    if (checkContextAndCleanup()) return;
-    autoRetryEnabled = Boolean(data.autoRetry);
-  });
+  const storageLocal = getChromeStorageLocal();
+  if (storageLocal?.get) {
+    try {
+      storageLocal.get({ autoRetry: false }, (data) => {
+        if (checkContextAndCleanup()) return;
+        autoRetryEnabled = Boolean(data.autoRetry);
+      });
+    } catch {
+      checkContextAndCleanup();
+    }
+  }
 
-  globalThis.chrome?.storage?.onChanged?.addListener((changes, area) => {
+  const storageChanges = getChromeStorageChanges();
+  storageChangeListener = (changes, area) => {
     if (checkContextAndCleanup()) return;
     if (area === "local" && changes.autoRetry) {
       autoRetryEnabled = Boolean(changes.autoRetry.newValue);
       processAutoRetry(detectStatus());
     }
-  });
+  };
+  if (storageChanges?.addListener) {
+    try {
+      storageChanges.addListener(storageChangeListener);
+    } catch {
+      storageChangeListener = null;
+      checkContextAndCleanup();
+    }
+  }
 
   scheduleSend();
   window.clearInterval(heartbeatTimer);
@@ -772,15 +870,33 @@ if (document.body) {
   });
 }
 
-if (typeof chrome !== "undefined" && chrome?.runtime?.onMessage) {
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+const runtime = getChromeRuntime();
+if (runtime?.onMessage?.addListener) {
+  runtimeMessageListener = (message, _sender, sendResponse) => {
     if (checkContextAndCleanup()) return;
     if (message?.type === "DELIVEREE_COLLECT_PAGE_STATE") {
       sendResponse(collectCurrentPageState());
       return true;
     }
 
+    if (message?.type === "DELIVEREE_DISABLE_AUTO_RETRY") {
+      autoRetryEnabled = false;
+      if (retryTimer) {
+        window.clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      if (retryStartedAt) {
+        stopRetry(message.reason || "Auto Retry dimatikan dari Discord", "driver_retry_paused");
+      }
+      sendResponse({ ok: true });
+      return true;
+    }
+
   if (message?.type === "DELIVEREE_SIMULATE_MODAL") {
+    lastFingerprint = "";
+    lastPageStateFingerprint = "";
+    lastLogFingerprint = "";
+
     // Clean up any existing simulated modal first
     const existing = document.getElementById("simulated-driver-modal-overlay");
     if (existing) existing.remove();
@@ -858,67 +974,114 @@ if (typeof chrome !== "undefined" && chrome?.runtime?.onMessage) {
     const actions = document.getElementById("simulated-modal-actions");
     const retryBtn = document.getElementById("simulated-retry-btn");
     const closeBtn = document.getElementById("simulated-close-btn");
+    const searchDurationMs = 60000;
+    const autoRetryDelayMs = 1000;
 
     const closeHandler = () => overlay.remove();
     closeBtn.addEventListener("click", closeHandler);
 
-    retryBtn.addEventListener("click", () => {
-      // Transition to Searching Driver state
+    function renderSearching(messageText) {
       actions.style.display = "none";
-
       iconContainer.style.background = "#f0fdf4";
       iconContainer.innerHTML = `
         <div style="width: 28px; height: 28px; border: 3px solid #f3f3f3; border-top: 3px solid #16a34a; border-radius: 50%; animation: spin 1s linear infinite;"></div>
       `;
-      title.textContent = "Mencari Driver Kembali...";
-      desc.textContent = "Sedang menghubungi pengemudi di sekitar Anda secara otomatis...";
+      title.textContent = "Mencari Driver...";
+      desc.textContent = messageText || "Sedang mencari pengemudi di sekitar Anda...";
+    }
 
+    function renderNoDriver() {
+      iconContainer.style.background = "#fee2e2";
+      iconContainer.innerHTML = `
+        <svg style="width: 28px; height: 28px; color: #ef4444;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+      `;
+      title.textContent = "Tidak bisa menemukan driver";
+      desc.textContent = "Maaf, saat ini seluruh pengemudi kami sedang sibuk melayani pemesanan lain. Silakan coba memesan kembali.";
+      actions.style.display = "flex";
+      retryBtn.disabled = false;
+      closeBtn.disabled = false;
+      sendForcedCurrentStatus("driver_retry_detected", "no_driver_found");
 
+      if (autoRetryEnabled) {
+        window.setTimeout(() => {
+          if (!document.getElementById("simulated-driver-modal-overlay")) return;
+          retryBtn.click();
+        }, autoRetryDelayMs);
+      }
+    }
 
-      // Resolve scenario after 3 seconds
+    function renderDriverFound() {
+      actions.style.display = "none";
+      iconContainer.style.background = "#dcfce7";
+      iconContainer.innerHTML = `
+        <svg style="width: 28px; height: 28px; color: #16a34a;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      `;
+      title.textContent = "Driver Ditemukan!";
+      desc.innerHTML = `
+        <strong>Pengemudi:</strong> Budi Santoso<br>
+        <strong>Kendaraan:</strong> Pickup Mitsubishi L300<br>
+        <strong>Plat Nomor:</strong> B 9876 CKY
+      `;
+      sendForcedCurrentStatus("driver_assigned_after_retry", "driver_assigned");
+      window.setTimeout(() => overlay.remove(), 10000);
+    }
+
+    function startSearch(afterSearch) {
+      renderSearching("Sedang mencari pengemudi di sekitar Anda...");
+      sendForcedCurrentStatus("order_created", "searching_driver");
       window.setTimeout(() => {
         if (!document.getElementById("simulated-driver-modal-overlay")) return;
+        afterSearch();
+      }, searchDurationMs);
+    }
 
-        if (message.scenario === "fail") {
-          iconContainer.style.background = "#fee2e2";
-          iconContainer.innerHTML = `
-            <svg style="width: 28px; height: 28px; color: #ef4444;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-          `;
-          title.textContent = "Tidak bisa menemukan driver";
-          desc.textContent = "Maaf, saat ini seluruh pengemudi kami sedang sibuk melayani pemesanan lain. Silakan coba memesan kembali.";
-          
-          actions.style.display = "flex";
-          retryBtn.disabled = false;
-          closeBtn.disabled = false;
-        } else {
-          iconContainer.style.background = "#dcfce7";
-          iconContainer.innerHTML = `
-            <svg style="width: 28px; height: 28px; color: #16a34a;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          `;
-          title.textContent = "Driver Ditemukan!";
-          desc.innerHTML = `
-            <strong>Pengemudi:</strong> Budi Santoso<br>
-            <strong>Kendaraan:</strong> Pickup Mitsubishi L300<br>
-            <strong>Plat Nomor:</strong> B 9876 CKY
-          `;
-
-          // Wait another 3 seconds, then close the modal
-          window.setTimeout(() => {
-            overlay.remove();
-          }, 3000);
+    retryBtn.addEventListener("click", () => {
+      retryAttempt += 1;
+      retryStartedAt = retryStartedAt || new Date();
+      sendForcedCurrentStatus("driver_retry_clicked", "no_driver_found");
+      startSearch(() => {
+        if (message.scenario === "success" && retryAttempt >= 1) {
+          renderDriverFound();
+          return;
         }
-      }, 3000);
+
+        renderNoDriver();
+      });
     });
+
+    retryAttempt = 0;
+    retryStartedAt = new Date();
+    retryBookingId = "MOCK-7777";
+    isRetryPaused = false;
+    startSearch(renderNoDriver);
 
     sendResponse({ ok: true });
     return true;
   }
 
   return false;
-});
+  };
+
+  try {
+    runtime.onMessage.addListener(runtimeMessageListener);
+  } catch {
+    runtimeMessageListener = null;
+    checkContextAndCleanup();
+  }
 }
 })();
+
+
+
+
+
+
+
+
+
+
+

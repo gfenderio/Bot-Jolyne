@@ -1,4 +1,4 @@
-import { EmbedBuilder, SlashCommandBuilder } from "discord.js";
+﻿import { EmbedBuilder, SlashCommandBuilder } from "discord.js";
 import { createDelivereeCaseStore } from "../deliveree/liveRuntime.js";
 import { getDelivereeAccessDeniedReason } from "../security/discordAccess.js";
 import type { SlashCommand } from "../types/command.js";
@@ -73,7 +73,7 @@ export const command: SlashCommand = {
 
     const embed = new EmbedBuilder()
       .setColor(0x2f80ed)
-      .setTitle("[Jolyne] Deliveree Cases")
+      .setTitle("Kyou Deliveree Cases")
       .setDescription(filteredCases.length
         ? `Menampilkan ${filteredCases.length} case terbaru. Gunakan \`/deliveree-case booking_id:<id>\` untuk detail.`
         : `Tidak ada Deliveree case dengan filter \`${state}\`.`)
@@ -110,3 +110,4 @@ export const command: SlashCommand = {
     });
   }
 };
+

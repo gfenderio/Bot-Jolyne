@@ -1,4 +1,4 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from "discord.js";
+﻿import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from "discord.js";
 import { getMockOrderOutcome } from "./mockOrderGenerator.js";
 import type { CreatedMockOrder } from "./mockOrderGenerator.js";
 import { mapDelivereeStatusToLabel } from "./statusMapper.js";
@@ -188,7 +188,7 @@ export function buildMockOrderEmbed(state: MockOrderViewState) {
   ].join("\n");
   const embed = new EmbedBuilder()
     .setColor(getStatusColor(status, state.decision))
-    .setTitle("[Jolyne] Deliveree Mock Order")
+    .setTitle("Kyou Deliveree Mock Order")
     .setDescription(buildStatusSummary(state))
     .addFields(
       {
@@ -212,7 +212,7 @@ export function buildMockOrderEmbed(state: MockOrderViewState) {
         inline: false
       }
     )
-    .setFooter({ text: "Jolyne Deliveree Recovery" })
+    .setFooter({ text: "Kyou Deliveree Recovery" })
     .setTimestamp();
 
   if (state.decision) {
@@ -258,3 +258,5 @@ export function buildMockOrderMessage(state: MockOrderViewState, options: MockOr
     embeds: [buildMockOrderEmbed(state)]
   };
 }
+
+
