@@ -1,4 +1,4 @@
-(() => {
+﻿(() => {
 if (window.__KYOU_DELIVEREE_CAPTURE_LOADED__) {
   return;
 }
@@ -152,6 +152,16 @@ function parseInteger(value) {
   return parsed === undefined ? undefined : Math.trunc(parsed);
 }
 
+function truncateText(value, maxLength) {
+  const text = optionalString(value);
+
+  if (!text || text.length <= maxLength) {
+    return text;
+  }
+
+  return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
 function findActiveHomepageOrder() {
   const orderItems = Array.from(document.querySelectorAll(".Dropdown-Devina-Group"));
   const order = orderItems.find((item) => /Pemesanan\s+#\w+/i.test(textOf(item)));
@@ -182,7 +192,7 @@ function findActiveHomepageOrder() {
     address,
     bookingId,
     status,
-    statusText: statusText || undefined,
+    statusText: truncateText(statusText, 100),
     timeLeft
   };
 }
@@ -362,7 +372,7 @@ function firstMatch(text, patterns) {
 
 function findDriverName(bodyText) {
   return firstMatch(bodyText, [
-    /\bPengemudi\s+(.+?)\s+(?:star|â˜…|Pickup|Small Pickup|Mobil|Van|Suzuki|Daihatsu|Toyota)\b/i,
+    /\bPengemudi\s+(.+?)\s+(?:star|Ã¢Ëœâ€¦|Pickup|Small Pickup|Mobil|Van|Suzuki|Daihatsu|Toyota)\b/i,
     /\bYour Driver\s+(.+?)\s+(?:Small Pickup|Pickup|Mobil|Van)\b/i,
     /\bPengemudi:\s*(.+?)\s*Kendaraan:\b/i
   ])?.replace(/^Pengemudi\s+/i, "");
@@ -410,7 +420,7 @@ function buildPayload() {
     return {
       bookingId: homepageOrder.bookingId,
       eventType: "order_created",
-      failureReason: homepageOrder.address ? `Alamat aktif: ${homepageOrder.address}` : undefined,
+      failureReason: homepageOrder.address ? truncateText(`Alamat aktif: ${homepageOrder.address}`, 160) : undefined,
       observedAt: new Date().toISOString(),
       pageUrl: new window.URL(`/bookings/${homepageOrder.bookingId}`, window.location.href).toString(),
       schemaVersion: SCHEMA_VERSION,
@@ -1155,3 +1165,4 @@ if (runtime?.onMessage?.addListener) {
   }
 }
 })();
+
