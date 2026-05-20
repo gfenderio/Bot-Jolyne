@@ -1,8 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "Jolyne Deliveree Capture",
-  "version": "0.1.0",
-  "description": "Read-only Deliveree order detector for local Jolyne intake.",
+  "name": "Kyou Deliveree Partner",
+  "version": "0.2.0",
+  "description": "Pemantauan & Auto Retry Driver Deliveree.",
+  "icons": {
+    "16": "icons/scanner-partner-16.png",
+    "32": "icons/scanner-partner-32.png",
+    "48": "icons/scanner-partner-48.png",
+    "128": "icons/scanner-partner-128.png"
+  },
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": [
     "https://webapp.deliveree.com/*",
@@ -21,6 +27,12 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Jolyne Deliveree"
+    "default_title": "Kyou Deliveree Partner",
+    "default_icon": {
+      "16": "icons/scanner-partner-16.png",
+      "32": "icons/scanner-partner-32.png",
+      "48": "icons/scanner-partner-48.png",
+      "128": "icons/scanner-partner-128.png"
+    }
   }
 }

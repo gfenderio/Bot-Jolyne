@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Kyou Scanner Partner">
+  <defs>
+    <linearGradient id="bg" x1="18" y1="8" x2="108" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff7a2e"/>
+      <stop offset="1" stop-color="#fc4c02"/>
+    </linearGradient>
+    <filter id="softShadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="5" stdDeviation="3" flood-color="#7a2b12" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect width="128" height="128" rx="30" fill="url(#bg)"/>
+  <path d="M19 20h25a13 13 0 0 1-25 0" fill="#fff7f2" opacity="0.28"/>
+  <g filter="url(#softShadow)">
+    <rect x="26" y="27" width="76" height="37" rx="14" fill="#fff7f2"/>
+    <rect x="38" y="40" width="36" height="10" rx="5" fill="#302420"/>
+    <circle cx="86" cy="45" r="5" fill="#fc4c02"/>
+    <path d="M82 59h16c5 0 8 4 8 9v9H83z" fill="#fff7f2"/>
+    <path d="M34 67h60c7 0 12 5 12 12v18c0 7-5 12-12 12H34c-7 0-12-5-12-12V79c0-7 5-12 12-12z" fill="#fff7f2"/>
+    <path d="M34 80h5v17h-5zm10 0h9v17h-9zm14 0h4v17h-4zm9 0h12v17H67zm17 0h5v17h-5zm10 0h4v17h-4z" fill="#302420"/>
+  </g>
+  <g fill="none" stroke="#fff7f2" stroke-linecap="round" stroke-width="5" opacity="0.92">
+    <path d="M18 55v-9c0-5 4-9 9-9h7"/>
+    <path d="M110 55v-9c0-5-4-9-9-9h-7"/>
+  </g>
+</svg>

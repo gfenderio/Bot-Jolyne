@@ -5,7 +5,12 @@ export const DELIVEREE_EXTENSION_SCHEMA_VERSION = 1;
 
 export const DELIVEREE_EXTENSION_EVENT_TYPES = [
   "order_created",
-  "order_failed"
+  "order_failed",
+  "driver_retry_detected",
+  "driver_retry_clicked",
+  "driver_assigned_after_retry",
+  "driver_retry_page_changed",
+  "driver_retry_paused"
 ] as const;
 
 export type DelivereeExtensionEventType = (typeof DELIVEREE_EXTENSION_EVENT_TYPES)[number];
@@ -54,6 +59,11 @@ export type DelivereeExtensionStatusPayload = {
   observedAt: string;
   pageUrl: string;
   plateNumber?: string;
+  retryAttempt?: number;
+  retryDelayUsed?: number;
+  retryDurationSeconds?: number;
+  retryTotalDurationSeconds?: number;
+  retryStopReason?: string;
   schemaVersion: typeof DELIVEREE_EXTENSION_SCHEMA_VERSION;
   serviceType?: string;
   status: DelivereeWebStatus;
@@ -76,6 +86,11 @@ export const delivereeExtensionStatusPayloadSchema = z.object({
   observedAt: z.string().datetime(),
   pageUrl: z.string().url(),
   plateNumber: z.string().min(1).max(24).optional(),
+  retryAttempt: z.number().int().nonnegative().optional(),
+  retryDelayUsed: z.number().int().nonnegative().optional(),
+  retryDurationSeconds: z.number().int().nonnegative().optional(),
+  retryTotalDurationSeconds: z.number().int().nonnegative().optional(),
+  retryStopReason: z.string().max(160).optional(),
   schemaVersion: z.literal(DELIVEREE_EXTENSION_SCHEMA_VERSION),
   serviceType: z.string().min(1).max(80).optional(),
   status: z.enum(DELIVEREE_WEB_STATUSES),

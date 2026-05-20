@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Deliveree Recovery Partner">
+  <defs>
+    <linearGradient id="bg" x1="18" y1="8" x2="108" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff7a2e"/>
+      <stop offset="1" stop-color="#fc4c02"/>
+    </linearGradient>
+    <filter id="softShadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="5" stdDeviation="3" flood-color="#7a2b12" flood-opacity="0.32"/>
+    </filter>
+  </defs>
+  <rect width="128" height="128" rx="30" fill="url(#bg)"/>
+  <path d="M19 20h25a13 13 0 0 1-25 0" fill="#fff7f2" opacity="0.28"/>
+  <g filter="url(#softShadow)">
+    <!-- Stylized Delivery Truck in Deliveree Green -->
+    <!-- Cargo Box -->
+    <rect x="24" y="36" width="56" height="46" rx="6" fill="#16a34a"/>
+    <!-- Cab -->
+    <path d="M80 44h18c4 0 7 3 8 7l6 14c1 2 1 4 1 6v11c0 2-2 4-4 4H80V44z" fill="#16a34a"/>
+    <!-- Cab Window (Cream / Off-white for high contrast on green cab) -->
+    <path d="M84 48h10l4 12H84V48z" fill="#fff7f2" opacity="0.85"/>
+    <!-- Wheels -->
+    <circle cx="44" cy="88" r="10" fill="#1f2937"/>
+    <circle cx="44" cy="88" r="4" fill="#fff7f2"/>
+    <circle cx="82" cy="88" r="10" fill="#1f2937"/>
+    <circle cx="82" cy="88" r="4" fill="#fff7f2"/>
+    <!-- Speed/Delivery lines on Cargo Box (Cream for excellent contrast) -->
+    <rect x="34" y="46" width="24" height="4" rx="2" fill="#fff7f2"/>
+    <rect x="42" y="56" width="20" height="4" rx="2" fill="#fff7f2"/>
+    <rect x="38" y="66" width="22" height="4" rx="2" fill="#fff7f2"/>
+  </g>
+  <!-- Frame highlight lines in Kyou theme -->
+  <g fill="none" stroke="#fff7f2" stroke-linecap="round" stroke-width="5" opacity="0.92">
+    <path d="M18 55v-9c0-5 4-9 9-9h7"/>
+    <path d="M110 55v-9c0-5-4-9-9-9h-7"/>
+  </g>
+</svg>

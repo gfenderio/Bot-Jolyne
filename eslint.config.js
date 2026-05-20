@@ -32,7 +32,10 @@ export default tseslint.config(
         document: "readonly",
         MutationObserver: "readonly",
         navigator: "readonly",
-        window: "readonly"
+        window: "readonly",
+        sessionStorage: "readonly",
+        URL: "readonly",
+        HTMLAnchorElement: "readonly"
       }
     }
   }

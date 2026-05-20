@@ -39,7 +39,10 @@ export type DelivereeRecoveryCase = {
   lastStatusChangeAt: string;
   lateText?: string;
   plateNumber?: string;
+  retryAttempt?: number;
   retryCount: number;
+  retryStartedAt?: string;
+  retryStopReason?: string;
   serviceType?: string;
   silencedAt?: string;
   silenceReason?: string;
@@ -71,6 +74,9 @@ export type UpsertObservationInput = {
   observedAt?: string;
   plateNumber?: string;
   recordUnchangedAction?: boolean;
+  retryAttempt?: number;
+  retryStartedAt?: string;
+  retryStopReason?: string;
   serviceType?: string;
   screenshotPath?: string;
   status: DelivereeWebStatus;
@@ -129,7 +135,10 @@ export class JsonDelivereeCaseStore {
         lastStatusChangeAt: input.statusStartedAt ?? observedAt,
         lateText: input.lateText,
         plateNumber: input.plateNumber,
+        retryAttempt: input.retryAttempt,
         retryCount: 0,
+        retryStartedAt: input.retryStartedAt,
+        retryStopReason: input.retryStopReason,
         serviceType: input.serviceType,
         status: input.status,
         statusText: input.statusText,
@@ -179,6 +188,9 @@ export class JsonDelivereeCaseStore {
       lastStatusChangeAt: changed ? input.statusStartedAt ?? observedAt : existing.lastStatusChangeAt,
       lateText: input.lateText ?? existing.lateText,
       plateNumber: input.plateNumber ?? existing.plateNumber,
+      retryAttempt: input.retryAttempt ?? existing.retryAttempt,
+      retryStartedAt: input.retryStartedAt ?? existing.retryStartedAt,
+      retryStopReason: input.retryStopReason ?? existing.retryStopReason,
       serviceType: input.serviceType ?? existing.serviceType,
       status: input.status,
       statusText: input.statusText ?? existing.statusText,

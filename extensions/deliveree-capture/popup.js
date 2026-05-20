@@ -1,26 +1,29 @@
 const DEFAULT_SETTINGS = {
+  autoRetry: false,
   deviceId: "yugi-browser",
+  enabled: true,
   intakeUrl: "http://127.0.0.1:3001",
   token: ""
 };
 
 const elements = {
-  bookingId: document.querySelector("#booking-id"),
-  clearLogs: document.querySelector("#clear-logs"),
-  connectionState: document.querySelector("#connection-state"),
-  copyLogs: document.querySelector("#copy-logs"),
+  autoRetry: document.querySelector("#auto-retry"),
+  closeHistory: document.querySelector("#close-history"),
   deviceId: document.querySelector("#device-id"),
-  eventType: document.querySelector("#event-type"),
+  enabled: document.querySelector("#enabled"),
+  historyPanel: document.querySelector("#history-panel"),
   intakeUrl: document.querySelector("#intake-url"),
-  lastSent: document.querySelector("#last-sent"),
-  logs: document.querySelector("#logs"),
-  result: document.querySelector("#result"),
+  modeBadge: document.querySelector("#mode-badge"),
+  openHistory: document.querySelector("#open-history"),
+  retryCard: document.querySelector("#retry-card"),
   save: document.querySelector("#save"),
-  status: document.querySelector("#status"),
-  summaryBadge: document.querySelector("#summary-badge"),
-  summaryText: document.querySelector("#summary-text"),
+  scanHistory: document.querySelector("#scan-history"),
   testDiscord: document.querySelector("#test-discord"),
   testIntake: document.querySelector("#test-intake"),
+  testMenu: document.querySelector("#test-menu"),
+  testMenuToggle: document.querySelector("#test-menu-toggle"),
+  testModalSuccess: document.querySelector("#test-modal-success"),
+  testModalFail: document.querySelector("#test-modal-fail"),
   token: document.querySelector("#token")
 };
 
@@ -33,258 +36,114 @@ function formatTime(value) {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    month: "2-digit"
+    month: "2-digit",
+    second: "2-digit"
   });
 }
 
-function formatElapsed(value) {
-  if (!value) {
-    return undefined;
+function updateModeControls() {
+  const enabled = elements.enabled.checked;
+
+  if (!enabled) {
+    elements.autoRetry.checked = false;
   }
 
-  const elapsedMs = Math.max(0, Date.now() - new Date(value).getTime());
-  const totalSeconds = Math.floor(elapsedMs / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
+  elements.autoRetry.disabled = !enabled;
+  elements.retryCard.classList.toggle("toggle-card--disabled", !enabled);
+  elements.testMenuToggle.disabled = !enabled;
 
-  if (minutes <= 0) {
-    return `${seconds} detik lalu`;
+  if (!enabled) {
+    hideTestMenu();
   }
 
-  return `${minutes} menit ${seconds} detik lalu`;
-}
+  elements.modeBadge.classList.remove(
+    "mode-badge--retry",
+    "mode-badge--inactive",
+    "mode-badge--open"
+  );
 
-function setConnectionState(result) {
-  elements.connectionState.classList.remove("ok", "error");
-
-  if (!result) {
-    elements.connectionState.textContent = "Idle";
+  if (!enabled) {
+    elements.modeBadge.textContent = "Nonaktif";
+    elements.modeBadge.classList.add("mode-badge--inactive");
     return;
   }
 
-  if (result.ok) {
-    if (result.action === "health_ok") {
-      elements.connectionState.textContent = "Connected";
-      elements.connectionState.classList.add("ok");
-      return;
-    }
-
-    if (result.action === "discord_test_sent") {
-      elements.connectionState.textContent = "Discord OK";
-      elements.connectionState.classList.add("ok");
-      return;
-    }
-
-    elements.connectionState.textContent = result.deduped ? "Deduped" : "Sent";
-    elements.connectionState.classList.add("ok");
+  if (elements.autoRetry.checked) {
+    elements.modeBadge.textContent = "Auto Retry Aktif";
+    elements.modeBadge.classList.add("mode-badge--retry");
     return;
   }
 
-  elements.connectionState.textContent = "Error";
-  elements.connectionState.classList.add("error");
+  elements.modeBadge.textContent = "Siap Pantau";
+  elements.modeBadge.classList.add("mode-badge--open");
 }
 
-function formatLogEntry(entry) {
-  const at = formatTime(entry.at);
-  const details = entry.details && Object.keys(entry.details).length > 0
-    ? ` | ${JSON.stringify(entry.details)}`
-    : "";
-
-  return `[${at}] ${String(entry.level || "info").toUpperCase()} ${entry.event || "event"} - ${entry.message || ""}${details}`;
+function getLogClass(level) {
+  if (level === "error") return "is-error";
+  if (level === "warn") return "is-searching";
+  return "is-success";
 }
 
-function formatLogs(logs) {
-  if (!Array.isArray(logs) || logs.length === 0) {
-    return "Belum ada log.";
-  }
+function renderLogs(logs) {
+  const items = Array.isArray(logs) ? logs : [];
+  elements.scanHistory.innerHTML = "";
 
-  return logs.map(formatLogEntry).join("\n");
-}
-
-function humanPageKind(pageKind) {
-  const labels = {
-    booking_detail: "Detail booking",
-    draft_page: "Draft order",
-    front_page: "Halaman utama",
-    unknown_deliveree_page: "Halaman Deliveree"
-  };
-
-  return labels[pageKind] || pageKind || "Belum diketahui";
-}
-
-function humanSignal(eventType, status) {
-  if (eventType === "order_failed") {
-    return "Order gagal";
-  }
-
-  if (eventType === "order_created") {
-    return "Order dibuat/aktif";
-  }
-
-  if (status === "completed") {
-    return "Selesai";
-  }
-
-  if (["going_to_pickup", "waiting_pickup", "going_to_destination", "arrived_destination"].includes(status)) {
-    return "Order berjalan";
-  }
-
-  return "Tidak ada sinyal MVP";
-}
-
-function inferEventType(status) {
-  if (status === "cancelled" || status === "no_driver_found") {
-    return "order_failed";
-  }
-
-  if ([
-    "searching_driver",
-    "driver_assigned",
-    "going_to_pickup",
-    "waiting_pickup",
-    "going_to_destination",
-    "arrived_destination"
-  ].includes(status)) {
-    return "order_created";
-  }
-
-  return undefined;
-}
-
-function pageStatusFromLog(entry) {
-  const details = entry?.details || {};
-
-  if (!["active_page_status_finished", "page_state_finished"].includes(entry?.event) || !details.ok) {
-    return undefined;
-  }
-
-  return {
-    bookingId: details.bookingId,
-    driverName: details.driverName,
-    eventType: details.eventType || inferEventType(details.status),
-    etaText: details.etaText,
-    lastHeartbeatAt: details.lastHeartbeatAt || entry.at,
-    lastStatusChangeAt: details.statusStartedAt,
-    lateText: details.lateText,
-    manualTest: entry.event === "active_page_status_finished",
-    pageKind: details.pageKind,
-    plateNumber: details.plateNumber,
-    receivedAt: entry.at,
-    source: details.source,
-    status: details.status,
-    statusText: details.statusText,
-    vehicleDescription: details.vehicleDescription
-  };
-}
-
-function latestPageStatusFromLogs(logs) {
-  if (!Array.isArray(logs)) {
-    return undefined;
-  }
-
-  for (const entry of logs) {
-    const pageStatus = pageStatusFromLog(entry);
-
-    if (pageStatus) {
-      return pageStatus;
-    }
-  }
-
-  return undefined;
-}
-
-function summaryBadgeClass(pageStatus) {
-  if (!pageStatus) {
-    return "";
-  }
-
-  if (pageStatus.eventType === "order_failed" || pageStatus.status === "cancelled" || pageStatus.status === "no_driver_found") {
-    return "fail";
-  }
-
-  if (
-    pageStatus.eventType === "order_created"
-    || [
-      "searching_driver",
-      "driver_assigned",
-      "going_to_pickup",
-      "waiting_pickup",
-      "going_to_destination",
-      "arrived_destination"
-    ].includes(pageStatus.status)
-  ) {
-    return "warn";
-  }
-
-  return "ok";
-}
-
-function setSummary(pageStatus) {
-  elements.summaryBadge.classList.remove("ok", "warn", "fail");
-
-  if (!pageStatus) {
-    elements.summaryBadge.textContent = "Belum dicek";
-    elements.summaryText.textContent = "Buka halaman Deliveree, lalu klik Test Intake.";
+  if (items.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "scan-history__empty";
+    empty.textContent = "Belum ada aktivitas.";
+    elements.scanHistory.appendChild(empty);
     return;
   }
 
-  const badgeClass = summaryBadgeClass(pageStatus);
+  for (const entry of items.slice(0, 10)) {
+    const item = document.createElement("li");
+    item.className = `scan-history__item ${getLogClass(entry.level)}`;
 
-  if (badgeClass) {
-    elements.summaryBadge.classList.add(badgeClass);
+    const title = document.createElement("strong");
+    title.textContent = entry.event || "Event";
+
+    const meta = document.createElement("span");
+    const details = entry.details && Object.keys(entry.details).length > 0
+      ? ` | ${JSON.stringify(entry.details)}`
+      : "";
+    meta.textContent = `${formatTime(entry.at)} | ${entry.message || ""}${details}`;
+
+    item.append(title, meta);
+    elements.scanHistory.appendChild(item);
   }
-
-  const booking = pageStatus.bookingId ? `#${pageStatus.bookingId}` : "tanpa booking aktif";
-  const status = pageStatus.statusText || pageStatus.status || "-";
-  const signal = humanSignal(pageStatus.eventType, pageStatus.status);
-  const extra = [
-    pageStatus.etaText ? `ETA ${pageStatus.etaText}` : undefined,
-    pageStatus.lateText,
-    pageStatus.plateNumber ? `Plat ${pageStatus.plateNumber}` : undefined
-  ].filter(Boolean).join(". ");
-  const heartbeatText = formatElapsed(pageStatus.lastHeartbeatAt || pageStatus.receivedAt);
-  const statusChangeText = formatElapsed(pageStatus.lastStatusChangeAt);
-  const health = [
-    heartbeatText ? `Heartbeat ${heartbeatText}` : undefined,
-    statusChangeText ? `status berubah ${statusChangeText}` : undefined
-  ].filter(Boolean).join(", ");
-
-  elements.summaryBadge.textContent = signal;
-  elements.summaryText.textContent = `${humanPageKind(pageStatus.pageKind)} ${booking}. Status: ${status}.${extra ? ` ${extra}.` : ""}${health ? ` ${health}.` : ""} Source: ${pageStatus.manualTest ? "manual Test Intake" : "heartbeat extension"}.`;
 }
 
 async function render() {
   const data = await chrome.storage.local.get({
     ...DEFAULT_SETTINGS,
-    extensionLogs: [],
-    lastEvent: undefined,
-    lastPageStatus: undefined,
-    lastResult: undefined
+    extensionLogs: []
   });
 
   elements.intakeUrl.value = data.intakeUrl;
   elements.deviceId.value = data.deviceId;
   elements.token.value = data.token;
-  const pageStatus = data.lastPageStatus || latestPageStatusFromLogs(data.extensionLogs);
+  elements.enabled.checked = Boolean(data.enabled);
+  elements.autoRetry.checked = elements.enabled.checked && Boolean(data.autoRetry);
 
-  elements.bookingId.textContent = data.lastEvent?.bookingId || pageStatus?.bookingId || "-";
-  elements.status.textContent = data.lastEvent?.status || pageStatus?.status || "-";
-  elements.eventType.textContent = data.lastEvent?.eventType || pageStatus?.eventType || "-";
-  elements.lastSent.textContent = formatTime(pageStatus?.lastHeartbeatAt || pageStatus?.receivedAt || data.lastResult?.at);
-  elements.result.textContent = data.lastResult?.ok
-    ? `${data.lastResult.action || "ok"} (${data.lastResult.httpStatus || 200})`
-    : data.lastResult?.error || "-";
-  elements.logs.value = formatLogs(data.extensionLogs);
-  setSummary(pageStatus);
-  setConnectionState(data.lastResult);
+  updateModeControls();
+  renderLogs(data.extensionLogs);
 }
 
 async function saveSettings(options = {}) {
   await chrome.storage.local.set({
+    autoRetry: elements.enabled.checked && elements.autoRetry.checked,
     deviceId: elements.deviceId.value.trim() || DEFAULT_SETTINGS.deviceId,
+    enabled: elements.enabled.checked,
     intakeUrl: elements.intakeUrl.value.trim() || DEFAULT_SETTINGS.intakeUrl,
     token: elements.token.value.trim()
   });
+
+  elements.save.textContent = "Tersimpan";
+  updateModeControls();
+  window.setTimeout(() => {
+    elements.save.textContent = "Simpan";
+  }, 900);
 
   if (options.renderAfter !== false) {
     await render();
@@ -315,38 +174,87 @@ async function runPopupTest(button, messageType, busyText, idleText) {
   }
 }
 
-async function copyLogs() {
-  const data = await chrome.storage.local.get({
-    extensionLogs: []
-  });
-
-  await navigator.clipboard.writeText(formatLogs(data.extensionLogs));
-  elements.copyLogs.textContent = "Copied";
-  window.setTimeout(() => {
-    elements.copyLogs.textContent = "Copy";
-  }, 1200);
+function showTestMenu() {
+  elements.testMenu.hidden = false;
+  elements.testMenuToggle.textContent = "Tutup Test";
+  elements.testMenuToggle.setAttribute("aria-expanded", "true");
 }
 
-async function clearLogs() {
-  await chrome.storage.local.set({
-    extensionLogs: []
-  });
-  await render();
+function hideTestMenu() {
+  elements.testMenu.hidden = true;
+  elements.testMenuToggle.textContent = "Test";
+  elements.testMenuToggle.setAttribute("aria-expanded", "false");
 }
 
-elements.save.addEventListener("click", saveSettings);
-elements.testIntake.addEventListener("click", () => runPopupTest(
-  elements.testIntake,
-  "DELIVEREE_TEST_INTAKE",
-  "Testing...",
-  "Test Intake"
-));
-elements.testDiscord.addEventListener("click", () => runPopupTest(
-  elements.testDiscord,
-  "DELIVEREE_TEST_DISCORD",
-  "Sending...",
-  "Send Discord Test"
-));
-elements.copyLogs.addEventListener("click", copyLogs);
-elements.clearLogs.addEventListener("click", clearLogs);
+function toggleTestMenu() {
+  if (elements.testMenu.hidden) {
+    showTestMenu();
+    return;
+  }
+
+  hideTestMenu();
+}
+
+function showHistory() {
+  elements.historyPanel.hidden = false;
+  elements.openHistory.hidden = true;
+}
+
+function hideHistory() {
+  elements.historyPanel.hidden = true;
+  elements.openHistory.hidden = false;
+}
+
+elements.autoRetry.addEventListener("change", () => saveSettings());
+elements.enabled.addEventListener("change", () => saveSettings());
+elements.save.addEventListener("click", () => saveSettings());
+elements.closeHistory.addEventListener("click", hideHistory);
+elements.openHistory.addEventListener("click", showHistory);
+
+elements.testIntake.addEventListener("click", () => {
+  hideHistory();
+  hideTestMenu();
+  runPopupTest(
+    elements.testIntake.querySelector("span"),
+    "DELIVEREE_TEST_INTAKE",
+    "Testing...",
+    "Test Intake"
+  );
+});
+
+elements.testDiscord.addEventListener("click", () => {
+  hideHistory();
+  hideTestMenu();
+  runPopupTest(
+    elements.testDiscord.querySelector("span"),
+    "DELIVEREE_TEST_DISCORD",
+    "Sending...",
+    "Test Discord"
+  );
+});
+
+elements.testModalSuccess.addEventListener("click", () => {
+  hideHistory();
+  hideTestMenu();
+  runPopupTest(
+    elements.testModalSuccess.querySelector("span"),
+    "DELIVEREE_SIMULATE_MODAL_SUCCESS",
+    "Simulating...",
+    "Simulasi: Driver Ditemukan"
+  );
+});
+
+elements.testModalFail.addEventListener("click", () => {
+  hideHistory();
+  hideTestMenu();
+  runPopupTest(
+    elements.testModalFail.querySelector("span"),
+    "DELIVEREE_SIMULATE_MODAL_FAIL",
+    "Simulating...",
+    "Simulasi: Gagal Lagi"
+  );
+});
+
+elements.testMenuToggle.addEventListener("click", toggleTestMenu);
+
 render();

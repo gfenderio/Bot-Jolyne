@@ -220,17 +220,18 @@ test("Deliveree Extension Intake - Discord REST notifier sends embeds without ga
   assert.strictEqual(calls[0].url, "https://discord.com/api/v10/channels/1501899831268868106/messages");
   assert.strictEqual(calls[0].method, "POST");
   assert.strictEqual(calls[0].headers.get("Authorization"), "Bot discord-token");
-  assert.match(JSON.stringify(calls[0].body), /Deliveree #19330506/);
+  assert.match(JSON.stringify(calls[0].body), /Kyou Deliveree: Order Alert #19330506/);
 });
 
 test("Deliveree Extension Intake - builds safe manual case controls only", () => {
   const components = buildDelivereeExtensionManualComponents("19330506", "test-secret-for-buttons");
   const json = JSON.stringify(components.map((component) => component.toJSON()));
 
-  assert.match(json, /Need Follow Up/);
-  assert.match(json, /Manual Reorder Done/);
-  assert.match(json, /Close Case/);
-  assert.match(json, /Ignore/);
+  assert.match(json, /Turn Off Auto Retry/);
+  assert.doesNotMatch(json, /Need Follow Up/);
+  assert.doesNotMatch(json, /Manual Reorder Done/);
+  assert.doesNotMatch(json, /Close Case/);
+  assert.doesNotMatch(json, /Ignore/);
   assert.doesNotMatch(json, /Prepare Reorder/);
   assert.doesNotMatch(json, /Refresh/);
 });

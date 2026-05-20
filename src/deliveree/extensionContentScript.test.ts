@@ -36,6 +36,10 @@ function collectContentPageState(options: {
   const context = {
     chrome: {
       runtime: {
+        id: "test-extension-id",
+        getURL(path: string) {
+          return path;
+        },
         onMessage: {
           addListener(callback: MessageListener) {
             listener = callback;

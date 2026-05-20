@@ -335,6 +335,13 @@ function getNotificationAction(
     }
   }
 
+  if (
+    eventType.startsWith("driver_retry_")
+    || eventType === "driver_assigned_after_retry"
+  ) {
+    return eventType;
+  }
+
   return changed ? eventType : "deduped";
 }
 
@@ -358,6 +365,8 @@ function toObservationInputFromStatusPayload(
     lateText: payload.lateText,
     observedAt: payload.observedAt,
     plateNumber: payload.plateNumber,
+    retryAttempt: payload.retryAttempt,
+    retryStopReason: payload.retryStopReason,
     serviceType: payload.serviceType,
     status: payload.status,
     statusStartedAt,
@@ -595,6 +604,11 @@ export function createDelivereeExtensionIntakeServer(options: DelivereeExtension
 
 function describeAction(action: DelivereeExtensionNotification["action"]) {
   const descriptions: Record<DelivereeExtensionNotification["action"], string> = {
+    driver_assigned_after_retry: "Auto Retry berhasil! Driver ditemukan.",
+    driver_retry_clicked: "Auto Retry sedang menekan tombol 'Coba Pesan Kembali'.",
+    driver_retry_detected: "Deliveree kehabisan driver. Jolyne siap melakukan Auto Retry jika aktif.",
+    driver_retry_page_changed: "Halaman berubah dari modal Retry. Auto Retry dipause sementara.",
+    driver_retry_paused: "Auto Retry dipause. Cek status di popup atau halaman.",
     order_created: "Order Deliveree baru terdeteksi oleh extension lokal.",
     order_failed: "Order Deliveree gagal. Perlu dicek manual oleh tim."
   };
@@ -603,7 +617,12 @@ function describeAction(action: DelivereeExtensionNotification["action"]) {
 }
 
 function statusColor(notification: DelivereeExtensionNotification) {
-  return notification.action === "order_failed" ? 0xeb5757 : 0x2f80ed;
+  if (notification.action === "order_failed") return 0xeb5757;
+  if (notification.action === "driver_assigned_after_retry") return 0x27ae60;
+  if (notification.action === "driver_retry_detected") return 0xf2994a;
+  if (notification.action === "driver_retry_clicked") return 0x2d9cdb;
+  if (notification.action.startsWith("driver_retry_")) return 0xf2c94c;
+  return 0x2f80ed;
 }
 
 function fieldValue(value: string | number | undefined) {
@@ -626,35 +645,11 @@ export function buildDelivereeExtensionManualComponents(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(createSignedDelivereeButtonId({
-          action: "need_followup",
+          action: "turn_off_auto_retry",
           caseId,
           secret
         }))
-        .setLabel("Need Follow Up")
-        .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId(createSignedDelivereeButtonId({
-          action: "manual_reorder",
-          caseId,
-          secret
-        }))
-        .setLabel("Manual Reorder Done")
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId(createSignedDelivereeButtonId({
-          action: "close",
-          caseId,
-          secret
-        }))
-        .setLabel("Close Case")
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setCustomId(createSignedDelivereeButtonId({
-          action: "ignore",
-          caseId,
-          secret
-        }))
-        .setLabel("Ignore")
+        .setLabel("Turn Off Auto Retry")
         .setStyle(ButtonStyle.Danger)
     )
   ];
@@ -723,7 +718,7 @@ export function buildDelivereeExtensionNotificationEmbed(notification: Deliveree
     });
   }
 
-  if (notification.payload.failureReason) {
+  if (notification.payload.failureReason && !notification.action.startsWith("driver_retry_")) {
     fields.push({
       inline: false,
       name: "Reason",
@@ -731,9 +726,56 @@ export function buildDelivereeExtensionNotificationEmbed(notification: Deliveree
     });
   }
 
+  if (notification.action === "driver_retry_clicked" && notification.payload.retryAttempt !== undefined) {
+    fields.push({
+      inline: true,
+      name: "Attempt",
+      value: String(notification.payload.retryAttempt)
+    });
+    if (notification.payload.retryDelayUsed !== undefined) {
+      fields.push({
+        inline: true,
+        name: "Delay",
+        value: `${notification.payload.retryDelayUsed}s`
+      });
+    }
+    if (notification.payload.retryDurationSeconds !== undefined) {
+      fields.push({
+        inline: true,
+        name: "Duration",
+        value: `${Math.floor(notification.payload.retryDurationSeconds / 60)}m ${notification.payload.retryDurationSeconds % 60}s`
+      });
+    }
+  }
+
+  if (notification.action === "driver_assigned_after_retry" && notification.payload.retryTotalDurationSeconds !== undefined) {
+    fields.push({
+      inline: true,
+      name: "Total Retry Duration",
+      value: `${Math.floor(notification.payload.retryTotalDurationSeconds / 60)}m ${notification.payload.retryTotalDurationSeconds % 60}s`
+    });
+    if (notification.payload.retryAttempt !== undefined) {
+      fields.push({
+        inline: true,
+        name: "Total Coba Pesan",
+        value: String(notification.payload.retryAttempt)
+      });
+    }
+  }
+
+  if (notification.action === "driver_retry_paused" || notification.action === "driver_retry_page_changed") {
+    if (notification.payload.retryStopReason) {
+      fields.push({
+        inline: false,
+        name: "Stop Reason",
+        value: notification.payload.retryStopReason
+      });
+    }
+  }
+
   return new EmbedBuilder()
     .setColor(statusColor(notification))
-    .setTitle(`[Jolyne] Deliveree #${notification.payload.bookingId}`)
+    .setTitle(`🚨 Kyou Deliveree: Order Alert #${notification.payload.bookingId}`)
     .setDescription(describeAction(notification.action))
     .addFields(fields)
     .setFooter({
@@ -752,8 +794,8 @@ export function buildDelivereeExtensionNotificationMessage(notification: Deliver
 export function buildDelivereeExtensionConnectionTestEmbed(notification: DelivereeExtensionConnectionTestNotification) {
   return new EmbedBuilder()
     .setColor(0x27ae60)
-    .setTitle("[Jolyne] Deliveree extension test OK")
-    .setDescription("Chrome extension berhasil terhubung ke Jolyne dan Discord.")
+    .setTitle("⚙️ Kyou Deliveree Extension Test OK")
+    .setDescription("Chrome extension berhasil terhubung ke Kyou Deliveree dan Discord.")
     .addFields([
       {
         inline: true,
