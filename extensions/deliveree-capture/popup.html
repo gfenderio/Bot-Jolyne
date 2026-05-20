@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Kyou Deliveree</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <header class="hero">
+        <img src="icons/scanner-partner-48.png" alt="" class="hero__icon" id="hero-icon">
+        <div>
+          <h1 class="hero__title">
+            <span class="hero__brand">Kyou</span>
+            <span class="hero__tool">Deliveree</span>
+          </h1>
+          <p class="muted">Pemantauan & Auto Retry Driver Deliveree.</p>
+        </div>
+      </header>
+
+      <div id="mode-badge" class="mode-badge">Nonaktif</div>
+
+      <div class="toggle-card toggle-card--power">
+        <div>
+          <span class="toggle-card__title">Aktifkan Pemantauan</span>
+          <span class="toggle-card__subtitle">Baca status halaman Deliveree aktif.</span>
+        </div>
+        <label class="switch" aria-label="Enable monitoring">
+          <input id="enabled" type="checkbox">
+          <span class="switch__track">
+            <span class="switch__thumb"></span>
+          </span>
+        </label>
+      </div>
+
+      <div id="retry-card" class="toggle-card">
+        <div>
+          <span class="toggle-card__title">Auto Retry Driver</span>
+          <span class="toggle-card__subtitle">Klik otomatis saat driver tak ditemukan.</span>
+        </div>
+        <label class="switch" aria-label="Enable auto retry driver">
+          <input id="auto-retry" type="checkbox">
+          <span class="switch__track">
+            <span class="switch__thumb"></span>
+          </span>
+        </label>
+      </div>
+
+      <label class="field-card">
+        Intake URL
+        <input id="intake-url" type="url" autocomplete="off" spellcheck="false">
+      </label>
+
+      <label class="field-card">
+        Device ID
+        <input id="device-id" type="text" autocomplete="off" spellcheck="false">
+      </label>
+
+      <label class="field-card">
+        Token
+        <input id="token" type="password" autocomplete="off" spellcheck="false">
+      </label>
+
+      <div class="actions">
+        <button id="save" type="button">Simpan</button>
+        <button id="test-menu-toggle" class="secondary" type="button" aria-expanded="false" aria-controls="test-menu">Test</button>
+        <div id="test-menu" class="test-menu" hidden>
+          <button id="test-intake" class="test-choice" type="button">
+            <span>Test Intake</span>
+            <small>Cek koneksi ke local intake.</small>
+          </button>
+          <button id="test-discord" class="test-choice" type="button">
+            <span>Test Discord</span>
+            <small>Kirim pesan test ke Discord.</small>
+          </button>
+          <button id="test-modal-success" class="test-choice" type="button">
+            <span>Simulasi: Driver Ditemukan</span>
+            <small>Sukses setelah klik pesan kembali.</small>
+          </button>
+          <button id="test-modal-fail" class="test-choice" type="button">
+            <span>Simulasi: Gagal Lagi</span>
+            <small>Uji coba loop auto-retry.</small>
+          </button>
+        </div>
+      </div>
+
+      <section id="history-panel" class="history-panel" hidden>
+        <div class="section-heading">
+          <h2>Riwayat Aktivitas</h2>
+          <button id="close-history" class="tiny-button" type="button">Tutup</button>
+        </div>
+        <ol id="scan-history" class="scan-history"></ol>
+      </section>
+
+      <button id="open-history" class="ghost" type="button" style="margin-top: 14px; width: 100%;">Riwayat Aktivitas</button>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

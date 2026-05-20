@@ -1,4 +1,4 @@
-import { mapDelivereeStatusToLabel } from "./statusMapper.js";
+﻿import { mapDelivereeStatusToLabel } from "./statusMapper.js";
 import type { DelivereeOrderSnapshot } from "./types.js";
 
 export type DelivereeRecoverySeverity = "info" | "warning" | "critical";
@@ -22,7 +22,7 @@ export interface DelivereeNotifier {
 
 export function formatDelivereeDiscordMessage(order: DelivereeOrderSnapshot) {
   const lines = [
-    `[Jolyne] Update Deliveree #${order.bookingId}`,
+    `[Kyou Deliveree] Update #${order.bookingId}`,
     `Status: ${mapDelivereeStatusToLabel(order.status)}`
   ];
 
@@ -58,7 +58,7 @@ function formatStalledMinutes(stalledForSeconds: number) {
 
 export function formatDelivereeRecoveryAlertMessage(alert: DelivereeRecoveryAlert) {
   const lines = [
-    `[Jolyne] Deliveree Recovery Alert #${alert.bookingId}`,
+    `[Kyou Deliveree] Recovery Alert #${alert.bookingId}`,
     `Severity: ${mapSeverityToLabel(alert.severity)}`,
     `Status: ${mapDelivereeStatusToLabel(alert.status)}`,
     `Reason: ${alert.reason}`,
@@ -116,3 +116,5 @@ export class DiscordWebhookNotifier implements DelivereeNotifier {
     }
   }
 }
+
+

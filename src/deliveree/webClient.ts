@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+﻿import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { chromium } from "playwright";
 import { classifyDelivereePageText } from "./webClassifier.js";
@@ -87,10 +87,11 @@ export class DelivereeWebClient {
       inspection,
       prepared: false,
       reason: [
-        "Jolyne berhenti sebelum klik tindakan reorder apa pun.",
+        "Sistem berhenti sebelum klik tindakan reorder apa pun.",
         "Gunakan screenshot untuk review manual sampai tombol aman terverifikasi dari UI live."
       ].join(" ")
     };
   }
 }
+
 

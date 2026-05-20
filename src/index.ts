@@ -7,6 +7,7 @@ import {
   mockDelivereeStateStore
 } from "./deliveree/mockRuntime.js";
 import { startDelivereePoller } from "./deliveree/poller.js";
+import { startDelivereeExtensionIntake } from "./deliveree/extensionIntake.js";
 import { startDelivereeWebMonitor } from "./deliveree/webMonitor.js";
 import { handleInteractionCreate } from "./events/interaction-create.js";
 import { handleReady } from "./events/ready.js";
@@ -31,6 +32,7 @@ if (!env.DISCORD_TOKEN) {
   client.once(Events.ClientReady, (readyClient) => {
     handleReady(readyClient);
     startBirthdayNowScheduler(readyClient);
+    startDelivereeExtensionIntake(readyClient);
     startDelivereeWebMonitor(readyClient);
   });
   client.on(Events.Error, (error) => {

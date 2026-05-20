@@ -1,6 +1,6 @@
 # Bot Jolyne
 
-Bot Jolyne berbasis Node.js dan TypeScript. Saat ini repo berisi Discord bot existing dan mockup awal pemantauan status order Deliveree via Discord webhook.
+Bot Jolyne berbasis Node.js dan TypeScript. Fokus Deliveree saat ini adalah MVP Chrome extension lokal yang read-only untuk membaca status halaman Deliveree dan mengirim sinyal minimal ke intake lokal Jolyne.
 
 ## Setup
 
@@ -12,7 +12,7 @@ npm install
 
 2. Salin `.env.example` menjadi `.env`.
 
-   Untuk mockup Deliveree lokal, `DISCORD_WEBHOOK_URL` boleh dikosongkan supaya update ditulis ke console. Isi `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, dan `DISCORD_GUILD_ID` jika ingin menjalankan Discord bot/slash command.
+   Untuk intake extension lokal, isi `DELIVEREE_EXTENSION_TOKEN` dan biarkan `DELIVEREE_INTAKE_DISCORD_ENABLED=false` jika hanya ingin test lokal tanpa kirim Discord. Isi `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, dan `DISCORD_GUILD_ID` jika ingin menjalankan Discord bot/slash command.
 
 3. Jalankan mode development:
 
@@ -38,9 +38,9 @@ npm run build
 npm start
 ```
 
-## Mockup Deliveree
+## Mockup Deliveree Legacy
 
-Mockup Deliveree berjalan otomatis saat `npm run dev` atau `npm start`. Poller memantau order aktif yang dibuat lewat `/mock-order`, mengambil status dari `MockDelivereeClient`, menyimpan status terakhir di memori, lalu mengirim alert hanya saat ada recovery event atau status akhir.
+Mockup Deliveree masih ada untuk unit test dan referensi development lama, tapi command `/mock-order` dan `/track-test` tidak diregister di runtime aktif. Fokus MVP sekarang adalah Chrome extension lokal. Poller mock membaca order yang dimasukkan ke mock runtime, mengambil status dari `MockDelivereeClient`, menyimpan status terakhir di memori, lalu mengirim alert hanya saat ada recovery event atau status akhir.
 
 Status mock yang tersedia:
 
@@ -64,17 +64,15 @@ ETA: 14:30
 
 Jika `DISCORD_WEBHOOK_URL` diisi, pesan dikirim ke Discord webhook. Jika kosong, pesan yang sama ditampilkan ke console agar mockup tetap bisa dites lokal tanpa koneksi Discord.
 
-## Demo Mock Order 1-10
+## Demo Mock Order Legacy
 
-Gunakan `/mock-order slot` untuk membuat booking ID demo dari slot 1 sampai 10. Slot akan menjadi booking ID `MOCK-001` sampai `MOCK-010`, reset dari awal setiap command dipanggil ulang, lalu otomatis masuk daftar pantau poller.
+Slot demo lama tersedia di kode mock dari slot 1 sampai 10. Slot akan menjadi booking ID `MOCK-001` sampai `MOCK-010`, reset dari awal setiap command dipanggil ulang, lalu otomatis masuk daftar pantau poller.
 
 Contoh cepat:
 
-- `/mock-order 1`: order normal berhasil sampai `completed`.
-- `/mock-order 2`: order `cancelled`, cocok untuk demo keputusan reorder.
-- `/mock-order 4`: driver stuck sampai alert `warning` dan `critical`.
-- `/confirm-reorder`: gunakan setelah alert cancelled jika command recovery ini tersedia di deployment kamu.
-- `/replace-deliveree`: gunakan untuk mencatat order pengganti jika command recovery ini tersedia di deployment kamu.
+- Slot 1: order normal berhasil sampai `completed`.
+- Slot 2: order `cancelled`, cocok untuk demo keputusan reorder.
+- Slot 4: driver stuck sampai alert `warning` dan `critical`.
 
 Mapping skenario:
 
@@ -105,14 +103,10 @@ Timeline demo dibuat cepat:
 - `/server`: tampilkan info server Discord.
 - `/birthday`: ambil daftar birthday admin dari Metabase.
 - `/birthdaynow`: tampilkan admin yang birthday hari ini.
-- `/birthdaynowtest`: tes tampilan embed birthday tanpa data Metabase.
-- `/track-test`: tes tracking Deliveree dari mock data lokal. Opsi `booking_id` bisa diisi, default `19320032`.
-- `/mock-order`: buat mock order Deliveree slot 1-10 untuk demo recovery.
 - `/whoami`: tampilkan Discord user ID untuk konfigurasi owner bot.
-- `/deliveree-status`: cek status booking Deliveree live secara read-only via Playwright.
-- `/deliveree-pause`: emergency stop Deliveree monitor/action.
-- `/deliveree-resume`: kembalikan Deliveree runtime ke mode read-only.
-- `/deliveree-prepare-reorder`: owner-only, menyiapkan review reorder tanpa final submit. Saat ini berhenti sebelum klik action apa pun.
+- `/deliveree-status`: cek status halaman Deliveree terakhir dari Chrome extension lokal.
+- `/deliveree-cases`: lihat daftar recovery case Deliveree terbaru.
+- `/deliveree-case`: lihat detail satu recovery case Deliveree dan tombol aksi manual.
 
 ## Deliveree Web Monitor Aman
 
@@ -158,6 +152,121 @@ npm run deliveree:login
 
 Command ini membuka browser Playwright dengan persistent profile di `DELIVEREE_PLAYWRIGHT_PROFILE_DIR`. Login di browser tersebut, lalu tekan Enter di terminal setelah selesai. Untuk Coolify, pastikan folder `data/` dipasang sebagai persistent volume agar session dan case store tidak hilang saat restart.
 
+## Deliveree Extension Lokal
+
+Tahap MVP Deliveree memakai Chrome extension lokal yang read-only. Extension berjalan di browser staff yang sudah login Deliveree, membaca detail aman dari halaman order aktif, lalu hanya mengirim sinyal penting ke endpoint lokal Jolyne. Intake-only runner bisa mengirim notifikasi ke `DELIVEREE_ALERT_CHANNEL_ID` lewat Discord REST tanpa login Discord gateway, sehingga tidak mengganggu Jolyne yang sedang berjalan di Coolify.
+
+Konfigurasi `.env` lokal:
+
+```bash
+DELIVEREE_EXTENSION_ENABLED=true
+DELIVEREE_EXTENSION_PORT=3001
+DELIVEREE_EXTENSION_TOKEN=change-me-local-random-token
+DELIVEREE_EXTENSION_ALLOWED_DEVICE_IDS=yugi-browser
+DELIVEREE_INTAKE_DISCORD_ENABLED=false
+DELIVEREE_ALERT_CHANNEL_ID=1501899831268868106
+DELIVEREE_BUTTON_SIGNING_SECRET=change-me-to-random-secret
+```
+
+Cara pakai:
+
+1. Build TypeScript:
+
+```bash
+npm run build
+```
+
+2. Jalankan intake lokal saja:
+
+```bash
+npm run deliveree:intake
+```
+
+3. Untuk membuat folder extension yang siap di-load:
+
+```bash
+npm run deliveree:extension:pack
+```
+
+4. Buka `chrome://extensions`, aktifkan Developer mode, lalu pilih `Load unpacked`.
+5. Pilih folder `dist/deliveree-capture-extension`. Untuk development langsung, folder `extensions/deliveree-capture` juga bisa dipakai.
+6. Buka popup extension, isi:
+   - Intake URL: `http://127.0.0.1:3001`
+   - Device ID: `yugi-browser`
+   - Token: sama dengan `DELIVEREE_EXTENSION_TOKEN`
+7. Buka halaman `https://webapp.deliveree.com/bookings/<id>`.
+
+Data yang dikirim sengaja minimal: event MVP, booking ID, status, URL halaman, reason gagal bila terbaca, jenis layanan, jarak, jumlah tujuan, dan No. Job. Extension tidak mengirim nomor telepon, alamat lengkap, foto, signature, cookie, password, OTP, atau data pembayaran. Extension juga tidak klik tombol Deliveree apa pun.
+
+Halaman utama `https://webapp.deliveree.com/bookings/new` dan draft pemesanan seperti `https://webapp.deliveree.com/bookings/new?ftl=true` dicatat sebagai log lokal saja. Kartu `Pesanan Terbaru` di halaman utama tidak dianggap sebagai booking aktif, sehingga tidak memicu alert Discord.
+
+Popup extension menyimpan log lokal terbatas untuk troubleshooting. Gunakan tombol `Copy` untuk menyalin log terbaru saat perlu review bersama, atau `Clear` untuk mengosongkan log setelah issue selesai. Log tidak menyimpan token, cookie, password, OTP, nomor telepon, alamat lengkap, foto, atau signature.
+
+Gunakan `Test Intake` di popup untuk mengecek apakah endpoint lokal Jolyne hidup, token/device ID diterima, dan halaman Deliveree aktif bisa dibaca. Tombol ini sekaligus berfungsi seperti test lokal `/deliveree-status` dari sisi extension. Gunakan `Send Discord Test` hanya saat `DELIVEREE_INTAKE_DISCORD_ENABLED=true`; jika flag masih `false`, intake akan mengembalikan status `discord_test_disabled`.
+
+Command test lokal:
+
+- `/deliveree-status`: membaca heartbeat terakhir dari Chrome extension dan mengirim embed ringkas.
+- `/deliveree-cases`: membaca daftar case yang sudah pernah dilihat extension/intake.
+- `/deliveree-case booking_id:<id>`: membuka detail case dan tombol manual jika case masih aktif.
+- Jika Deliveree belum terbuka, Jolyne akan menampilkan bahwa halaman Deliveree belum terdeteksi.
+- Jika heartbeat sudah stale, Jolyne tetap menampilkan status terakhir plus peringatan agar Chrome/tab Deliveree/extension/local intake dicek.
+- Jika Deliveree terbuka di front page atau draft pemesanan, Jolyne menampilkan status idle.
+- Jika booking sedang mencari driver, Jolyne menampilkan durasi status berdasarkan pertama kali status itu terlihat.
+- Jika driver sudah berjalan, Jolyne bisa membaca state operasional seperti `going_to_pickup`, `waiting_pickup`, `going_to_destination`, `arrived_destination`, ETA, keterlambatan, driver, dan plat jika terlihat.
+- Jika order gagal karena no driver atau cancelled, Jolyne menampilkan status gagal/cancelled dan reason bila terbaca.
+
+Rule notifikasi tahap 1:
+
+- `order_created`: booking ID asli sudah muncul dan status aktif awal terbaca, seperti `searching_driver` atau `driver_assigned`.
+- `order_failed`: booking ID asli sudah muncul dan status gagal terbaca, seperti `cancelled` atau `no_driver_found`.
+- Status normal lain seperti `going_to_pickup`, `going_to_destination`, `arrived_destination`, `completed`, `unknown`, dan halaman draft hanya masuk log/status lokal.
+- Heartbeat page-state yang sama didedup di log server agar runner tidak berisik.
+- Manual `Test Intake` tetap muncul di log popup/server supaya debugging jelas.
+- Event booking dan status yang sama berulang disimpan sebagai observasi, tapi tidak mengirim spam Discord.
+
+Manual case tracking MVP:
+
+- Setiap booking detail yang punya booking ID dan status akan masuk ke `DELIVEREE_CASE_STORE_PATH`.
+- Heartbeat page-state memperbarui status/current context case tanpa menambah action log berulang setiap 15 detik.
+- Data operasional aman yang bisa disimpan: status, status text, driver, plat, ETA, keterlambatan, failure reason, service type, jarak, jumlah tujuan, dan No. Job.
+- Alert `order_created` dan `order_failed` menyertakan tombol manual bila `DELIVEREE_BUTTON_SIGNING_SECRET` terisi.
+- Tombol manual yang aman: `Need Follow Up`, `Manual Reorder Done`, `Close Case`, dan `Ignore`.
+- Tombol manual hanya mencatat keputusan/status case di Jolyne. Tombol ini tidak membuka Playwright, tidak klik Deliveree, tidak submit order, dan tidak membuat reorder otomatis.
+- Dalam mode `npm run deliveree:intake` yang hanya mengirim Discord REST, tombol Discord baru bisa diproses jika runtime Discord bot yang aktif menjalankan branch/kode yang sama dan memakai case store yang sama. Untuk local-only testing tanpa full bot lokal, gunakan file case store dan popup/log sebagai bukti dulu.
+
+## Kyou Item Scanner Extension
+
+Extension `Kyou Item Scanner Opener` dipakai untuk scanner keyboard-wedge. Saat scanner membaca kode angka lalu mengirim `Enter`, tab aktif langsung redirect ke halaman item Kyou.
+
+Default:
+
+- Kode contoh: `219402`
+- URL tujuan: `https://kyou.id/items/219402`
+- Host aktif: `https://kyou.id/*` dan `https://old.kyou.id/*`
+- Mode default: redirect tab aktif, bukan buka tab baru.
+
+Cara pack:
+
+```bash
+npm run kyou:scanner-extension:pack
+```
+
+Cara pakai:
+
+1. Buka `chrome://extensions`.
+2. Aktifkan Developer mode.
+3. Pilih `Load unpacked`.
+4. Pilih folder `dist/kyou-item-scanner-opener`.
+5. Buka halaman `https://kyou.id/` atau `https://old.kyou.id/`.
+6. Scan kode produk, misalnya `219402`.
+
+Catatan:
+
+- Extension hanya trigger jika input berupa angka dan diakhiri `Enter`.
+- Extension mengabaikan scan saat cursor sedang berada di `input`, `textarea`, `select`, atau field editable agar tidak mengganggu form.
+- Setting popup menyediakan enable/disable, base URL, minimal digit, dan reset buffer.
+
 ## Struktur
 
 ```text
@@ -170,4 +279,7 @@ src/
   types/         Shared TypeScript types
   deploy-commands.ts
   index.ts
+extensions/
+  deliveree-capture/  Chrome extension read-only untuk endpoint lokal
+  kyou-item-scanner-opener/  Chrome extension untuk buka item Kyou dari scanner
 ```

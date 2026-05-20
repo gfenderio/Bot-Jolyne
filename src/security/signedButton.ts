@@ -4,8 +4,12 @@ export const DELIVEREE_BUTTON_SCOPE = "deliv";
 
 export const DELIVEREE_BUTTON_ACTIONS = [
   "close",
+  "ignore",
+  "manual_reorder",
+  "need_followup",
   "prepare_reorder",
-  "refresh"
+  "refresh",
+  "turn_off_auto_retry"
 ] as const;
 
 export type DelivereeButtonAction = (typeof DELIVEREE_BUTTON_ACTIONS)[number];

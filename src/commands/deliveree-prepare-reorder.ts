@@ -1,4 +1,4 @@
-import { SlashCommandBuilder } from "discord.js";
+﻿import { SlashCommandBuilder } from "discord.js";
 import { env } from "../config/env.js";
 import { createDelivereeCaseStore, createDelivereeWebClient } from "../deliveree/liveRuntime.js";
 import { getDelivereeRuntimeMode } from "../deliveree/runtimeControl.js";
@@ -40,7 +40,7 @@ export const command: SlashCommand = {
 
     if (getDelivereeRuntimeMode() !== "prepare_reorder") {
       await interaction.reply({
-        content: "Prepare reorder masih dikunci. Set `DELIVEREE_ACTION_MODE=prepare_reorder` setelah read-only monitor terbukti aman.",
+        content: "Prepare reorder masih dikunci. Set `DELIVEREE_ACTION_MODE=prepare_reorder` hanya jika workflow ini sudah disetujui untuk dipakai.",
         flags: ["Ephemeral"]
       });
       return;
@@ -76,4 +76,5 @@ export const command: SlashCommand = {
     ].join("\n"));
   }
 };
+
 

@@ -1,9 +1,13 @@
-export const DELIVEREE_WEB_STATUSES = [
+﻿export const DELIVEREE_WEB_STATUSES = [
   "cancelled",
   "captcha_or_security_challenge",
   "completed",
   "draft_prepared",
   "driver_assigned",
+  "going_to_destination",
+  "going_to_pickup",
+  "arrived_destination",
+  "waiting_pickup",
   "login_required",
   "no_driver_found",
   "searching_driver",
@@ -102,6 +106,50 @@ export function classifyDelivereePageText(rawText: string): DelivereePageClassif
     };
   }
 
+  if (includesAny(text, ["di tujuan", "di lokasi akhir pada", "arrived at destination"])) {
+    detectedTexts.push("di tujuan");
+    return {
+      detectedTexts,
+      finalActionVisible,
+      recommendedAction: "Pantau sampai order selesai atau ada kendala dokumen/foto.",
+      status: "arrived_destination",
+      summary: "Driver sudah berada di tujuan."
+    };
+  }
+
+  if (includesAny(text, ["menuju tujuan", "going to destination"])) {
+    detectedTexts.push("menuju tujuan");
+    return {
+      detectedTexts,
+      finalActionVisible,
+      recommendedAction: "Pantau ETA dan keterlambatan jika estimasi berubah terlalu jauh.",
+      status: "going_to_destination",
+      summary: "Driver sedang menuju tujuan."
+    };
+  }
+
+  if (includesAny(text, ["menuju penjemputan", "going to pickup"])) {
+    detectedTexts.push("menuju penjemputan");
+    return {
+      detectedTexts,
+      finalActionVisible,
+      recommendedAction: "Pantau sampai driver tiba di lokasi penjemputan.",
+      status: "going_to_pickup",
+      summary: "Driver sedang menuju lokasi penjemputan."
+    };
+  }
+
+  if (includesAny(text, ["menunggu penjemputan", "waiting pickup", "waiting for pickup"])) {
+    detectedTexts.push("menunggu penjemputan");
+    return {
+      detectedTexts,
+      finalActionVisible,
+      recommendedAction: "Pantau waktu tunggu pickup dan follow up jika terlalu lama.",
+      status: "waiting_pickup",
+      summary: "Driver sudah menunggu di lokasi penjemputan."
+    };
+  }
+
   if (includesAny(text, ["memilih", "mencari pengemudi", "tidak ada info pengemudi", "mengonfirmasi"])) {
     detectedTexts.push("memilih/mencari pengemudi");
     return {
@@ -143,7 +191,8 @@ export function classifyDelivereePageText(rawText: string): DelivereePageClassif
     finalActionVisible,
     recommendedAction: "Kirim screenshot untuk review manual sebelum action apa pun.",
     status: "unknown",
-    summary: "Jolyne belum mengenali state halaman Deliveree."
+    summary: "Sistem belum mengenali state halaman Deliveree."
   };
 }
+
 

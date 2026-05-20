@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Kyou Scanner Partner</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <header class="hero">
+        <img src="icons/scanner-partner-48.png" alt="" class="hero__icon">
+        <div>
+          <h1 class="hero__title">
+            <span class="hero__brand">Kyou</span>
+            <span class="hero__tool">Scanner Partner</span>
+          </h1>
+          <p class="muted">Untuk divisi yang bekerja memakai scanner biasa, bukan PDA.</p>
+        </div>
+      </header>
+
+      <div id="mode-badge" class="mode-badge">Siap Scan</div>
+
+      <div class="toggle-card toggle-card--power">
+        <div>
+          <span class="toggle-card__title">Aktifkan Scanner</span>
+          <span class="toggle-card__subtitle">Baca scan angka lalu Enter.</span>
+        </div>
+        <label class="switch" aria-label="Enable scanner">
+          <input id="enabled" type="checkbox">
+          <span class="switch__track">
+            <span class="switch__thumb"></span>
+          </span>
+        </label>
+      </div>
+
+      <div id="copy-card" class="toggle-card">
+        <div>
+          <span class="toggle-card__title">Salin Kyou ID</span>
+          <span class="toggle-card__subtitle">ID disalin, item tetap dibuka.</span>
+        </div>
+        <label class="switch" aria-label="Copy Kyou ID to clipboard">
+          <input id="copy-kyou-id" type="checkbox">
+          <span class="switch__track">
+            <span class="switch__thumb"></span>
+          </span>
+        </label>
+      </div>
+
+      <label class="field-card">
+        Minimal digit
+        <input id="min-digits" min="1" step="1" type="number">
+      </label>
+
+      <label class="field-card">
+        Reset buffer (ms)
+        <input id="reset-after-ms" min="100" step="50" type="number">
+      </label>
+
+      <div class="actions">
+        <button id="save" type="button">Simpan</button>
+        <button id="test-menu-toggle" class="secondary" type="button" aria-expanded="false" aria-controls="test-menu">Test</button>
+        <div id="test-menu" class="test-menu" hidden>
+          <button id="test-item" class="test-choice" type="button">
+            <span>Coba Item</span>
+            <small>Buka halaman item contoh.</small>
+          </button>
+          <button id="test-jan-open" class="test-choice" type="button">
+            <span>Coba JAN</span>
+            <small>Cari kode barcode contoh.</small>
+          </button>
+          <button id="test-jan-copy" class="test-choice" type="button">
+            <span>Coba Salin ID</span>
+            <small>Aktifkan salin lalu cari item.</small>
+          </button>
+        </div>
+      </div>
+
+      <section id="history-panel" class="history-panel" hidden>
+        <div class="section-heading">
+          <h2>Riwayat Scan</h2>
+          <button id="close-history" class="tiny-button" type="button">Tutup</button>
+        </div>
+        <ol id="scan-history" class="scan-history"></ol>
+      </section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Kyou Scanner Partner",
+  "version": "0.2.2",
+  "description": "Scanner helper for Kyou partner workflows without PDA.",
+  "permissions": ["storage", "clipboardWrite"],
+  "host_permissions": [
+    "https://kyou.id/*",
+    "https://old.kyou.id/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://kyou.id/*",
+        "https://old.kyou.id/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/scanner-partner-16.png",
+    "32": "icons/scanner-partner-32.png",
+    "48": "icons/scanner-partner-48.png",
+    "128": "icons/scanner-partner-128.png"
+  },
+  "action": {
+    "default_icon": {
+      "16": "icons/scanner-partner-16.png",
+      "32": "icons/scanner-partner-32.png",
+      "48": "icons/scanner-partner-48.png",
+      "128": "icons/scanner-partner-128.png"
+    },
+    "default_popup": "popup.html",
+    "default_title": "Kyou Scanner Partner"
+  }
+}
