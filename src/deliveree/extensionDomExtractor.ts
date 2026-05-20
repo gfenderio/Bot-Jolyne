@@ -1,4 +1,4 @@
-import { z } from "zod";
+﻿import { z } from "zod";
 import { DELIVEREE_WEB_STATUSES, type DelivereeWebStatus } from "./webClassifier.js";
 
 export const DELIVEREE_EXTENSION_SCHEMA_VERSION = 1;
@@ -80,7 +80,7 @@ export const delivereeExtensionStatusPayloadSchema = z.object({
   eventType: z.enum(DELIVEREE_EXTENSION_EVENT_TYPES).optional(),
   etaMinutes: z.number().int().nonnegative().optional(),
   etaText: z.string().min(1).max(40).optional(),
-  failureReason: z.string().min(1).max(160).optional(),
+  failureReason: z.string().min(1).max(500).optional(),
   jobNo: z.string().min(1).max(120).optional(),
   lateText: z.string().min(1).max(80).optional(),
   observedAt: z.string().datetime(),
@@ -94,7 +94,7 @@ export const delivereeExtensionStatusPayloadSchema = z.object({
   schemaVersion: z.literal(DELIVEREE_EXTENSION_SCHEMA_VERSION),
   serviceType: z.string().min(1).max(80).optional(),
   status: z.enum(DELIVEREE_WEB_STATUSES),
-  statusText: z.string().min(1).max(100).optional(),
+  statusText: z.string().min(1).max(500).optional(),
   totalDistanceKm: z.number().nonnegative().optional(),
   vehicleDescription: z.string().min(1).max(160).optional()
 }).strict();
@@ -123,7 +123,7 @@ export const delivereeExtensionPageStatePayloadSchema = z.object({
   eventType: z.enum(DELIVEREE_EXTENSION_EVENT_TYPES).optional(),
   etaMinutes: z.number().int().nonnegative().optional(),
   etaText: z.string().min(1).max(40).optional(),
-  failureReason: z.string().min(1).max(160).optional(),
+  failureReason: z.string().min(1).max(500).optional(),
   lateText: z.string().min(1).max(80).optional(),
   observedAt: z.string().datetime(),
   pageKind: z.enum(DELIVEREE_EXTENSION_PAGE_KINDS),
@@ -131,7 +131,7 @@ export const delivereeExtensionPageStatePayloadSchema = z.object({
   plateNumber: z.string().min(1).max(24).optional(),
   schemaVersion: z.literal(DELIVEREE_EXTENSION_SCHEMA_VERSION),
   status: z.enum(DELIVEREE_WEB_STATUSES).optional(),
-  statusText: z.string().min(1).max(100).optional(),
+  statusText: z.string().min(1).max(500).optional(),
   vehicleDescription: z.string().min(1).max(160).optional()
 }).strict();
 
@@ -347,7 +347,7 @@ function firstMatch(text: string, patterns: RegExp[]) {
 function findDriverName(snapshot: DelivereeExtensionPageSnapshot) {
   const bodyText = normalizeText(snapshot.bodyText);
   return firstMatch(bodyText, [
-    /\bPengemudi\s+(.+?)\s+(?:star|★|Pickup|Small Pickup|Mobil|Van|Suzuki|Daihatsu|Toyota)\b/i,
+    /\bPengemudi\s+(.+?)\s+(?:star|â˜…|Pickup|Small Pickup|Mobil|Van|Suzuki|Daihatsu|Toyota)\b/i,
     /\bYour Driver\s+(.+?)\s+(?:Small Pickup|Pickup|Mobil|Van)\b/i,
     /\bPengemudi:\s*(.+?)\s*Kendaraan:\b/i
   ])?.replace(/^Pengemudi\s+/i, "");
@@ -434,3 +434,4 @@ export function parseDelivereeExtensionStatusPayload(value: unknown) {
 export function parseDelivereeExtensionPageStatePayload(value: unknown) {
   return delivereeExtensionPageStatePayloadSchema.parse(value);
 }
+
