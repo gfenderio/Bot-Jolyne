@@ -1,4 +1,4 @@
-﻿import { env } from "./config/env.js";
+import { env } from "./config/env.js";
 import {
   createDelivereeExtensionIntakeServer,
   DelivereeExtensionDiscordTestDisabledError,
@@ -150,10 +150,8 @@ const server = createDelivereeExtensionIntakeServer({
   token: env.DELIVEREE_EXTENSION_TOKEN
 });
 
-server.listen(env.DELIVEREE_EXTENSION_PORT, "127.0.0.1", () => {
-  console.log(`Deliveree intake-only aktif di http://127.0.0.1:${env.DELIVEREE_EXTENSION_PORT}.`);
-  console.log(`Allowed devices: ${env.DELIVEREE_EXTENSION_ALLOWED_DEVICE_IDS.join(", ")}.`);
-  console.log(`Mode: local extension intake only, tanpa Discord gateway login. Discord REST: ${env.DELIVEREE_INTAKE_DISCORD_ENABLED ? "enabled" : "disabled"}.`);
+server.listen(env.DELIVEREE_EXTENSION_PORT, env.DELIVEREE_EXTENSION_HOST, () => {
+  console.log(`Deliveree intake aktif di ${env.DELIVEREE_EXTENSION_HOST}:${env.DELIVEREE_EXTENSION_PORT}.`);
 });
 
 server.on("error", (error) => {

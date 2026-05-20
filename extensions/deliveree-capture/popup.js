@@ -6,12 +6,18 @@ const DEFAULT_SETTINGS = {
   token: ""
 };
 
+const ENDPOINTS = {
+  local: "http://127.0.0.1:3001",
+  remote: "https://deliveree-intake.kyou.id"
+};
+
 const elements = {
   autoRetry: document.querySelector("#auto-retry"),
   closeHistory: document.querySelector("#close-history"),
   deviceId: document.querySelector("#device-id"),
   enabled: document.querySelector("#enabled"),
   historyPanel: document.querySelector("#history-panel"),
+  endpointNote: document.querySelector("#endpoint-note"),
   intakeUrl: document.querySelector("#intake-url"),
   modeBadge: document.querySelector("#mode-badge"),
   openHistory: document.querySelector("#open-history"),
@@ -24,7 +30,9 @@ const elements = {
   testMenuToggle: document.querySelector("#test-menu-toggle"),
   testModalSuccess: document.querySelector("#test-modal-success"),
   testModalFail: document.querySelector("#test-modal-fail"),
-  token: document.querySelector("#token")
+  token: document.querySelector("#token"),
+  useLocalEndpoint: document.querySelector("#use-local-endpoint"),
+  useRemoteEndpoint: document.querySelector("#use-remote-endpoint")
 };
 
 function formatTime(value) {
@@ -39,6 +47,36 @@ function formatTime(value) {
     month: "2-digit",
     second: "2-digit"
   });
+}
+
+function getEndpointMode() {
+  const value = elements.intakeUrl.value.trim();
+
+  if (value.startsWith("http://127.0.0.1") || value.startsWith("http://localhost")) {
+    return "local";
+  }
+
+  if (value.startsWith("https://")) {
+    return "remote";
+  }
+
+  return "custom";
+}
+
+function updateEndpointNote() {
+  const mode = getEndpointMode();
+
+  if (mode === "local") {
+    elements.endpointNote.textContent = "Local hanya terbaca di komputer ini. Discord remote perlu endpoint publik.";
+    return;
+  }
+
+  if (mode === "remote") {
+    elements.endpointNote.textContent = "Mode remote siap. Pastikan device ID dan token sudah didaftarkan di server.";
+    return;
+  }
+
+  elements.endpointNote.textContent = "Endpoint custom aktif. Gunakan URL HTTPS untuk distribusi kantor.";
 }
 
 function updateModeControls() {
@@ -67,6 +105,8 @@ function updateModeControls() {
     elements.modeBadge.classList.add("mode-badge--inactive");
     return;
   }
+
+  updateEndpointNote();
 
   if (elements.autoRetry.checked) {
     elements.modeBadge.textContent = "Auto Retry Aktif";
@@ -208,6 +248,15 @@ function hideHistory() {
 elements.autoRetry.addEventListener("change", () => saveSettings());
 elements.enabled.addEventListener("change", () => saveSettings());
 elements.save.addEventListener("click", () => saveSettings());
+elements.intakeUrl.addEventListener("input", updateEndpointNote);
+elements.useLocalEndpoint.addEventListener("click", () => {
+  elements.intakeUrl.value = ENDPOINTS.local;
+  saveSettings();
+});
+elements.useRemoteEndpoint.addEventListener("click", () => {
+  elements.intakeUrl.value = ENDPOINTS.remote;
+  saveSettings();
+});
 elements.closeHistory.addEventListener("click", hideHistory);
 elements.openHistory.addEventListener("click", showHistory);
 

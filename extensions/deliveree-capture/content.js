@@ -1,4 +1,4 @@
-﻿(() => {
+(() => {
 if (window.__KYOU_DELIVEREE_CAPTURE_LOADED__) {
   return;
 }
@@ -159,7 +159,7 @@ function truncateText(value, maxLength) {
     return text;
   }
 
-  return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+  return `${text.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
 }
 
 function findActiveHomepageOrder() {
@@ -372,9 +372,9 @@ function firstMatch(text, patterns) {
 
 function findDriverName(bodyText) {
   return firstMatch(bodyText, [
-    /\bPengemudi\s+(.+?)\s+(?:star|Ã¢Ëœâ€¦|Pickup|Small Pickup|Mobil|Van|Suzuki|Daihatsu|Toyota)\b/i,
-    /\bYour Driver\s+(.+?)\s+(?:Small Pickup|Pickup|Mobil|Van)\b/i,
-    /\bPengemudi:\s*(.+?)\s*Kendaraan:\b/i
+    /\bPengemudi\s+(.+?)\s+(?:star|\u2605|\*|Pickup|Small Pickup|Mobil|Van|Suzuki|Daihatsu|Toyota)\b/i,
+    /Your Driver\s+(.+?)\s+(?:Small Pickup|Pickup|Mobil|Van)/i,
+    /Pengemudi:\s*(.+?)\s*Kendaraan:/i
   ])?.replace(/^Pengemudi\s+/i, "");
 }
 

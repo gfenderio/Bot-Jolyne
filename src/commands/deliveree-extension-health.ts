@@ -31,16 +31,14 @@ export const command: SlashCommand = {
     const deviceActivity = new Map<string, { lastSeen: string; count: number }>();
 
     for (const recoveryCase of cases) {
-      const deviceLog = recoveryCase.actionLog.find((log) => log.note?.includes("extension"));
-      if (deviceLog) {
-        const existing = deviceActivity.get("extension") || { count: 0, lastSeen: recoveryCase.lastObservedAt };
-        deviceActivity.set("extension", {
-          count: existing.count + 1,
-          lastSeen: new Date(recoveryCase.lastObservedAt) > new Date(existing.lastSeen)
-            ? recoveryCase.lastObservedAt
-            : existing.lastSeen
-        });
-      }
+      if (!recoveryCase.deviceId) continue;
+      const existing = deviceActivity.get(recoveryCase.deviceId) || { count: 0, lastSeen: recoveryCase.lastObservedAt };
+      deviceActivity.set(recoveryCase.deviceId, {
+        count: existing.count + 1,
+        lastSeen: new Date(recoveryCase.lastObservedAt) > new Date(existing.lastSeen)
+          ? recoveryCase.lastObservedAt
+          : existing.lastSeen
+      });
     }
 
     const fields = [
@@ -56,8 +54,8 @@ export const command: SlashCommand = {
       },
       {
         inline: true,
-        name: "Extension Enabled",
-        value: env.DELIVEREE_EXTENSION_ENABLED ? "âœ… Yes" : "âŒ No"
+        name: "Extension Intake",
+        value: env.DELIVEREE_EXTENSION_ENABLED ? "Aktif" : "Belum aktif"
       }
     ];
 

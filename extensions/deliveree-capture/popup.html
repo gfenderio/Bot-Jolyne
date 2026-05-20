@@ -52,6 +52,15 @@
         <input id="intake-url" type="url" autocomplete="off" spellcheck="false">
       </label>
 
+      <div class="endpoint-card">
+        <span>Endpoint cepat</span>
+        <div class="endpoint-actions">
+          <button id="use-local-endpoint" class="preset-button" type="button">Local 127</button>
+          <button id="use-remote-endpoint" class="preset-button" type="button">Remote Ready</button>
+        </div>
+        <small id="endpoint-note">Remote akan aktif setelah endpoint publik diberikan tim infra.</small>
+      </div>
+
       <label class="field-card">
         Device ID
         <input id="device-id" type="text" autocomplete="off" spellcheck="false">
@@ -68,7 +77,7 @@
         <div id="test-menu" class="test-menu" hidden>
           <button id="test-intake" class="test-choice" type="button">
             <span>Test Intake</span>
-            <small>Cek koneksi ke local intake.</small>
+            <small>Cek koneksi ke intake aktif.</small>
           </button>
           <button id="test-discord" class="test-choice" type="button">
             <span>Test Discord</span>

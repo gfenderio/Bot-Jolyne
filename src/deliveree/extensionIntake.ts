@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+﻿import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -885,7 +885,7 @@ export function buildDelivereeExtensionNotificationEmbed(notification: Deliveree
 
   return new EmbedBuilder()
     .setColor(statusColor(notification))
-    .setTitle(`ðŸš¨ Kyou Deliveree: Order Alert #${notification.payload.bookingId}`)
+    .setTitle(`Kyou Deliveree: Order Alert #${notification.payload.bookingId}`)
     .setDescription(describeAction(notification.action))
     .addFields(fields)
     .setFooter({
@@ -904,7 +904,7 @@ export function buildDelivereeExtensionNotificationMessage(notification: Deliver
 export function buildDelivereeExtensionConnectionTestEmbed(notification: DelivereeExtensionConnectionTestNotification) {
   return new EmbedBuilder()
     .setColor(0x27ae60)
-    .setTitle("âš™ï¸ Kyou Deliveree Extension Test OK")
+    .setTitle("Kyou Deliveree Extension Test OK")
     .setDescription("Chrome extension berhasil terhubung ke Kyou Deliveree dan Discord.")
     .addFields([
       {
@@ -1009,13 +1009,7 @@ export class DiscordRestDelivereeExtensionNotifier implements DelivereeExtension
 }
 
 export function startDelivereeExtensionIntake(client: Client<true>) {
-  if (!env.DELIVEREE_EXTENSION_ENABLED) {
-    console.log("Deliveree extension intake tidak aktif karena DELIVEREE_EXTENSION_ENABLED belum true.");
-    return () => undefined;
-  }
-
-  if (!env.DELIVEREE_EXTENSION_TOKEN) {
-    console.warn("Deliveree extension intake tidak aktif karena DELIVEREE_EXTENSION_TOKEN belum diisi.");
+  if (!env.DELIVEREE_EXTENSION_ENABLED || !env.DELIVEREE_EXTENSION_TOKEN) {
     return () => undefined;
   }
 
@@ -1026,8 +1020,8 @@ export function startDelivereeExtensionIntake(client: Client<true>) {
     token: env.DELIVEREE_EXTENSION_TOKEN
   });
 
-  server.listen(env.DELIVEREE_EXTENSION_PORT, "127.0.0.1", () => {
-    console.log(`Deliveree extension intake aktif di http://127.0.0.1:${env.DELIVEREE_EXTENSION_PORT}.`);
+  server.listen(env.DELIVEREE_EXTENSION_PORT, env.DELIVEREE_EXTENSION_HOST, () => {
+    console.log(`Deliveree extension intake aktif di ${env.DELIVEREE_EXTENSION_HOST}:${env.DELIVEREE_EXTENSION_PORT}.`);
   });
 
   server.on("error", (error) => {

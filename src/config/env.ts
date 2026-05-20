@@ -110,6 +110,7 @@ const envSchema = z.object({
   DELIVEREE_CASE_STORE_PATH: optionalString.default("data/deliveree-cases.json"),
   DELIVEREE_EXTENSION_ALLOWED_DEVICE_IDS: optionalStringList.default(["yugi-browser"]),
   DELIVEREE_EXTENSION_ENABLED: optionalBoolean,
+  DELIVEREE_EXTENSION_HOST: optionalString.default("0.0.0.0"),
   DELIVEREE_EXTENSION_PORT: localPort,
   DELIVEREE_EXTENSION_TOKEN: optionalString.pipe(
     z.string().min(32, "Token harus minimal 32 karakter untuk keamanan.").optional()

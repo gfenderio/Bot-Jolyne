@@ -1,4 +1,4 @@
-﻿import { z } from "zod";
+import { z } from "zod";
 import { DELIVEREE_WEB_STATUSES, type DelivereeWebStatus } from "./webClassifier.js";
 
 export const DELIVEREE_EXTENSION_SCHEMA_VERSION = 1;
@@ -347,9 +347,9 @@ function firstMatch(text: string, patterns: RegExp[]) {
 function findDriverName(snapshot: DelivereeExtensionPageSnapshot) {
   const bodyText = normalizeText(snapshot.bodyText);
   return firstMatch(bodyText, [
-    /\bPengemudi\s+(.+?)\s+(?:star|â˜…|Pickup|Small Pickup|Mobil|Van|Suzuki|Daihatsu|Toyota)\b/i,
-    /\bYour Driver\s+(.+?)\s+(?:Small Pickup|Pickup|Mobil|Van)\b/i,
-    /\bPengemudi:\s*(.+?)\s*Kendaraan:\b/i
+    /\bPengemudi\s+(.+?)\s+(?:star|\u2605|\*|Pickup|Small Pickup|Mobil|Van|Suzuki|Daihatsu|Toyota)\b/i,
+    /Your Driver\s+(.+?)\s+(?:Small Pickup|Pickup|Mobil|Van)/i,
+    /Pengemudi:\s*(.+?)\s*Kendaraan:/i
   ])?.replace(/^Pengemudi\s+/i, "");
 }
 

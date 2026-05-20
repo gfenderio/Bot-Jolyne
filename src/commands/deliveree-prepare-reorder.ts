@@ -1,4 +1,4 @@
-﻿import { SlashCommandBuilder } from "discord.js";
+import { SlashCommandBuilder } from "discord.js";
 import { env } from "../config/env.js";
 import { createDelivereeCaseStore, createDelivereeWebClient } from "../deliveree/liveRuntime.js";
 import { getDelivereeRuntimeMode } from "../deliveree/runtimeControl.js";
@@ -29,10 +29,7 @@ export const command: SlashCommand = {
 
     if (!env.DELIVEREE_WEB_AUTOMATION_APPROVED) {
       await interaction.reply({
-        content: [
-          "Prepare reorder Deliveree masih dikunci oleh compliance gate.",
-          "Aktifkan `DELIVEREE_WEB_AUTOMATION_APPROVED=true` hanya setelah ada izin/approval yang jelas untuk akses otomatis Deliveree."
-        ].join("\n"),
+        content: "Prepare reorder belum tersedia untuk mode operasional saat ini.",
         flags: ["Ephemeral"]
       });
       return;

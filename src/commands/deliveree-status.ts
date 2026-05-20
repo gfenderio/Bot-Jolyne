@@ -103,10 +103,11 @@ function describeState(state: StoredDelivereeExtensionPageState, nowMs: number) 
   return "Deliveree terbuka dan extension mengirim status terakhir.";
 }
 
-async function getLatestStoredCaseState(): Promise<StoredDelivereeExtensionPageState | undefined> {
+async function getLatestStoredCaseState(deviceId?: string): Promise<StoredDelivereeExtensionPageState | undefined> {
   const cases = await createDelivereeCaseStore().listCases();
   const latest = cases
     .filter((recoveryCase) => recoveryCase.deviceId && recoveryCase.lastHeartbeatAt)
+    .filter((recoveryCase) => !deviceId || recoveryCase.deviceId === deviceId)
     .sort((left, right) => String(right.lastHeartbeatAt).localeCompare(String(left.lastHeartbeatAt)))[0];
 
   if (!latest?.deviceId || !latest.lastHeartbeatAt) {
@@ -133,8 +134,14 @@ async function getLatestStoredCaseState(): Promise<StoredDelivereeExtensionPageS
   };
 }
 
-async function getStatusState() {
-  return getLatestDelivereeExtensionPageState() ?? await getLatestStoredCaseState();
+async function getStatusState(deviceId?: string) {
+  const latestMemoryState = getLatestDelivereeExtensionPageState();
+
+  if (latestMemoryState && (!deviceId || latestMemoryState.deviceId === deviceId)) {
+    return latestMemoryState;
+  }
+
+  return getLatestStoredCaseState(deviceId);
 }
 
 function buildStatusEmbed(state: StoredDelivereeExtensionPageState | undefined) {
@@ -278,7 +285,11 @@ function buildStatusEmbed(state: StoredDelivereeExtensionPageState | undefined) 
 export const command: SlashCommand = {
   data: new SlashCommandBuilder()
     .setName("deliveree-status")
-    .setDescription("Cek status halaman Deliveree terakhir dari extension lokal."),
+    .setDescription("Cek status halaman Deliveree terakhir dari extension.")
+    .addStringOption((option) => option
+      .setName("device")
+      .setDescription("Device ID, contoh: yugi-browser atau cindy-browser")
+      .setRequired(false)),
 
   async execute(interaction) {
     const deniedReason = getDelivereeAccessDeniedReason(interaction);
@@ -291,8 +302,10 @@ export const command: SlashCommand = {
       return;
     }
 
+    const deviceId = interaction.options.getString("device")?.trim() || undefined;
+
     await interaction.reply({
-      embeds: [buildStatusEmbed(await getStatusState())],
+      embeds: [buildStatusEmbed(await getStatusState(deviceId))],
       flags: ["Ephemeral"]
     });
   }
