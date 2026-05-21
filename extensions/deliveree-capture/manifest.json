@@ -1,39 +1,48 @@
 ﻿{
-  "manifest_version": 3,
-  "name": "Kyou Deliveree Partner",
-  "version": "0.2.0",
-  "description": "Pemantauan & Auto Retry Driver Deliveree.",
-  "icons": {
-    "16": "icons/scanner-partner-16.png",
-    "32": "icons/scanner-partner-32.png",
-    "48": "icons/scanner-partner-48.png",
-    "128": "icons/scanner-partner-128.png"
-  },
-  "permissions": ["activeTab", "alarms", "scripting", "storage"],
-  "host_permissions": [
-    "https://webapp.deliveree.com/*",
-    "http://127.0.0.1/*",
-    "http://localhost/*"
-  ],
-  "background": {
-    "service_worker": "background.js"
-  },
-  "content_scripts": [
-    {
-      "matches": ["https://webapp.deliveree.com/*"],
-      "js": ["content.js"],
-      "run_at": "document_idle"
-    }
-  ],
-  "action": {
-    "default_popup": "popup.html",
-    "default_title": "Kyou Deliveree Partner",
-    "default_icon": {
-      "16": "icons/scanner-partner-16.png",
-      "32": "icons/scanner-partner-32.png",
-      "48": "icons/scanner-partner-48.png",
-      "128": "icons/scanner-partner-128.png"
-    }
-  }
+    "manifest_version":  3,
+    "name":  "Kyou Deliveree Partner",
+    "version":  "0.2.0",
+    "description":  "Pemantauan \u0026 Auto Retry Driver Deliveree.",
+    "icons":  {
+                  "16":  "icons/scanner-partner-16.png",
+                  "32":  "icons/scanner-partner-32.png",
+                  "48":  "icons/scanner-partner-48.png",
+                  "128":  "icons/scanner-partner-128.png"
+              },
+    "permissions":  [
+                        "activeTab",
+                        "alarms",
+                        "scripting",
+                        "storage"
+                    ],
+    "host_permissions":  [
+                             "https://webapp.deliveree.com/*",
+                             "http://127.0.0.1/*",
+                             "http://localhost/*",
+                             "http://w9a2iwiolpi9wvw2fx6wlboo.43.134.34.13.sslip.io/*"
+                         ],
+    "background":  {
+                       "service_worker":  "background.js"
+                   },
+    "content_scripts":  [
+                            {
+                                "matches":  [
+                                                "https://webapp.deliveree.com/*"
+                                            ],
+                                "js":  [
+                                           "content.js"
+                                       ],
+                                "run_at":  "document_idle"
+                            }
+                        ],
+    "action":  {
+                   "default_popup":  "popup.html",
+                   "default_title":  "Kyou Deliveree Partner",
+                   "default_icon":  {
+                                        "16":  "icons/scanner-partner-16.png",
+                                        "32":  "icons/scanner-partner-32.png",
+                                        "48":  "icons/scanner-partner-48.png",
+                                        "128":  "icons/scanner-partner-128.png"
+                                    }
+               }
 }
-

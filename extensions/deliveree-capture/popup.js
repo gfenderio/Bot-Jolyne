@@ -1,4 +1,4 @@
-const DEFAULT_SETTINGS = {
+﻿const DEFAULT_SETTINGS = {
   autoRetry: false,
   deviceId: "yugi-browser",
   enabled: true,
@@ -8,7 +8,7 @@ const DEFAULT_SETTINGS = {
 
 const ENDPOINTS = {
   local: "http://127.0.0.1:3001",
-  remote: "https://deliveree-intake.kyou.id"
+  remote: "http://w9a2iwiolpi9wvw2fx6wlboo.43.134.34.13.sslip.io"
 };
 
 const elements = {
@@ -307,3 +307,4 @@ elements.testModalFail.addEventListener("click", () => {
 elements.testMenuToggle.addEventListener("click", toggleTestMenu);
 
 render();
+
