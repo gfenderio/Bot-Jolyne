@@ -1,15 +1,11 @@
-﻿const DEFAULT_SETTINGS = {
+const DEFAULT_SETTINGS = {
   autoRetry: false,
   deviceId: "yugi-browser",
   enabled: true,
-  intakeUrl: "http://127.0.0.1:3001",
+  intakeUrl: "http://w9a2iwiolpi9wvw2fx6wlboo.43.134.34.13.sslip.io",
   token: ""
 };
 
-const ENDPOINTS = {
-  local: "http://127.0.0.1:3001",
-  remote: "http://w9a2iwiolpi9wvw2fx6wlboo.43.134.34.13.sslip.io"
-};
 
 const elements = {
   autoRetry: document.querySelector("#auto-retry"),
@@ -28,11 +24,7 @@ const elements = {
   testIntake: document.querySelector("#test-intake"),
   testMenu: document.querySelector("#test-menu"),
   testMenuToggle: document.querySelector("#test-menu-toggle"),
-  testModalSuccess: document.querySelector("#test-modal-success"),
-  testModalFail: document.querySelector("#test-modal-fail"),
   token: document.querySelector("#token"),
-  useLocalEndpoint: document.querySelector("#use-local-endpoint"),
-  useRemoteEndpoint: document.querySelector("#use-remote-endpoint")
 };
 
 function formatTime(value) {
@@ -52,11 +44,7 @@ function formatTime(value) {
 function getEndpointMode() {
   const value = elements.intakeUrl.value.trim();
 
-  if (value.startsWith("http://127.0.0.1") || value.startsWith("http://localhost")) {
-    return "local";
-  }
-
-  if (value.startsWith("https://")) {
+  if (value.startsWith("http://w9a2iwiolpi9wvw2fx6wlboo.43.134.34.13.sslip.io") || value.startsWith("https://")) {
     return "remote";
   }
 
@@ -66,17 +54,12 @@ function getEndpointMode() {
 function updateEndpointNote() {
   const mode = getEndpointMode();
 
-  if (mode === "local") {
-    elements.endpointNote.textContent = "Local hanya terbaca di komputer ini. Discord remote perlu endpoint publik.";
-    return;
-  }
-
   if (mode === "remote") {
     elements.endpointNote.textContent = "Mode remote siap. Pastikan device ID dan token sudah didaftarkan di server.";
     return;
   }
 
-  elements.endpointNote.textContent = "Endpoint custom aktif. Gunakan URL HTTPS untuk distribusi kantor.";
+  elements.endpointNote.textContent = "Endpoint custom aktif. Pastikan URL bisa diakses dari komputer pengguna.";
 }
 
 function updateModeControls() {
@@ -248,15 +231,7 @@ function hideHistory() {
 elements.autoRetry.addEventListener("change", () => saveSettings());
 elements.enabled.addEventListener("change", () => saveSettings());
 elements.save.addEventListener("click", () => saveSettings());
-elements.intakeUrl.addEventListener("input", updateEndpointNote);
-elements.useLocalEndpoint.addEventListener("click", () => {
-  elements.intakeUrl.value = ENDPOINTS.local;
-  saveSettings();
-});
-elements.useRemoteEndpoint.addEventListener("click", () => {
-  elements.intakeUrl.value = ENDPOINTS.remote;
-  saveSettings();
-});
+elements.intakeUrl.addEventListener("input", updateEndpointNote);
 elements.closeHistory.addEventListener("click", hideHistory);
 elements.openHistory.addEventListener("click", showHistory);
 
@@ -279,28 +254,6 @@ elements.testDiscord.addEventListener("click", () => {
     "DELIVEREE_TEST_DISCORD",
     "Sending...",
     "Test Discord"
-  );
-});
-
-elements.testModalSuccess.addEventListener("click", () => {
-  hideHistory();
-  hideTestMenu();
-  runPopupTest(
-    elements.testModalSuccess.querySelector("span"),
-    "DELIVEREE_SIMULATE_MODAL_SUCCESS",
-    "Simulating...",
-    "Simulasi: Driver Ditemukan"
-  );
-});
-
-elements.testModalFail.addEventListener("click", () => {
-  hideHistory();
-  hideTestMenu();
-  runPopupTest(
-    elements.testModalFail.querySelector("span"),
-    "DELIVEREE_SIMULATE_MODAL_FAIL",
-    "Simulating...",
-    "Simulasi: Gagal Lagi"
   );
 });
 

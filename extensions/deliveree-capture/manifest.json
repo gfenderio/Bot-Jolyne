@@ -1,4 +1,4 @@
-﻿{
+{
     "manifest_version":  3,
     "name":  "Kyou Deliveree Partner",
     "version":  "0.2.0",
@@ -16,10 +16,7 @@
                         "storage"
                     ],
     "host_permissions":  [
-                             "https://webapp.deliveree.com/*",
-                             "http://127.0.0.1/*",
-                             "http://localhost/*",
-                             "http://w9a2iwiolpi9wvw2fx6wlboo.43.134.34.13.sslip.io/*"
+                             "https://webapp.deliveree.com/*",                             "http://w9a2iwiolpi9wvw2fx6wlboo.43.134.34.13.sslip.io/*"
                          ],
     "background":  {
                        "service_worker":  "background.js"
@@ -46,3 +43,4 @@
                                     }
                }
 }
+

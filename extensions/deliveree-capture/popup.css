@@ -304,20 +304,6 @@ input[type="checkbox"] {
   font-weight: 900;
 }
 
-.endpoint-actions {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: 1fr 1fr;
-}
-
-.preset-button {
-  background: rgba(255, 247, 242, 0.96);
-  border: 1px solid rgba(252, 76, 2, 0.18);
-  box-shadow: 0 5px 10px rgba(80, 40, 20, 0.06);
-  color: #d83f1d;
-  text-shadow: none;
-}
-
 .endpoint-card small {
   color: #79645d;
   font-size: 10.5px;

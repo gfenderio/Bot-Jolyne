@@ -1,6 +1,6 @@
-﻿const DEFAULT_SETTINGS = {
+const DEFAULT_SETTINGS = {
   deviceId: "yugi-browser",
-  intakeUrl: "http://127.0.0.1:3001",
+  intakeUrl: "http://w9a2iwiolpi9wvw2fx6wlboo.43.134.34.13.sslip.io",
   token: ""
 };
 const MAX_LOG_ENTRIES = 120;
@@ -256,7 +256,7 @@ async function sendStatus(payload) {
   }
 
   try {
-    await appendLog("info", "send_started", "Mengirim status ke local intake.", {
+    await appendLog("info", "send_started", "Mengirim status ke intake.", {
       bookingId: payload.bookingId,
       eventType: payload.eventType,
       intakeUrl: normalizeBaseUrl(settings.intakeUrl),
@@ -281,7 +281,7 @@ async function sendStatus(payload) {
     };
 
     await saveLastResult(result);
-    await appendLog(response.ok ? "info" : "error", "send_finished", "Local intake merespons event.", {
+    await appendLog(response.ok ? "info" : "error", "send_finished", "intake merespons event.", {
       action: result.action,
       bookingId: payload.bookingId,
       deduped: result.deduped,
@@ -299,7 +299,7 @@ async function sendStatus(payload) {
       ok: false
     };
     await saveLastResult(result);
-    await appendLog("error", "send_failed", "Gagal menghubungi local intake.", {
+    await appendLog("error", "send_failed", "Gagal menghubungi intake.", {
       bookingId: payload.bookingId,
       eventType: payload.eventType,
       error: result.error,
@@ -347,7 +347,7 @@ async function sendPageState(pageState, options = {}) {
     };
 
     if (!response.ok) {
-      await appendLog("error", "page_state_failed", "Local intake gagal menerima page state.", {
+      await appendLog("error", "page_state_failed", "intake gagal menerima page state.", {
         error: body.error,
         httpStatus: response.status,
         pageKind: pageState.pageKind,
@@ -382,7 +382,7 @@ async function sendPageState(pageState, options = {}) {
 
     return result;
   } catch (error) {
-    await appendLog("error", "page_state_network_failed", "Gagal mengirim page state ke local intake.", {
+    await appendLog("error", "page_state_network_failed", "Gagal mengirim page state ke intake.", {
       error: error instanceof Error ? error.message : "network_error",
       pageKind: pageState.pageKind,
       status: pageState.status
@@ -582,12 +582,12 @@ async function pollExtensionCommands(options = {}) {
 async function testLocalIntake() {
   const result = await sendControlRequest("/deliveree/extension/health", {
     failedEvent: "test_intake_failed",
-    failedMessage: "Gagal menghubungi local intake.",
+    failedMessage: "Gagal menghubungi intake.",
     finishedEvent: "test_intake_finished",
-    finishedMessage: "Local intake merespons test koneksi.",
+    finishedMessage: "intake merespons test koneksi.",
     skippedEvent: "test_intake_skipped",
     startedEvent: "test_intake_started",
-    startedMessage: "Menguji koneksi local intake."
+    startedMessage: "Menguji koneksi intake."
   });
 
   if (result.ok) {
@@ -605,33 +605,9 @@ function sendDiscordTest() {
     finishedMessage: "Intake merespons permintaan test Discord.",
     skippedEvent: "discord_test_skipped",
     startedEvent: "discord_test_started",
-    startedMessage: "Meminta local intake mengirim test Discord."
+    startedMessage: "Meminta intake mengirim test Discord."
   });
 }
-
-async function simulateModalInActiveTab(scenario) {
-  const tab = await getActiveTab();
-  if (!tab?.id) {
-    return { error: "active_tab_unavailable", ok: false };
-  }
-  
-  const firstAttempt = await sendMessageToTab(tab.id, { type: "DELIVEREE_SIMULATE_MODAL", scenario });
-  if (firstAttempt?.ok) {
-    return firstAttempt;
-  }
-  
-  if (!canFallbackInjectContentScript(firstAttempt?.error)) {
-    return firstAttempt;
-  }
-  
-  const injection = await injectContentScript(tab.id);
-  if (!injection.ok) {
-    return injection;
-  }
-  
-  return sendMessageToTab(tab.id, { type: "DELIVEREE_SIMULATE_MODAL", scenario });
-}
-
 
 chrome.alarms?.create?.("deliveree-command-poll", {
   periodInMinutes: 0.25
@@ -662,16 +638,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message?.type === "DELIVEREE_TEST_DISCORD") {
     sendDiscordTest().then(sendResponse);
-    return true;
-  }
-
-  if (message?.type === "DELIVEREE_SIMULATE_MODAL_SUCCESS") {
-    simulateModalInActiveTab("success").then(sendResponse);
-    return true;
-  }
-
-  if (message?.type === "DELIVEREE_SIMULATE_MODAL_FAIL") {
-    simulateModalInActiveTab("fail").then(sendResponse);
     return true;
   }
 
