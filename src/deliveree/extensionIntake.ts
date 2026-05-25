@@ -1,4 +1,4 @@
-﻿import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -211,9 +211,10 @@ export type DelivereeExtensionIntakeOptions = {
   onPageState?: (
     state: StoredDelivereeExtensionPageState,
     context: { manualTest: boolean }
-  ) => Promise<void> | void;
+  ) => void | Promise<void>;
   store: DelivereeExtensionCaseStore;
   token: string;
+  discordClient?: import("discord.js").Client<true>;
 };
 
 class HttpError extends Error {
@@ -580,7 +581,8 @@ export async function handleDelivereeExtensionHttpRequest(
     "/deliveree/extension/health",
     "/deliveree/extension/page-state",
     "/deliveree/extension/status",
-    "/deliveree/extension/test-discord"
+    "/deliveree/extension/test-discord",
+    "/machitan/pick-proof"
   ];
 
   if (!validPaths.includes(pathname) || !["GET", "POST"].includes(request.method || "")) {
@@ -588,6 +590,21 @@ export async function handleDelivereeExtensionHttpRequest(
       error: "not_found",
       ok: false
     });
+    return;
+  }
+
+  if (pathname === "/machitan/pick-proof") {
+    if (!options.discordClient) {
+      sendJson(response, 500, { error: "Discord client not configured", ok: false });
+      return;
+    }
+    try {
+      const { handleMachitanPickProof } = await import("../machitan/pickProofIntake.js");
+      await handleMachitanPickProof(request, response, options.discordClient);
+    } catch (e) {
+      console.error(e);
+      sendJson(response, 500, { error: "Internal server error handling Machitan request", ok: false });
+    }
     return;
   }
 
@@ -614,6 +631,8 @@ export async function handleDelivereeExtensionHttpRequest(
       sendJson(response, 200, await handleDelivereeExtensionCommands(deviceId, options.store));
       return;
     }
+
+
 
     if (request.method !== "POST") {
       sendJson(response, 405, {
@@ -1017,7 +1036,8 @@ export function startDelivereeExtensionIntake(client: Client<true>) {
     allowedDeviceIds: env.DELIVEREE_EXTENSION_ALLOWED_DEVICE_IDS,
     notifier: new DiscordBotDelivereeExtensionNotifier(client),
     store: createDelivereeCaseStore(),
-    token: env.DELIVEREE_EXTENSION_TOKEN
+    token: env.DELIVEREE_EXTENSION_TOKEN,
+    discordClient: client
   });
 
   server.listen(env.DELIVEREE_EXTENSION_PORT, env.DELIVEREE_EXTENSION_HOST, () => {
