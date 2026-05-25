@@ -67,10 +67,11 @@ export async function handleMachitanPickProof(
       .setImage("attachment://pick_proof.jpg")
       .setTimestamp();
 
-    // Use the DELIVEREE_ALERT_CHANNEL_ID as requested
-    const channel = await client.channels.fetch(env.DELIVEREE_ALERT_CHANNEL_ID);
+    // Use MACHITAN_PICK_PROOF_CHANNEL_ID if configured, otherwise fallback to DELIVEREE_ALERT_CHANNEL_ID
+    const targetChannelId = env.MACHITAN_PICK_PROOF_CHANNEL_ID || env.DELIVEREE_ALERT_CHANNEL_ID;
+    const channel = await client.channels.fetch(targetChannelId);
     if (!channel || !channel.isTextBased() || !("send" in channel)) {
-      throw new Error(`Cannot send to channel ${env.DELIVEREE_ALERT_CHANNEL_ID}`);
+      throw new Error(`Cannot send to channel ${targetChannelId}`);
     }
 
     await channel.send({
