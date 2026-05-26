@@ -57,18 +57,23 @@ export async function handleMachitanPickProof(
       ? body.itemIds.map((item: unknown) => String(item)).filter(Boolean)
       : [];
     const itemRows = Array.isArray(body.items)
-      ? body.items.map((item: any) => {
+      ? body.items.map((item: any, index: number) => {
         const itemId = item?.itemId ?? item?.id ?? "-";
         const orderItemId = item?.orderItemId ?? "-";
         const productName = item?.productName ?? item?.name ?? "Item";
         const qty = item?.qty ?? item?.quantity ?? "-";
         const source = item?.source ?? "-";
-        return `Order #${item?.orderId ?? "-"} | OrderItem #${orderItemId} | Item #${itemId} | ${productName} | Qty ${qty} | ${source}`;
+        const orderId = item?.orderId ?? "-";
+        return [
+          `${index + 1}. ${productName}`,
+          `   Order: #${orderId} | Order Item: #${orderItemId} | Item: #${itemId}`,
+          `   Qty: ${qty} | Source: ${source}`
+        ].join("\n");
       }).filter(Boolean)
       : [];
-    const detailRows = itemSummary.length ? itemSummary : itemRows;
+    const detailRows = itemRows.length ? itemRows : itemSummary;
     const itemDetails = detailRows.length
-      ? detailRows.slice(0, 10).join("\n").slice(0, 1024)
+      ? detailRows.slice(0, 6).join("\n").slice(0, 1024)
       : (itemIds.length ? itemIds.join(", ").slice(0, 1024) : "-");
 
     // Convert Base64 back to buffer
