@@ -108,7 +108,7 @@ const envSchema = z.object({
   DELIVEREE_ALLOWED_GUILD_ID: optionalString,
   DELIVEREE_BUTTON_SIGNING_SECRET: optionalString,
   DELIVEREE_CASE_STORE_PATH: optionalString.default("data/deliveree-cases.json"),
-  MACHITAN_PICK_PROOF_CHANNEL_ID: optionalString,
+  MACHITAN_PICK_PROOF_CHANNEL_ID: optionalString.default("1418827227264450663"),
   DELIVEREE_EXTENSION_ALLOWED_DEVICE_IDS: optionalStringList.default(["yugi-browser"]),
   DELIVEREE_EXTENSION_ENABLED: optionalBoolean,
   DELIVEREE_EXTENSION_HOST: optionalString.default("0.0.0.0"),

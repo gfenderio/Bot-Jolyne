@@ -48,6 +48,28 @@ export async function handleMachitanPickProof(
     const picker = String(body.picker);
     const notes = body.notes ? String(body.notes) : "-";
     const imageBase64 = String(body.imageBase64);
+    const requestedChannelId = body.channelId ?? body.channel_id ?? body.targetChannelId ?? body.target_channel_id;
+    const targetChannelId = requestedChannelId ? String(requestedChannelId) : env.MACHITAN_PICK_PROOF_CHANNEL_ID;
+    const itemSummary = Array.isArray(body.itemSummary)
+      ? body.itemSummary.map((item: unknown) => String(item)).filter(Boolean)
+      : [];
+    const itemIds = Array.isArray(body.itemIds)
+      ? body.itemIds.map((item: unknown) => String(item)).filter(Boolean)
+      : [];
+    const itemRows = Array.isArray(body.items)
+      ? body.items.map((item: any) => {
+        const itemId = item?.itemId ?? item?.id ?? "-";
+        const orderItemId = item?.orderItemId ?? "-";
+        const productName = item?.productName ?? item?.name ?? "Item";
+        const qty = item?.qty ?? item?.quantity ?? "-";
+        const source = item?.source ?? "-";
+        return `Order #${item?.orderId ?? "-"} | OrderItem #${orderItemId} | Item #${itemId} | ${productName} | Qty ${qty} | ${source}`;
+      }).filter(Boolean)
+      : [];
+    const detailRows = itemSummary.length ? itemSummary : itemRows;
+    const itemDetails = detailRows.length
+      ? detailRows.slice(0, 10).join("\n").slice(0, 1024)
+      : (itemIds.length ? itemIds.join(", ").slice(0, 1024) : "-");
 
     // Convert Base64 back to buffer
     const imageBuffer = Buffer.from(imageBase64, "base64");
@@ -62,13 +84,16 @@ export async function handleMachitanPickProof(
       .addFields(
         { name: "Order ID", value: orderIdsStr, inline: true },
         { name: "Picker", value: picker, inline: true },
-        { name: "Notes", value: notes, inline: false }
+        { name: "Notes", value: notes.slice(0, 1024), inline: false },
+        { name: "Items", value: itemDetails, inline: false }
       )
       .setImage("attachment://pick_proof.jpg")
       .setTimestamp();
 
-    // Use MACHITAN_PICK_PROOF_CHANNEL_ID if configured, otherwise fallback to DELIVEREE_ALERT_CHANNEL_ID
-    const targetChannelId = env.MACHITAN_PICK_PROOF_CHANNEL_ID || env.DELIVEREE_ALERT_CHANNEL_ID;
+    if (!targetChannelId) {
+      throw new Error("MACHITAN_PICK_PROOF_CHANNEL_ID wajib diisi atau kirim channelId di payload.");
+    }
+
     const channel = await client.channels.fetch(targetChannelId);
     if (!channel || !channel.isTextBased() || !("send" in channel)) {
       throw new Error(`Cannot send to channel ${targetChannelId}`);
@@ -79,9 +104,10 @@ export async function handleMachitanPickProof(
       files: [attachment]
     });
 
-    sendJson(response, 200, { message: "Photo received and sent to Discord", ok: true });
+    sendJson(response, 200, { message: "Photo received and sent to Discord", ok: true, channelId: targetChannelId });
   } catch (error) {
     console.error("Machitan Pick Proof Intake Error:", error);
     sendJson(response, 500, { error: error instanceof Error ? error.message : "Internal Server Error", ok: false });
   }
 }
+
