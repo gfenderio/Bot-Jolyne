@@ -1,4 +1,4 @@
-import type { IncomingMessage, ServerResponse } from "node:http";
+﻿import type { IncomingMessage, ServerResponse } from "node:http";
 import { AttachmentBuilder, Client, EmbedBuilder } from "discord.js";
 import { env } from "../config/env.js";
 
@@ -45,8 +45,14 @@ export async function handleMachitanPickProof(
     }
 
     const orderIdsStr = Array.isArray(body.orderIds) ? body.orderIds.join(", ") : String(body.orderIds);
-    const picker = String(body.picker);
     const notes = body.notes ? String(body.notes) : "-";
+    const proofType = String(body.proofType ?? body.type ?? "pick_proof").toLowerCase();
+    const isPackProof = proofType.includes("pack");
+    const isBypass = body.isBypass === true || proofType.includes("bypass");
+    const actorLabel = isPackProof ? "Packer" : "Picker";
+    const actorName = String(isPackProof ? (body.packer ?? body.picker ?? "-") : (body.picker ?? body.packer ?? "-"));
+    const picker = actorName;
+    const titlePrefix = isPackProof ? (isBypass ? "📦 Pack Proof Bypass" : "📦 Pack Proof") : "📸 Pick Proof";
     const imageBase64 = String(body.imageBase64);
     const requestedChannelId = body.channelId ?? body.channel_id ?? body.targetChannelId ?? body.target_channel_id;
     const targetChannelId = requestedChannelId ? String(requestedChannelId) : env.MACHITAN_PICK_PROOF_CHANNEL_ID;
@@ -80,19 +86,19 @@ export async function handleMachitanPickProof(
     const imageBuffer = Buffer.from(imageBase64, "base64");
     
     // Create Attachment
-    const attachment = new AttachmentBuilder(imageBuffer, { name: "pick_proof.jpg" });
+    const attachment = new AttachmentBuilder(imageBuffer, { name: isPackProof ? "pack_proof.jpg" : "pick_proof.jpg" });
 
     // Create Embed
     const embed = new EmbedBuilder()
       .setColor(0x00ff00)
-      .setTitle(`📸 Pick Proof: Order #${orderIdsStr}`)
+      .setTitle(`${titlePrefix}: Order #${orderIdsStr}`)
       .addFields(
         { name: "Order ID", value: orderIdsStr, inline: true },
-        { name: "Picker", value: picker, inline: true },
+        { name: actorLabel, value: picker, inline: true },
         { name: "Notes", value: notes.slice(0, 1024), inline: false },
         { name: "Items", value: itemDetails, inline: false }
       )
-      .setImage("attachment://pick_proof.jpg")
+      .setImage(isPackProof ? "attachment://pack_proof.jpg" : "attachment://pick_proof.jpg")
       .setTimestamp();
 
     if (!targetChannelId) {
@@ -115,4 +121,6 @@ export async function handleMachitanPickProof(
     sendJson(response, 500, { error: error instanceof Error ? error.message : "Internal Server Error", ok: false });
   }
 }
+
+
 
