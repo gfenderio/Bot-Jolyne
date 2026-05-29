@@ -155,22 +155,27 @@ async function fetchEcommercePickRequestsFromMetabase() {
   const query = `
     SELECT * FROM (
       SELECT
-        id,
-        name AS invoice_number,
-        source,
-        channel,
-        item_id,
-        qty,
-        price,
-        admin_notes,
-        status,
-        created_at,
-        updated_at
-      FROM outside_orders
-      WHERE item_id IS NOT NULL
-        AND qty > 0
-        AND channel IN ('Tokopedia', 'TOPED', 'Shopee', 'SHOPEE')
-      ORDER BY id DESC
+        oo.id,
+        oo.name AS invoice_number,
+        oo.source,
+        oo.channel,
+        oo.item_id,
+        oo.qty,
+        oo.price,
+        oo.admin_notes,
+        oo.status,
+        oo.created_at,
+        oo.updated_at,
+        i.name AS item_name,
+        i.character_name,
+        img.path AS image_path
+      FROM outside_orders oo
+      LEFT JOIN items i ON i.item_id = oo.item_id
+      LEFT JOIN images img ON img.image_id = i.main_img
+      WHERE oo.item_id IS NOT NULL
+        AND oo.qty > 0
+        AND oo.channel IN ('Tokopedia', 'TOPED', 'Shopee', 'SHOPEE')
+      ORDER BY oo.id DESC
       LIMIT ${limit}
     ) recent_ecommerce_pick_requests
     ORDER BY id ASC
@@ -196,9 +201,17 @@ async function fetchEcommercePickRequestRows() {
   return fetchEcommercePickRequestsFromMetabase();
 }
 
+function imageUrl(value: unknown) {
+  const raw = text(value, "");
+  if (!raw) return undefined;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return `https://old.kyou.id/storage/${raw.replace(/^\/+/, "")}`;
+}
+
 function buildEmbed(row: EcommercePickRequestRow) {
   const itemId = text(row.item_id ?? row.itemId);
   const itemName = text(row.item_name ?? row.itemName ?? row.name, "E-Commerce item");
+  const characterName = text(row.character_name ?? row.characterName, "");
   const invoiceNumber = text(row.invoice_number ?? row.invoiceNumber);
   const source = text(row.source);
   const qty = numberText(row.qty ?? row.quantity, "1");
@@ -212,7 +225,7 @@ function buildEmbed(row: EcommercePickRequestRow) {
   const embed = new EmbedBuilder()
     .setColor(0x00a3ff)
     .setTitle("🛒 New E-Commerce Pick Request")
-    .setDescription(truncate(itemName, 256))
+    .setDescription(truncate(characterName ? `${itemName}\n${characterName}` : itemName, 256))
     .addFields(
       { name: "Channel", value: channel, inline: true },
       { name: "Invoice/Buyer", value: truncate(invoiceNumber, 256), inline: true },
@@ -225,6 +238,11 @@ function buildEmbed(row: EcommercePickRequestRow) {
       { name: "Notes", value: truncate(notes), inline: false }
     )
     .setTimestamp();
+
+  const thumbnailUrl = imageUrl(row.image_path ?? row.imagePath ?? row.thumbnail_link ?? row.thumbnailLink ?? row.image_link ?? row.imageLink);
+  if (thumbnailUrl) {
+    embed.setThumbnail(thumbnailUrl);
+  }
 
   if (stockLogsUrl) {
     embed.addFields({ name: "Links", value: `[Stock Logs](${stockLogsUrl})`, inline: false });
