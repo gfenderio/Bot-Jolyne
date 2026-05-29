@@ -2,6 +2,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { env } from "../config/env.js";
+import { fetchNativeQueryWithPagination, type MetabaseConfig } from "../services/metabase.js";
 
 type EcommercePickRequestRow = Record<string, unknown>;
 
@@ -78,6 +79,33 @@ function extractRows(payload: unknown): EcommercePickRequestRow[] {
   return [];
 }
 
+function hasMetabaseConfig() {
+  return Boolean(env.METABASE_URL && env.METABASE_EMAIL && env.METABASE_PASSWORD && env.METABASE_DATABASE_ID);
+}
+
+function metabaseConfig(): MetabaseConfig {
+  if (!env.METABASE_URL || !env.METABASE_EMAIL || !env.METABASE_PASSWORD || !env.METABASE_DATABASE_ID) {
+    throw new Error("Metabase env belum lengkap untuk Machitan e-commerce pick request poller.");
+  }
+
+  return {
+    url: env.METABASE_URL,
+    email: env.METABASE_EMAIL,
+    password: env.METABASE_PASSWORD,
+    databaseId: env.METABASE_DATABASE_ID
+  };
+}
+
+function datasetToRows(columns: string[], rows: unknown[][]): EcommercePickRequestRow[] {
+  return rows.map((row) => {
+    const mapped: EcommercePickRequestRow = {};
+    columns.forEach((column, index) => {
+      mapped[column] = row[index];
+    });
+    return mapped;
+  });
+}
+
 async function readSeenStore(path: string): Promise<Set<string>> {
   try {
     const parsed = JSON.parse(await readFile(path, "utf8")) as SeenStore;
@@ -120,6 +148,52 @@ async function fetchEcommercePickRequests() {
   }
 
   return extractRows(payload);
+}
+
+async function fetchEcommercePickRequestsFromMetabase() {
+  const limit = env.MACHITAN_ECOMMERCE_PICK_REQUEST_POLL_LIMIT;
+  const query = `
+    SELECT * FROM (
+      SELECT
+        id,
+        name AS invoice_number,
+        source,
+        channel,
+        item_id,
+        qty,
+        price,
+        admin_notes,
+        status,
+        created_at,
+        updated_at
+      FROM outside_orders
+      WHERE item_id IS NOT NULL
+        AND qty > 0
+        AND channel IN ('Tokopedia', 'TOPED', 'Shopee', 'SHOPEE')
+      ORDER BY id DESC
+      LIMIT ${limit}
+    ) recent_ecommerce_pick_requests
+    ORDER BY id ASC
+  `;
+  const result = await fetchNativeQueryWithPagination(metabaseConfig(), query, limit);
+  return datasetToRows(result.columns, result.rows as unknown[][]);
+}
+
+async function fetchEcommercePickRequestRows() {
+  if (env.MACHITAN_KYOU_API_TOKEN) {
+    try {
+      return await fetchEcommercePickRequests();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes("HTTP 422") || !hasMetabaseConfig()) {
+        throw error;
+      }
+
+      console.warn("Kyou API list endpoint butuh invoice_number; fallback ke Metabase outside_orders.");
+    }
+  }
+
+  return fetchEcommercePickRequestsFromMetabase();
 }
 
 function buildEmbed(row: EcommercePickRequestRow) {
@@ -175,8 +249,8 @@ export function startMachitanEcommercePickRequestPoller(client: Client<true>) {
     return () => undefined;
   }
 
-  if (!env.MACHITAN_KYOU_API_TOKEN) {
-    console.warn("Machitan e-commerce pick request poller aktif, tapi MACHITAN_KYOU_API_TOKEN belum diisi. Poller dilewati.");
+  if (!env.MACHITAN_KYOU_API_TOKEN && !hasMetabaseConfig()) {
+    console.warn("Machitan e-commerce pick request poller aktif, tapi token Kyou/API atau Metabase env belum lengkap. Poller dilewati.");
     return () => undefined;
   }
 
@@ -191,7 +265,7 @@ export function startMachitanEcommercePickRequestPoller(client: Client<true>) {
 
     try {
       const seenKeys = await readSeenStore(env.MACHITAN_ECOMMERCE_PICK_REQUEST_SEEN_STORE_PATH);
-      const rows = (await fetchEcommercePickRequests())
+      const rows = (await fetchEcommercePickRequestRows())
         .sort((left, right) => rowTimestamp(left) - rowTimestamp(right));
       const newRows = rows.filter((row) => !seenKeys.has(rowKey(row)));
 
