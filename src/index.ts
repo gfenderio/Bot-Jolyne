@@ -12,7 +12,6 @@ import { startDelivereeWebMonitor } from "./deliveree/webMonitor.js";
 import { handleInteractionCreate } from "./events/interaction-create.js";
 import { handleReady } from "./events/ready.js";
 import { startBirthdayNowScheduler } from "./schedulers/birthday-now.js";
-import { startMachitanEcommercePickRequestPoller } from "./machitan/ecommercePickRequestPoller.js";
 import { registerGuildSlashCommands } from "./services/slash-commands.js";
 
 startDelivereePoller({
@@ -35,7 +34,6 @@ if (!env.DISCORD_TOKEN) {
     startBirthdayNowScheduler(readyClient);
     startDelivereeExtensionIntake(readyClient);
     startDelivereeWebMonitor(readyClient);
-    startMachitanEcommercePickRequestPoller(readyClient);
   });
   client.on(Events.Error, (error) => {
     console.error("Discord client error", error);
