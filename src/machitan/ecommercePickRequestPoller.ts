@@ -38,7 +38,7 @@ function rowKey(row: EcommercePickRequestRow) {
   const id = row.id ?? row.request_id ?? row.ecommerce_pick_request_id ?? row.pick_request_id;
   if (id !== undefined && id !== null && String(id).trim()) {
     const table = text(row.source_table ?? row.sourceTable ?? row.table ?? row.row_type ?? row.rowType, "ecommerce_pick_requests");
-    return `${table}:id:${String(id).trim()}`;
+    return `${table}:physical-picked:id:${String(id).trim()}`;
   }
 
   return [
