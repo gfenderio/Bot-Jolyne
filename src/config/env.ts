@@ -109,6 +109,14 @@ const envSchema = z.object({
   DELIVEREE_BUTTON_SIGNING_SECRET: optionalString,
   DELIVEREE_CASE_STORE_PATH: optionalString.default("data/deliveree-cases.json"),
   MACHITAN_PICK_PROOF_CHANNEL_ID: optionalString.default("1418827227264450663"),
+  MACHITAN_ECOMMERCE_PICK_REQUEST_CHANNEL_ID: optionalString.default("1501899831268868106"),
+  MACHITAN_ECOMMERCE_PICK_REQUEST_POLL_ENABLED: optionalBoolean,
+  MACHITAN_ECOMMERCE_PICK_REQUEST_NOTIFY_EXISTING: optionalBoolean,
+  MACHITAN_ECOMMERCE_PICK_REQUEST_POLL_INTERVAL_SECONDS: pollIntervalSeconds.default(15),
+  MACHITAN_ECOMMERCE_PICK_REQUEST_POLL_LIMIT: pollIntervalSeconds.default(50),
+  MACHITAN_ECOMMERCE_PICK_REQUEST_SEEN_STORE_PATH: optionalString.default("data/machitan-ecommerce-pick-requests-seen.json"),
+  MACHITAN_KYOU_API_BASE_URL: optionalString.default("https://api.kyou.id/api"),
+  MACHITAN_KYOU_API_TOKEN: optionalString,
   DELIVEREE_EXTENSION_ALLOWED_DEVICE_IDS: optionalStringList.default(["yugi-browser"]),
   DELIVEREE_EXTENSION_ENABLED: optionalBoolean,
   DELIVEREE_EXTENSION_HOST: optionalString.default("0.0.0.0"),
@@ -144,3 +152,4 @@ export function requireDiscordBotEnv() {
 
   return result.data;
 }
+
