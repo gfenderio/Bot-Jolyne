@@ -1,4 +1,4 @@
-﻿import type { IncomingMessage, ServerResponse } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { AttachmentBuilder, Client, EmbedBuilder } from "discord.js";
 import { env } from "../config/env.js";
 
@@ -123,7 +123,7 @@ export async function handleMachitanPickProof(
 
       const imageBuffer = Buffer.from(imageBase64, "base64");
       for (const { item, index } of ecommerceRows) {
-        const orderId = String(item?.orderId ?? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-");
+        const orderId = String(item?.invoiceNumber ?? item?.invoice_number ?? item?.orderId ?? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-");
         const itemId = String(item?.itemId ?? item?.id ?? "-");
         const productName = String(item?.productName ?? item?.name ?? "E-Commerce item");
         const qty = String(item?.qty ?? item?.quantity ?? "-");
