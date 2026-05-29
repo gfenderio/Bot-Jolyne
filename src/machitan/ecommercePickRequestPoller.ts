@@ -37,7 +37,8 @@ function rupiah(value: unknown) {
 function rowKey(row: EcommercePickRequestRow) {
   const id = row.id ?? row.request_id ?? row.ecommerce_pick_request_id ?? row.pick_request_id;
   if (id !== undefined && id !== null && String(id).trim()) {
-    return `id:${String(id).trim()}`;
+    const table = text(row.source_table ?? row.sourceTable ?? row.table ?? row.row_type ?? row.rowType, "ecommerce_pick_requests");
+    return `${table}:id:${String(id).trim()}`;
   }
 
   return [
@@ -155,27 +156,37 @@ async function fetchEcommercePickRequestsFromMetabase() {
   const query = `
     SELECT * FROM (
       SELECT
-        oo.id,
-        oo.name AS invoice_number,
-        oo.source,
-        oo.channel,
-        oo.item_id,
-        oo.qty,
-        oo.price,
-        oo.admin_notes,
-        oo.status,
-        oo.created_at,
-        oo.updated_at,
+        epr.id,
+        'ecommerce_pick_requests' AS source_table,
+        epr.invoice_number,
+        epr.source,
+        CASE
+          WHEN epr.admin_notes LIKE 'Tokopedia %' THEN 'Tokopedia'
+          WHEN epr.admin_notes LIKE 'Shopee %' THEN 'Shopee'
+          ELSE 'E-Commerce'
+        END AS channel,
+        epr.item_id,
+        epr.qty,
+        NULL AS price,
+        epr.admin_notes,
+        CASE
+          WHEN epr.is_physically_picked = 1 THEN 'PHYSICALLY_PICKED'
+          ELSE 'REQUESTED'
+        END AS status,
+        epr.created_at,
+        epr.updated_at,
+        epr.physical_picked_qty,
+        epr.is_physically_picked,
+        epr.physically_picked_at,
         i.name AS item_name,
         i.character_name,
         img.path AS image_path
-      FROM outside_orders oo
-      LEFT JOIN items i ON i.item_id = oo.item_id
+      FROM ecommerce_pick_requests epr
+      LEFT JOIN items i ON i.item_id = epr.item_id
       LEFT JOIN images img ON img.image_id = i.main_img
-      WHERE oo.item_id IS NOT NULL
-        AND oo.qty > 0
-        AND oo.channel IN ('Tokopedia', 'TOPED', 'Shopee', 'SHOPEE')
-      ORDER BY oo.id DESC
+      WHERE epr.item_id IS NOT NULL
+        AND epr.qty > 0
+      ORDER BY epr.id DESC
       LIMIT ${limit}
     ) recent_ecommerce_pick_requests
     ORDER BY id ASC
@@ -219,6 +230,7 @@ function buildEmbed(row: EcommercePickRequestRow) {
   const notes = text(row.admin_notes ?? row.adminNotes ?? row.notes);
   const requestedBy = text(row.requested_by ?? row.requestedBy ?? row.created_by ?? row.createdBy ?? row.admin_name ?? row.adminName, "Kyou Extension");
   const price = rupiah(row.price ?? row.sale_price ?? row.salePrice);
+  const status = text(row.status ?? row.pick_status ?? row.pickStatus, "REQUESTED");
   const createdAt = text(row.created_at ?? row.createdAt ?? row.requested_at ?? row.requestedAt);
   const stockLogsUrl = itemId !== "-" ? `https://old.kyou.id/admin/stock-log/${encodeURIComponent(itemId)}` : undefined;
 
@@ -233,6 +245,7 @@ function buildEmbed(row: EcommercePickRequestRow) {
       { name: "Item ID", value: itemId, inline: true },
       { name: "Qty", value: qty, inline: true },
       { name: "Harga", value: price, inline: true },
+      { name: "Status", value: truncate(status, 256), inline: true },
       { name: "Requested By", value: truncate(requestedBy, 256), inline: true },
       { name: "Created At", value: truncate(createdAt, 256), inline: true },
       { name: "Notes", value: truncate(notes), inline: false }
