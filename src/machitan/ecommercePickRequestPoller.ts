@@ -205,7 +205,7 @@ function imageUrl(value: unknown) {
   const raw = text(value, "");
   if (!raw) return undefined;
   if (/^https?:\/\//i.test(raw)) return raw;
-  return `https://old.kyou.id/storage/${raw.replace(/^\/+/, "")}`;
+  return `https://kyoucdn.id/thumbnail/${raw.replace(/^\/+/, "")}`;
 }
 
 function buildEmbed(row: EcommercePickRequestRow) {
