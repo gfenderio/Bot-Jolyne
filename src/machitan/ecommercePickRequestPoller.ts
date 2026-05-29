@@ -178,15 +178,22 @@ async function fetchEcommercePickRequestsFromMetabase() {
         epr.physical_picked_qty,
         epr.is_physically_picked,
         epr.physically_picked_at,
+        epr.physically_picked_by,
+        epr.physical_pick_image_path,
+        epr.physical_pick_notes,
+        picker.name AS picker_name,
+        picker.username AS picker_username,
         i.name AS item_name,
         i.character_name,
         img.path AS image_path
       FROM ecommerce_pick_requests epr
+      LEFT JOIN users picker ON picker.id = epr.physically_picked_by
       LEFT JOIN items i ON i.item_id = epr.item_id
       LEFT JOIN images img ON img.image_id = i.main_img
       WHERE epr.item_id IS NOT NULL
         AND epr.qty > 0
-      ORDER BY epr.id DESC
+        AND epr.is_physically_picked = 1
+      ORDER BY epr.physically_picked_at DESC, epr.id DESC
       LIMIT ${limit}
     ) recent_ecommerce_pick_requests
     ORDER BY id ASC
@@ -219,46 +226,53 @@ function imageUrl(value: unknown) {
   return `https://kyoucdn.id/thumbnail/${raw.replace(/^\/+/, "")}`;
 }
 
+function proofImageUrl(value: unknown) {
+  const raw = text(value, "");
+  if (!raw) return undefined;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return `https://kyoucdn.id/${raw.replace(/^\/+/, "")}`;
+}
+
+function mentionForChannel(channel: string) {
+  const normalized = channel.toLowerCase();
+  if (normalized.includes("shopee")) return "<@804685637252939788>";
+  if (normalized.includes("tokopedia") || normalized.includes("toped")) return "<@833000054880206888>";
+  return "";
+}
+
 function buildEmbed(row: EcommercePickRequestRow) {
   const itemId = text(row.item_id ?? row.itemId);
   const itemName = text(row.item_name ?? row.itemName ?? row.name, "E-Commerce item");
-  const characterName = text(row.character_name ?? row.characterName, "");
   const invoiceNumber = text(row.invoice_number ?? row.invoiceNumber);
   const source = text(row.source);
-  const qty = numberText(row.qty ?? row.quantity, "1");
   const channel = text(row.channel ?? row.sales_channel ?? row.salesChannel ?? row.origin_channel ?? row.originChannel, "E-Commerce");
-  const notes = text(row.admin_notes ?? row.adminNotes ?? row.notes);
-  const requestedBy = text(row.requested_by ?? row.requestedBy ?? row.created_by ?? row.createdBy ?? row.admin_name ?? row.adminName, "Kyou Extension");
-  const price = rupiah(row.price ?? row.sale_price ?? row.salePrice);
-  const status = text(row.status ?? row.pick_status ?? row.pickStatus, "REQUESTED");
-  const createdAt = text(row.created_at ?? row.createdAt ?? row.requested_at ?? row.requestedAt);
+  const qty = numberText(row.physical_picked_qty ?? row.physicalPickedQty ?? row.qty ?? row.quantity, "1");
+  const picker = text(row.picker_name ?? row.pickerName ?? row.picker_username ?? row.pickerUsername ?? row.physically_picked_by ?? row.physicallyPickedBy, "WH Picker");
+  const pickedAt = text(row.physically_picked_at ?? row.physicallyPickedAt ?? row.updated_at ?? row.updatedAt);
   const stockLogsUrl = itemId !== "-" ? `https://old.kyou.id/admin/stock-log/${encodeURIComponent(itemId)}` : undefined;
 
   const embed = new EmbedBuilder()
-    .setColor(0x00a3ff)
-    .setTitle("🛒 New E-Commerce Pick Request")
-    .setDescription(truncate(characterName ? `${itemName}\n${characterName}` : itemName, 256))
+    .setColor(0x00c853)
+    .setTitle(truncate(itemName, 256))
     .addFields(
-      { name: "Channel", value: channel, inline: true },
-      { name: "Invoice/Buyer", value: truncate(invoiceNumber, 256), inline: true },
-      { name: "Source", value: source, inline: true },
-      { name: "Item ID", value: itemId, inline: true },
+      { name: "Kode Pesanan", value: truncate(invoiceNumber, 256), inline: true },
+      { name: "Picker", value: truncate(picker, 256), inline: true },
       { name: "Qty", value: qty, inline: true },
-      { name: "Harga", value: price, inline: true },
-      { name: "Status", value: truncate(status, 256), inline: true },
-      { name: "Requested By", value: truncate(requestedBy, 256), inline: true },
-      { name: "Created At", value: truncate(createdAt, 256), inline: true },
-      { name: "Notes", value: truncate(notes), inline: false }
+      { name: "Source", value: source, inline: true }
     )
     .setTimestamp();
 
-  const thumbnailUrl = imageUrl(row.image_path ?? row.imagePath ?? row.thumbnail_link ?? row.thumbnailLink ?? row.image_link ?? row.imageLink);
-  if (thumbnailUrl) {
-    embed.setThumbnail(thumbnailUrl);
+  if (stockLogsUrl) {
+    embed.setURL(stockLogsUrl);
   }
 
-  if (stockLogsUrl) {
-    embed.addFields({ name: "Links", value: `[Stock Logs](${stockLogsUrl})`, inline: false });
+  const image = proofImageUrl(row.physical_pick_image_path ?? row.physicalPickImagePath);
+  if (image) {
+    embed.setImage(image);
+  }
+
+  if (pickedAt !== "-") {
+    embed.setFooter({ text: pickedAt });
   }
 
   return embed;
@@ -271,7 +285,7 @@ async function notifyRows(client: Client<true>, rows: EcommercePickRequestRow[])
   }
 
   for (const row of rows) {
-    await channel.send({ embeds: [buildEmbed(row)] });
+    await channel.send({ content: mentionForChannel(text(row.channel ?? row.sales_channel ?? row.salesChannel ?? row.origin_channel ?? row.originChannel, "")), embeds: [buildEmbed(row)] });
   }
 }
 
