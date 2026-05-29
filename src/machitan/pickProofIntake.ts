@@ -2,6 +2,35 @@
 import { AttachmentBuilder, Client, EmbedBuilder } from "discord.js";
 import { env } from "../config/env.js";
 
+const ECOM_PICK_PROOF_CHANNEL_ID = "1390221553333043200";
+const SHOPEE_MENTION = "<@804685637252939788>";
+const TOKOPEDIA_MENTION = "<@833000054880206888>";
+
+function isEcommerceProofItem(item: any) {
+  const origin = String(item?.originType ?? item?.pickRequestType ?? item?.requestType ?? "").toLowerCase();
+  return origin.includes("e-com") || origin.includes("ecommerce") || origin.includes("outside");
+}
+
+function inferEcommerceChannel(orderId: string, item: any) {
+  const explicit = String(item?.channel ?? item?.ecommerce ?? item?.marketplace ?? "").toLowerCase();
+  if (explicit.includes("shopee")) return "Shopee";
+  if (explicit.includes("tokopedia") || explicit.includes("toped")) return "Tokopedia";
+  if (/^\d+$/.test(orderId) && orderId.length >= 12) return "Tokopedia";
+  return "Shopee";
+}
+
+function mentionForEcommerce(channel: string) {
+  const normalized = channel.toLowerCase();
+  if (normalized.includes("shopee")) return SHOPEE_MENTION;
+  if (normalized.includes("tokopedia") || normalized.includes("toped")) return TOKOPEDIA_MENTION;
+  return "";
+}
+
+function itemKyouUrl(itemId: string) {
+  return itemId && itemId !== "-" ? `https://kyou.id/items/${encodeURIComponent(itemId)}` : undefined;
+}
+
+
 // Helper for sending JSON response
 function sendJson(response: ServerResponse, statusCode: number, payload: unknown) {
   response.writeHead(statusCode, {
@@ -81,6 +110,57 @@ export async function handleMachitanPickProof(
     const itemDetails = detailRows.length
       ? detailRows.slice(0, 6).join("\n").slice(0, 1024)
       : (itemIds.length ? itemIds.join(", ").slice(0, 1024) : "-");
+
+    const ecommerceRows = Array.isArray(body.items)
+      ? body.items.map((item: any, index: number) => ({ item, index })).filter(({ item }: { item: any }) => isEcommerceProofItem(item))
+      : [];
+
+    if (!isPackProof && ecommerceRows.length > 0) {
+      const channel = await client.channels.fetch(ECOM_PICK_PROOF_CHANNEL_ID);
+      if (!channel || !channel.isTextBased() || !("send" in channel)) {
+        throw new Error(`Cannot send to channel ${ECOM_PICK_PROOF_CHANNEL_ID}`);
+      }
+
+      const imageBuffer = Buffer.from(imageBase64, "base64");
+      for (const { item, index } of ecommerceRows) {
+        const orderId = String(item?.orderId ?? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-");
+        const itemId = String(item?.itemId ?? item?.id ?? "-");
+        const productName = String(item?.productName ?? item?.name ?? "E-Commerce item");
+        const qty = String(item?.qty ?? item?.quantity ?? "-");
+        const source = String(item?.source ?? "-");
+        const channelName = inferEcommerceChannel(orderId, item);
+        const attachmentName = `ecom_pick_proof_${index + 1}.jpg`;
+        const attachment = new AttachmentBuilder(imageBuffer, { name: attachmentName });
+        const embed = new EmbedBuilder()
+          .setColor(0x00c853)
+          .setTitle(productName.slice(0, 256))
+          .addFields(
+            { name: "Kode Pesanan", value: orderId.slice(0, 1024), inline: true },
+            { name: "Picker", value: picker.slice(0, 1024), inline: true },
+            { name: "Qty", value: qty.slice(0, 1024), inline: true },
+            { name: "Source", value: source.slice(0, 1024), inline: true }
+          )
+          .setImage(`attachment://${attachmentName}`)
+          .setTimestamp();
+
+        const url = itemKyouUrl(itemId);
+        if (url) embed.setURL(url);
+        if (body.submittedAt) embed.setFooter({ text: String(body.submittedAt) });
+
+        await channel.send({
+          content: mentionForEcommerce(channelName),
+          embeds: [embed],
+          files: [attachment]
+        });
+      }
+
+      return sendJson(response, 200, {
+        message: "E-commerce pick proof received and sent to Discord",
+        ok: true,
+        channelId: ECOM_PICK_PROOF_CHANNEL_ID,
+        count: ecommerceRows.length
+      });
+    }
 
     // Convert Base64 back to buffer
     const imageBuffer = Buffer.from(imageBase64, "base64");
