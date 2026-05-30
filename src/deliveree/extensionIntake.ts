@@ -582,7 +582,8 @@ export async function handleDelivereeExtensionHttpRequest(
     "/deliveree/extension/page-state",
     "/deliveree/extension/status",
     "/deliveree/extension/test-discord",
-    "/machitan/pick-proof"
+    "/machitan/pick-proof",
+    "/machitan/pack-proof"
   ];
 
   if (!validPaths.includes(pathname) || !["GET", "POST"].includes(request.method || "")) {
@@ -593,7 +594,7 @@ export async function handleDelivereeExtensionHttpRequest(
     return;
   }
 
-  if (pathname === "/machitan/pick-proof") {
+  if (pathname === "/machitan/pick-proof" || pathname === "/machitan/pack-proof") {
     if (!options.discordClient) {
       sendJson(response, 500, { error: "Discord client not configured", ok: false });
       return;
