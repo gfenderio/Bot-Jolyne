@@ -136,12 +136,12 @@ export async function handleMachitanPickProof(
           .setColor(0x00c853)
           .setTitle(productName.slice(0, 256))
           .addFields(
-        { name: "Order ID", value: orderIdsStr, inline: true },
-        { name: actorLabel, value: picker, inline: true },
-        { name: "Notes", value: notes.slice(0, 1024), inline: !isPackProof },
-        ...(isPackProof ? [{ name: "Status", value: "Diproses ke RESI Fulfillment", inline: true }] : []),
-        { name: "Items", value: itemDetails, inline: false }
-      )
+            { name: "Order ID", value: orderId, inline: true },
+            { name: actorLabel, value: picker, inline: true },
+            { name: "Notes", value: notes.slice(0, 1024), inline: !isPackProof },
+            ...(isPackProof ? [{ name: "Status", value: "Diproses ke RESI Fulfillment", inline: true }] : []),
+            { name: "Items", value: `Qty: ${qty} | Source: ${source}`, inline: false }
+          )
           .setImage(`attachment://${attachmentName}`)
           .setTimestamp();
 
@@ -149,6 +149,10 @@ export async function handleMachitanPickProof(
         if (url) embed.setURL(url);
         if (body.submittedAt) embed.setFooter({ text: String(body.submittedAt) });
 
+        await channel.send({
+          content: mentionForEcommerce(channelName),
+          embeds: [embed],
+          files: [attachment]
         });
       }
 
@@ -158,13 +162,16 @@ export async function handleMachitanPickProof(
         channelId: ECOM_PICK_PROOF_CHANNEL_ID,
         orderIds: Array.isArray(body.orderIds) ? body.orderIds.map(String) : [String(body.orderIds)],
         actor: picker,
-        itemSummary: ecommerceRows.map(({ item }: any) => {
-           const productName = String(item?.productName ?? item?.name ?? "E-Commerce item");
-           const qty = String(item?.qty ?? item?.quantity ?? "-");
-           const source = String(item?.source ?? "-");
-           return `${productName} | Qty: ${qty} | Source: ${source}`;
+        items: ecommerceRows.map(({ item, index }: any) => {
+           const orderId = String(item?.invoiceNumber ?? item?.invoice_number ?? item?.orderId ?? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-");
+           return {
+             orderId: orderId,
+             itemId: String(item?.itemId ?? item?.id ?? "-"),
+             productName: String(item?.productName ?? item?.name ?? "E-Commerce item"),
+             qty: Number(item?.qty ?? item?.quantity ?? 1),
+             source: String(item?.source ?? item?.pickRequestType ?? item?.requestType ?? "-")
+           };
         }),
-        itemIds: ecommerceRows.map(({ item }: any) => String(item?.itemId ?? item?.id ?? "-")),
         notes: notes,
         imageBase64: imageBase64
       }).catch(err => console.error("Failed to save e-com proof to store", err));
@@ -217,8 +224,30 @@ export async function handleMachitanPickProof(
       channelId: targetChannelId,
       orderIds: Array.isArray(body.orderIds) ? body.orderIds.map(String) : [String(body.orderIds)],
       actor: picker,
-      itemSummary: itemSummary.length ? itemSummary : (Array.isArray(body.items) ? body.items.map((i: any) => `${i.productName ?? "Item"} | Qty: ${i.qty ?? i.quantity ?? "-"} | Source: ${i.source ?? "-"}`) : []),
-      itemIds: itemIds.length ? itemIds : (Array.isArray(body.items) ? body.items.map((i: any) => String(i.itemId ?? i.id ?? "-")) : []),
+      items: Array.isArray(body.items) && body.items.length > 0
+        ? body.items.map((item: any, index: number) => {
+            const orderId = String(item?.orderId ?? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-");
+            return {
+              orderId: orderId,
+              itemId: String(item?.itemId ?? item?.id ?? "-"),
+              productName: String(item?.productName ?? item?.name ?? "Item"),
+              qty: Number(item?.qty ?? item?.quantity ?? 1),
+              source: String(item?.source ?? item?.pickRequestType ?? item?.requestType ?? "-")
+            };
+          })
+        : (Array.isArray(body.orderIds) ? body.orderIds.map((oId: any) => ({
+            orderId: String(oId),
+            itemId: "-",
+            productName: "Proof Item",
+            qty: 1,
+            source: "-"
+          })) : [{
+            orderId: String(body.orderIds),
+            itemId: "-",
+            productName: "Proof Item",
+            qty: 1,
+            source: "-"
+          }]),
       notes: notes,
       imageBase64: imageBase64
     }).catch(err => console.error("Failed to save proof to store", err));

@@ -41,10 +41,12 @@ export function startMachitanDailyReportScheduler(client: Client<true>) {
         sheet.columns = [
           { header: "Waktu (WIB)", key: "time", width: 25 },
           { header: "Staff", key: "actor", width: 18 },
-          { header: "Order IDs", key: "orders", width: 25 },
-          { header: "Catatan", key: "notes", width: 30 },
-          { header: "Item Summary", key: "items", width: 55 },
-          { header: "Foto (Base64)", key: "photo", width: 15 }
+          { header: "Order ID", key: "orderId", width: 20 },
+          { header: "Item ID", key: "itemId", width: 18 },
+          { header: "Nama Barang", key: "productName", width: 40 },
+          { header: "Qty", key: "qty", width: 10 },
+          { header: "Source", key: "source", width: 15 },
+          { header: "Catatan", key: "notes", width: 30 }
         ];
 
         // Format Header Row
@@ -58,48 +60,67 @@ export function startMachitanDailyReportScheduler(client: Client<true>) {
         headerRow.alignment = { vertical: "middle", horizontal: "left" };
         headerRow.height = 26;
 
-        // Populate Data
-        data.forEach((p, idx) => {
-          const row = sheet.addRow({
-            time: new Date(p.timestamp).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }),
-            actor: p.actor,
-            orders: p.orderIds.join(", "),
-            notes: p.notes,
-            items: p.itemSummary.join("\n"),
-            photo: "Has Photo" 
-          });
+        let rowIndex = 0;
+        // Populate Data - One row per item!
+        data.forEach(p => {
+          const timestampStr = new Date(p.timestamp).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });
+          const actor = p.actor;
+          const notes = p.notes;
 
-          row.height = 24;
-          row.font = { name: "Segoe UI", size: 10 };
-          row.alignment = { vertical: "middle" };
+          // Safely iterate items or fall back to orderIds if items array is empty
+          const itemsToRender = Array.isArray(p.items) && p.items.length > 0
+            ? p.items
+            : p.orderIds.map(oId => ({
+                orderId: oId,
+                itemId: "-",
+                productName: "Proof Item",
+                qty: 1,
+                source: "-"
+              }));
 
-          // Format items column with text wrapping
-          const itemsCell = row.getCell("items");
-          itemsCell.alignment = { wrapText: true, vertical: "middle" };
+          itemsToRender.forEach(item => {
+            rowIndex++;
+            const row = sheet.addRow({
+              time: timestampStr,
+              actor: actor,
+              orderId: item.orderId || p.orderIds.join(", "),
+              itemId: item.itemId || "-",
+              productName: item.productName || "Item",
+              qty: item.qty || 1,
+              source: item.source || "-",
+              notes: notes
+            });
 
-          // Subtle Zebra Striping for better readability
-          if (idx % 2 === 1) {
-            row.fill = {
-              type: "pattern",
-              pattern: "solid",
-              fgColor: { argb: "FFF8F9FA" } // Light gray row background
-            };
-          }
+            row.height = 24;
+            row.font = { name: "Segoe UI", size: 10 };
+            row.alignment = { vertical: "middle" };
 
-          // Add cell borders to look premium
-          row.eachCell({ includeEmpty: true }, (cell) => {
-            cell.border = {
-              top: { style: "thin", color: { argb: "FFE0E0E0" } },
-              left: { style: "thin", color: { argb: "FFE0E0E0" } },
-              bottom: { style: "thin", color: { argb: "FFE0E0E0" } },
-              right: { style: "thin", color: { argb: "FFE0E0E0" } }
-            };
+            // Format productName with wrapText
+            row.getCell("productName").alignment = { wrapText: true, vertical: "middle" };
+
+            // Subtle Zebra Striping for better readability
+            if (rowIndex % 2 === 0) {
+              row.fill = {
+                type: "pattern",
+                pattern: "solid",
+                fgColor: { argb: "FFF8F9FA" } // Light gray row background
+              };
+            }
+
+            // Add cell borders to look premium
+            row.eachCell({ includeEmpty: true }, (cell) => {
+              cell.border = {
+                top: { style: "thin", color: { argb: "FFE0E0E0" } },
+                left: { style: "thin", color: { argb: "FFE0E0E0" } },
+                bottom: { style: "thin", color: { argb: "FFE0E0E0" } },
+                right: { style: "thin", color: { argb: "FFE0E0E0" } }
+              };
+            });
           });
         });
 
         // Enable AutoFilter so user can sort and filter any column
-        const totalRows = data.length + 1;
-        sheet.autoFilter = `A1:F${totalRows}`;
+        sheet.autoFilter = `A1:H${rowIndex + 1}`;
       };
 
       createSheet("Pick Fisik Log", pickFisiks);

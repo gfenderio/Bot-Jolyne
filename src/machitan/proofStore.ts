@@ -1,13 +1,20 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+export interface MachitanProofItem {
+  orderId?: string;
+  itemId?: string;
+  productName: string;
+  qty: number;
+  source: string;
+}
+
 export interface MachitanProofPayload {
   timestamp: string; // ISO 8601
   channelId: string;
   orderIds: string[];
   actor: string;
-  itemSummary: string[];
-  itemIds: string[];
+  items: MachitanProofItem[];
   notes: string;
   imageBase64: string;
 }
