@@ -8,7 +8,7 @@ const MARK_PICK_CHANNEL = "1418827227264450663";
 const PICK_FISIK_CHANNEL = "1390221553333043200";
 const PACK_PROOF_CHANNEL = "1209860901914677368";
 
-type SheetKind = "pick_fisik" | "mark_pick" | "pack";
+type SheetKind = "pick_fisik" | "mark_pick" | "pack" | "archive";
 
 interface SheetTheme {
   title: string;
@@ -21,7 +21,12 @@ const SHEET_THEMES: Record<SheetKind, SheetTheme> = {
   pick_fisik: { title: "Pick Fisik Log",         headerColor: "FF1B5E20", accentColor: "FFE8F5E9", actorLabel: "Picker" },
   mark_pick:  { title: "Mark Pick Log",          headerColor: "FF0D47A1", accentColor: "FFE3F2FD", actorLabel: "Picker" },
   pack:       { title: "Pack Log",               headerColor: "FF4A148C", accentColor: "FFF3E5F5", actorLabel: "Packer" },
+  archive:    { title: "Archive Log",            headerColor: "FFBF360C", accentColor: "FFFFE0B2", actorLabel: "Archiver" },
 };
+
+function isArchiveProof(p: MachitanProofPayload): boolean {
+  return String(p.proofType ?? "").toUpperCase().includes("ARCHIVE");
+}
 
 function jakartaDateParts(iso: string): { tanggal: string; jam: string } {
   const d = new Date(iso);
@@ -30,14 +35,36 @@ function jakartaDateParts(iso: string): { tanggal: string; jam: string } {
   return { tanggal: dateStr, jam: timeStr };
 }
 
-function sourceFillColor(source: string): string | null {
-  const s = source.toUpperCase();
-  if (s.includes("UREQ")) return "FFFFF8E1";
-  if (s.includes("GIFT")) return "FFFCE4EC";
-  if (s.includes("ECOM") || s.includes("E-COM") || s.includes("OUTSIDE")) return "FFE0F7FA";
-  if (s.includes("B2B") || s.includes("PARTNER")) return "FFF3E5F5";
-  if (s === "BEKASI" || s === "TANGERANG" || s === "SURABAYA") return "FFE8F5E9";
+function typeFillColor(tipe: string): string | null {
+  const t = tipe.toUpperCase();
+  if (t.includes("UREQ")) return "FFFFF8E1";       // amber
+  if (t.includes("GIFT")) return "FFFCE4EC";       // pink
+  if (t.includes("E-COM") || t.includes("ECOM")) return "FFE0F7FA"; // cyan
+  if (t.includes("B2B")) return "FFF3E5F5";        // purple
+  if (t === "REGULER" || t === "REGULAR") return "FFF5F5F5"; // neutral grey
+  // Archive reasons
+  if (t.includes("TIDAK KETEMU")) return "FFFFEBEE"; // light red
+  if (t.includes("SALAH")) return "FFFFF3E0";        // orange
+  if (t.includes("PINDAH RAK")) return "FFE8F5E9";   // light green
+  if (t.includes("LAIN")) return "FFEEEEEE";         // light grey
   return null;
+}
+
+function classifyType(item: MachitanProofItem): string {
+  const origin = String(item.originType ?? "").toLowerCase();
+  const source = String(item.source ?? "").toUpperCase();
+
+  if (origin.includes("ureq") || source === "UREQ") return "UReq";
+  if (origin.includes("gift") || source === "GIFT") return "Gift";
+  if (item.channel && item.channel.trim().length > 0) {
+    const ch = item.channel.toLowerCase();
+    if (ch.includes("shopee")) return "E-COM (Shopee)";
+    if (ch.includes("tokopedia") || ch.includes("toped")) return "E-COM (Tokopedia)";
+    return `E-COM (${item.channel})`;
+  }
+  if (origin.includes("ecom") || origin.includes("e-com") || origin.includes("outside")) return "E-COM";
+  if (origin.includes("b2b") || origin.includes("partner")) return "B2B";
+  return "Reguler";
 }
 
 function itemKyouUrl(itemId?: string): string | null {
@@ -56,7 +83,7 @@ function flattenItems(proofs: MachitanProofPayload[]): Array<MachitanProofItem &
   return rows;
 }
 
-function buildSheet(workbook: ExcelJS.Workbook, kind: SheetKind, proofs: MachitanProofPayload[], reportDateStr: string) {
+export function buildSheet(workbook: ExcelJS.Workbook, kind: SheetKind, proofs: MachitanProofPayload[], reportDateStr: string) {
   const theme = SHEET_THEMES[kind];
   const sheet = workbook.addWorksheet(theme.title, {
     views: [{ state: "frozen", ySplit: 4, showGridLines: false }],
@@ -65,7 +92,7 @@ function buildSheet(workbook: ExcelJS.Workbook, kind: SheetKind, proofs: Machita
   });
 
   // ── Title block (rows 1-3) ─────────────────────────────────────────────────
-  sheet.mergeCells("A1:J1");
+  sheet.mergeCells("A1:K1");
   const titleCell = sheet.getCell("A1");
   titleCell.value = `${theme.title} — ${reportDateStr}`;
   titleCell.font = { name: "Segoe UI Semibold", size: 16, bold: true, color: { argb: "FFFFFFFF" } };
@@ -78,7 +105,7 @@ function buildSheet(workbook: ExcelJS.Workbook, kind: SheetKind, proofs: Machita
   const uniqueOrders = new Set(flatRows.map(r => r.orderId).filter(Boolean)).size;
   const totalQty = flatRows.reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
 
-  sheet.mergeCells("A2:J2");
+  sheet.mergeCells("A2:K2");
   const summaryCell = sheet.getCell("A2");
   summaryCell.value = `Total Item: ${flatRows.length}    Total Qty: ${totalQty}    Unique Orders: ${uniqueOrders}    Unique ${theme.actorLabel}: ${uniquePickers}`;
   summaryCell.font = { name: "Segoe UI", size: 10, color: { argb: "FF424242" }, italic: true };
@@ -90,24 +117,28 @@ function buildSheet(workbook: ExcelJS.Workbook, kind: SheetKind, proofs: Machita
 
   // ── Column definitions ─────────────────────────────────────────────────────
   const baseColumns: Array<Partial<ExcelJS.Column> & { key: string; header: string }> = [
-    { header: "Tanggal",       key: "tanggal",      width: 12 },
-    { header: "Jam (WIB)",     key: "jam",          width: 11 },
-    { header: theme.actorLabel, key: "actor",       width: 22 },
-    { header: "Order / Invoice", key: "orderId",    width: 20 },
-    { header: "Order Item ID", key: "orderItemId",  width: 14 },
-    { header: "Item ID",       key: "itemId",       width: 12 },
-    { header: "Nama Barang",   key: "productName",  width: 48 },
-    { header: "Qty",           key: "qty",          width: 8 },
-    { header: "Source",        key: "source",       width: 14 },
-    { header: "Catatan",       key: "notes",        width: 28 },
+    { header: "Tanggal",         key: "tanggal",      width: 12 },
+    { header: "Jam (WIB)",       key: "jam",          width: 11 },
+    { header: theme.actorLabel,  key: "actor",        width: 22 },
+    { header: "Order / Invoice", key: "orderId",      width: 22 },
+    { header: "Order Item ID",   key: "orderItemId",  width: 14 },
+    { header: "Item ID",         key: "itemId",       width: 11 },
+    { header: "Nama Barang",     key: "productName",  width: 46 },
+    { header: "Qty",             key: "qty",          width: 7  },
+    { header: "Tipe",            key: "tipe",         width: 18 },
+    { header: "Source",          key: "source",       width: 14 },
+    { header: "Catatan",         key: "notes",        width: 28 },
   ];
 
-  // Pack sheet swaps "Source" for combined "Pack Location / Rack"
+  // Pack sheet uses "Lokasi Pack / Rack" instead of plain Source
   if (kind === "pack") {
-    baseColumns[8] = { header: "Lokasi Pack / Rack", key: "source", width: 22 };
+    baseColumns[9] = { header: "Lokasi Pack / Rack", key: "source", width: 22 };
+  }
+  // Archive sheet: kolom "Tipe" jadi "Alasan Arsip", "Source" tetap source asal
+  if (kind === "archive") {
+    baseColumns[8] = { header: "Alasan Arsip", key: "tipe", width: 22 };
   }
 
-  // Mark Pick adds channel info merged into source if available — handled at row time
   sheet.columns = baseColumns;
 
   // ── Header row (row 4) ─────────────────────────────────────────────────────
@@ -131,9 +162,12 @@ function buildSheet(workbook: ExcelJS.Workbook, kind: SheetKind, proofs: Machita
   for (const r of flatRows) {
     const { tanggal, jam } = jakartaDateParts(r._proof.timestamp);
     const orderDisplay = r.invoiceNumber && r.invoiceNumber !== "-" ? r.invoiceNumber : (r.orderId || r._proof.orderIds.join(", ") || "-");
+    const tipe = kind === "archive"
+      ? (r.archiveReason || "Lain-lain")
+      : classifyType(r);
     const sourceValue = kind === "pack"
-      ? [r.packLocation, r.rackName].filter(Boolean).join(" / ") || r.source || "-"
-      : (r.channel ? `${r.source} · ${r.channel}` : r.source);
+      ? ([r.packLocation, r.rackName].filter(Boolean).join(" / ") || r.source || "-")
+      : (r.source || "-");
 
     const row = sheet.addRow({
       tanggal,
@@ -144,6 +178,7 @@ function buildSheet(workbook: ExcelJS.Workbook, kind: SheetKind, proofs: Machita
       itemId: r.itemId || "-",
       productName: r.productName || "Item",
       qty: Number(r.qty) || 0,
+      tipe,
       source: sourceValue,
       notes: r._proof.notes || "-",
     });
@@ -165,12 +200,17 @@ function buildSheet(workbook: ExcelJS.Workbook, kind: SheetKind, proofs: Machita
     row.getCell("qty").numFmt = "#,##0";
     row.getCell("qty").alignment = { vertical: "middle", horizontal: "center" };
 
-    // Source color
-    const sourceColor = sourceFillColor(sourceValue);
-    if (sourceColor) {
-      row.getCell("source").fill = { type: "pattern", pattern: "solid", fgColor: { argb: sourceColor } };
-      row.getCell("source").font = { name: "Segoe UI Semibold", size: 10, bold: true };
+    // Tipe color badge
+    const tipeColor = typeFillColor(tipe);
+    if (tipeColor) {
+      row.getCell("tipe").fill = { type: "pattern", pattern: "solid", fgColor: { argb: tipeColor } };
+      row.getCell("tipe").font = { name: "Segoe UI Semibold", size: 10, bold: true };
+      row.getCell("tipe").alignment = { vertical: "middle", horizontal: "center" };
     }
+
+    // Source plain bold
+    row.getCell("source").font = { name: "Segoe UI Semibold", size: 10, bold: true };
+    row.getCell("source").alignment = { vertical: "middle", horizontal: "center" };
 
     // Zebra stripe (alternating background)
     if (rowIndex % 2 === 0) {
@@ -194,7 +234,7 @@ function buildSheet(workbook: ExcelJS.Workbook, kind: SheetKind, proofs: Machita
 
   // ── Empty state ────────────────────────────────────────────────────────────
   if (rowIndex === 0) {
-    sheet.mergeCells(`A5:J5`);
+    sheet.mergeCells(`A5:K5`);
     const emptyCell = sheet.getCell("A5");
     emptyCell.value = `Tidak ada data ${theme.title} untuk tanggal ${reportDateStr}.`;
     emptyCell.font = { name: "Segoe UI", size: 11, italic: true, color: { argb: "FF9E9E9E" } };
@@ -209,6 +249,31 @@ function buildSheet(workbook: ExcelJS.Workbook, kind: SheetKind, proofs: Machita
   }
 }
 
+export async function generateMachitanReportWorkbook(proofs: MachitanProofPayload[], todayStr: string): Promise<{ buffer: ArrayBuffer; pickFisiks: MachitanProofPayload[]; markPicks: MachitanProofPayload[]; packProofs: MachitanProofPayload[]; archives: MachitanProofPayload[]; }> {
+  // Pisahkan archive entries dari channel ID-nya (tidak tergantung channel, tergantung proofType)
+  const archives   = proofs.filter(p => isArchiveProof(p));
+  const regular    = proofs.filter(p => !isArchiveProof(p));
+
+  const pickFisiks = regular.filter(p => p.channelId === PICK_FISIK_CHANNEL);
+  const markPicks  = regular.filter(p => p.channelId === MARK_PICK_CHANNEL);
+  const packProofs = regular.filter(p => p.channelId === PACK_PROOF_CHANNEL);
+  const others     = regular.filter(p => ![MARK_PICK_CHANNEL, PICK_FISIK_CHANNEL, PACK_PROOF_CHANNEL].includes(p.channelId));
+  pickFisiks.push(...others);
+
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "Bot Jolyne";
+  workbook.created = new Date();
+  workbook.title = `Rekap Warehouse Machitan — ${todayStr}`;
+
+  buildSheet(workbook, "pick_fisik", pickFisiks, todayStr);
+  buildSheet(workbook, "mark_pick",  markPicks,  todayStr);
+  buildSheet(workbook, "pack",       packProofs, todayStr);
+  buildSheet(workbook, "archive",    archives,   todayStr);
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  return { buffer, pickFisiks, markPicks, packProofs, archives };
+}
+
 export function startMachitanDailyReportScheduler(client: Client<true>) {
   cron.schedule("0 0 * * *", async () => {
     try {
@@ -220,24 +285,8 @@ export function startMachitanDailyReportScheduler(client: Client<true>) {
         return;
       }
 
-      const pickFisiks = proofs.filter(p => p.channelId === PICK_FISIK_CHANNEL);
-      const markPicks  = proofs.filter(p => p.channelId === MARK_PICK_CHANNEL);
-      const packProofs = proofs.filter(p => p.channelId === PACK_PROOF_CHANNEL);
-      const others     = proofs.filter(p => ![MARK_PICK_CHANNEL, PICK_FISIK_CHANNEL, PACK_PROOF_CHANNEL].includes(p.channelId));
-      pickFisiks.push(...others);
-
       const todayStr = new Date().toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "long", year: "numeric" });
-
-      const workbook = new ExcelJS.Workbook();
-      workbook.creator = "Bot Jolyne";
-      workbook.created = new Date();
-      workbook.title = `Rekap Warehouse Machitan — ${todayStr}`;
-
-      buildSheet(workbook, "pick_fisik", pickFisiks, todayStr);
-      buildSheet(workbook, "mark_pick",  markPicks,  todayStr);
-      buildSheet(workbook, "pack",       packProofs, todayStr);
-
-      const buffer = await workbook.xlsx.writeBuffer();
+      const { buffer, pickFisiks, markPicks, packProofs, archives } = await generateMachitanReportWorkbook(proofs, todayStr);
 
       const channel = await client.channels.fetch(TARGET_CHANNEL_ID);
       if (!channel || !channel.isTextBased()) {
@@ -253,11 +302,12 @@ export function startMachitanDailyReportScheduler(client: Client<true>) {
       const embed = new EmbedBuilder()
         .setColor(0x2E7D32)
         .setTitle(`📊 Rekap Harian Warehouse — ${todayStr}`)
-        .setDescription(`File Excel berisi 3 sheet terpisah: **Pick Fisik**, **Mark Pick**, dan **Pack**. Setiap baris = 1 item. Klik nama produk untuk buka di Kyou.`)
+        .setDescription(`File Excel berisi 4 sheet terpisah: **Pick Fisik**, **Mark Pick**, **Pack**, dan **Archive Log**. Setiap baris = 1 item. Klik nama produk untuk buka di Kyou.`)
         .addFields(
           { name: "📦 Pick Fisik",         value: `${pickFisiks.length} proof`, inline: true },
           { name: "📝 Mark Pick",          value: `${markPicks.length} proof`,  inline: true },
           { name: "✅ Pack",                value: `${packProofs.length} proof`, inline: true },
+          { name: "🗄️ Archive",             value: `${archives.length} item`,    inline: true },
           { name: "Total Item Rows",       value: `${totalItems}`,              inline: true },
         )
         .setFooter({ text: `Generated ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB · Auto-cron 00:00` })

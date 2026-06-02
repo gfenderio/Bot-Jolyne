@@ -111,6 +111,7 @@ export async function handleMachitanPickProof(
                 invoiceNumber: item?.invoiceNumber ? String(item.invoiceNumber) : undefined,
                 originType: item?.originType ? String(item.originType) : (item?.pickRequestType ? String(item.pickRequestType) : undefined),
                 rackName: item?.rackName ? String(item.rackName) : undefined,
+                archiveReason: item?.archiveReason ? String(item.archiveReason) : undefined,
               };
             })
           : [],

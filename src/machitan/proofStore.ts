@@ -13,6 +13,7 @@ export interface MachitanProofItem {
   originType?: string;
   packLocation?: string;
   rackName?: string;
+  archiveReason?: string;
 }
 
 export interface MachitanProofPayload {
