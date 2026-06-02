@@ -135,11 +135,12 @@ export async function handleMachitanPickProof(
           .setColor(0x00c853)
           .setTitle(productName.slice(0, 256))
           .addFields(
-            { name: "Kode Pesanan", value: orderId.slice(0, 1024), inline: true },
-            { name: "Picker", value: picker.slice(0, 1024), inline: true },
-            { name: "Qty", value: qty.slice(0, 1024), inline: true },
-            { name: "Source", value: source.slice(0, 1024), inline: true }
-          )
+        { name: "Order ID", value: orderIdsStr, inline: true },
+        { name: actorLabel, value: picker, inline: true },
+        { name: "Notes", value: notes.slice(0, 1024), inline: !isPackProof },
+        ...(isPackProof ? [{ name: "Status", value: "Diproses ke RESI Fulfillment", inline: true }] : []),
+        { name: "Items", value: itemDetails, inline: false }
+      )
           .setImage(`attachment://${attachmentName}`)
           .setTimestamp();
 
@@ -175,7 +176,8 @@ export async function handleMachitanPickProof(
       .addFields(
         { name: "Order ID", value: orderIdsStr, inline: true },
         { name: actorLabel, value: picker, inline: true },
-        { name: "Notes", value: notes.slice(0, 1024), inline: false },
+        { name: "Notes", value: notes.slice(0, 1024), inline: !isPackProof },
+        ...(isPackProof ? [{ name: "Status", value: "Diproses ke RESI Fulfillment", inline: true }] : []),
         { name: "Items", value: itemDetails, inline: false }
       )
       .setImage(isPackProof ? "attachment://pack_proof.jpg" : "attachment://pick_proof.jpg")
