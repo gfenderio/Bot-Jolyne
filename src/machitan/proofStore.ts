@@ -3,10 +3,16 @@ import path from "node:path";
 
 export interface MachitanProofItem {
   orderId?: string;
+  orderItemId?: string;
   itemId?: string;
   productName: string;
   qty: number;
   source: string;
+  channel?: string;
+  invoiceNumber?: string;
+  originType?: string;
+  packLocation?: string;
+  rackName?: string;
 }
 
 export interface MachitanProofPayload {
@@ -17,6 +23,9 @@ export interface MachitanProofPayload {
   items: MachitanProofItem[];
   notes: string;
   imageBase64: string;
+  proofType?: string; // PICK_PROOF / PACK_PROOF / PACK_PROOF_BYPASS / ECOM_PHYSICAL_PICK_PROOF
+  isBypass?: boolean;
+  bypassReason?: string;
 }
 
 const STORE_PATH = path.join(process.cwd(), "data", "machitan-proofs.json");
@@ -42,7 +51,6 @@ export async function getAndClearMachitanProofs(): Promise<MachitanProofPayload[
   await ensureStoreFile();
   const content = await fs.readFile(STORE_PATH, "utf-8");
   const proofs = JSON.parse(content) as MachitanProofPayload[];
-  // Clear file
   await fs.writeFile(STORE_PATH, "[]", "utf-8");
   return proofs;
 }

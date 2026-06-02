@@ -70,7 +70,9 @@ export async function handleMachitanPickProof(
     const bodyStr = await readRequestBody(request);
     const body = JSON.parse(bodyStr);
 
-    if (!body.orderIds || !body.picker || !body.imageBase64) {
+    const logOnly = body.logOnly === true || String(body.proofType ?? body.type ?? "").toLowerCase().includes("log");
+
+    if (!body.orderIds || !body.picker || (!logOnly && !body.imageBase64)) {
       return sendJson(response, 400, { error: "Missing required fields", ok: false });
     }
 
@@ -83,7 +85,43 @@ export async function handleMachitanPickProof(
     const actorName = String(isPackProof ? (body.packer ?? body.picker ?? "-") : (body.picker ?? body.packer ?? "-"));
     const picker = actorName;
     const titlePrefix = isPackProof ? (isBypass ? "📦 Pack Proof Bypass" : "📦 Pack Proof") : "📸 Pick Proof";
-    const imageBase64 = String(body.imageBase64);
+    const imageBase64 = String(body.imageBase64 ?? "");
+
+    // logOnly mode: save to store untuk daily Excel report, skip Discord embed
+    if (logOnly) {
+      const requestedChannelIdLog = body.channelId ?? body.channel_id ?? body.targetChannelId ?? body.target_channel_id;
+      const targetChannelIdLog = requestedChannelIdLog ? String(requestedChannelIdLog) : "1390221553333043200"; // default PICK_FISIK
+
+      await addMachitanProof({
+        timestamp: new Date().toISOString(),
+        channelId: targetChannelIdLog,
+        orderIds: Array.isArray(body.orderIds) ? body.orderIds.map(String) : [String(body.orderIds)],
+        actor: picker,
+        items: Array.isArray(body.items)
+          ? body.items.map((item: any, index: number) => {
+              const orderId = String(item?.invoiceNumber ?? item?.invoice_number ?? item?.orderId ?? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-");
+              return {
+                orderId: orderId,
+                orderItemId: item?.orderItemId != null ? String(item.orderItemId) : undefined,
+                itemId: String(item?.itemId ?? item?.id ?? "-"),
+                productName: String(item?.productName ?? item?.name ?? "Item"),
+                qty: Number(item?.qty ?? item?.quantity ?? 1),
+                source: String(item?.source ?? item?.pickRequestType ?? item?.requestType ?? "-"),
+                channel: item?.channel ? String(item.channel) : undefined,
+                invoiceNumber: item?.invoiceNumber ? String(item.invoiceNumber) : undefined,
+                originType: item?.originType ? String(item.originType) : (item?.pickRequestType ? String(item.pickRequestType) : undefined),
+                rackName: item?.rackName ? String(item.rackName) : undefined,
+              };
+            })
+          : [],
+        notes: notes,
+        imageBase64: "",
+        proofType: String(body.proofType ?? body.type ?? "PICK_FISIK_LOG"),
+      }).catch(err => console.error("Failed to save pick-log to store", err));
+
+      return sendJson(response, 200, { message: "Pick log saved (no Discord embed)", ok: true, logOnly: true });
+    }
+
     const requestedChannelId = body.channelId ?? body.channel_id ?? body.targetChannelId ?? body.target_channel_id;
     const targetChannelId = requestedChannelId ? String(requestedChannelId) : env.MACHITAN_PICK_PROOF_CHANNEL_ID;
     const itemSummary = Array.isArray(body.itemSummary)
@@ -167,14 +205,19 @@ export async function handleMachitanPickProof(
            const orderId = String(item?.invoiceNumber ?? item?.invoice_number ?? item?.orderId ?? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-");
            return {
              orderId: orderId,
+             orderItemId: item?.orderItemId != null ? String(item.orderItemId) : undefined,
              itemId: String(item?.itemId ?? item?.id ?? "-"),
              productName: String(item?.productName ?? item?.name ?? "E-Commerce item"),
              qty: Number(item?.qty ?? item?.quantity ?? 1),
-             source: String(item?.source ?? item?.pickRequestType ?? item?.requestType ?? "-")
+             source: String(item?.source ?? item?.pickRequestType ?? item?.requestType ?? "-"),
+             channel: item?.channel ? String(item.channel) : undefined,
+             invoiceNumber: item?.invoiceNumber ? String(item.invoiceNumber) : undefined,
+             originType: item?.originType ? String(item.originType) : (item?.pickRequestType ? String(item.pickRequestType) : undefined),
            };
         }),
         notes: notes,
-        imageBase64: imageBase64
+        imageBase64: imageBase64,
+        proofType: String(body.proofType ?? body.type ?? "ECOM_PHYSICAL_PICK_PROOF"),
       }).catch(err => console.error("Failed to save e-com proof to store", err));
 
       return sendJson(response, 200, {
@@ -230,10 +273,16 @@ export async function handleMachitanPickProof(
             const orderId = String(item?.orderId ?? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-");
             return {
               orderId: orderId,
+              orderItemId: item?.orderItemId != null ? String(item.orderItemId) : undefined,
               itemId: String(item?.itemId ?? item?.id ?? "-"),
               productName: String(item?.productName ?? item?.name ?? "Item"),
               qty: Number(item?.qty ?? item?.quantity ?? 1),
-              source: String(item?.source ?? item?.pickRequestType ?? item?.requestType ?? "-")
+              source: String(item?.source ?? item?.pickRequestType ?? item?.requestType ?? "-"),
+              channel: item?.channel ? String(item.channel) : undefined,
+              invoiceNumber: item?.invoiceNumber ? String(item.invoiceNumber) : undefined,
+              originType: item?.originType ? String(item.originType) : (item?.pickRequestType ? String(item.pickRequestType) : undefined),
+              packLocation: item?.packLocation ? String(item.packLocation) : (body?.packLocation ? String(body.packLocation) : undefined),
+              rackName: item?.rackName ? String(item.rackName) : undefined,
             };
           })
         : (Array.isArray(body.orderIds) ? body.orderIds.map((oId: any) => ({
@@ -250,7 +299,10 @@ export async function handleMachitanPickProof(
             source: "-"
           }]),
       notes: notes,
-      imageBase64: imageBase64
+      imageBase64: imageBase64,
+      proofType: String(body.proofType ?? body.type ?? "PICK_PROOF"),
+      isBypass: isBypass,
+      bypassReason: body.bypassReason ? String(body.bypassReason) : undefined,
     }).catch(err => console.error("Failed to save proof to store", err));
 
     sendJson(response, 200, { message: "Photo received and sent to Discord", ok: true, channelId: targetChannelId });
