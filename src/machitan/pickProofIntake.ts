@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { AttachmentBuilder, Client, EmbedBuilder } from "discord.js";
 import { env } from "../config/env.js";
+import { addMachitanProof } from "./proofStore.js";
 
 const ECOM_PICK_PROOF_CHANNEL_ID = "1390221553333043200";
 const SHOPEE_MENTION = "<@804685637252939788>";
@@ -148,12 +149,25 @@ export async function handleMachitanPickProof(
         if (url) embed.setURL(url);
         if (body.submittedAt) embed.setFooter({ text: String(body.submittedAt) });
 
-        await channel.send({
-          content: mentionForEcommerce(channelName),
-          embeds: [embed],
-          files: [attachment]
         });
       }
+
+      // Save to local store for daily excel export
+      addMachitanProof({
+        timestamp: new Date().toISOString(),
+        channelId: ECOM_PICK_PROOF_CHANNEL_ID,
+        orderIds: Array.isArray(body.orderIds) ? body.orderIds.map(String) : [String(body.orderIds)],
+        actor: picker,
+        itemSummary: ecommerceRows.map(({ item }: any) => {
+           const productName = String(item?.productName ?? item?.name ?? "E-Commerce item");
+           const qty = String(item?.qty ?? item?.quantity ?? "-");
+           const source = String(item?.source ?? "-");
+           return `${productName} | Qty: ${qty} | Source: ${source}`;
+        }),
+        itemIds: ecommerceRows.map(({ item }: any) => String(item?.itemId ?? item?.id ?? "-")),
+        notes: notes,
+        imageBase64: imageBase64
+      }).catch(err => console.error("Failed to save e-com proof to store", err));
 
       return sendJson(response, 200, {
         message: "E-commerce pick proof received and sent to Discord",
@@ -196,6 +210,18 @@ export async function handleMachitanPickProof(
       embeds: [embed],
       files: [attachment]
     });
+
+    // Save to local store for daily excel export
+    addMachitanProof({
+      timestamp: new Date().toISOString(),
+      channelId: targetChannelId,
+      orderIds: Array.isArray(body.orderIds) ? body.orderIds.map(String) : [String(body.orderIds)],
+      actor: picker,
+      itemSummary: itemSummary.length ? itemSummary : (Array.isArray(body.items) ? body.items.map((i: any) => `${i.productName ?? "Item"} | Qty: ${i.qty ?? i.quantity ?? "-"} | Source: ${i.source ?? "-"}`) : []),
+      itemIds: itemIds.length ? itemIds : (Array.isArray(body.items) ? body.items.map((i: any) => String(i.itemId ?? i.id ?? "-")) : []),
+      notes: notes,
+      imageBase64: imageBase64
+    }).catch(err => console.error("Failed to save proof to store", err));
 
     sendJson(response, 200, { message: "Photo received and sent to Discord", ok: true, channelId: targetChannelId });
   } catch (error) {
