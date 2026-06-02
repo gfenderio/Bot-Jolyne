@@ -33,19 +33,33 @@ export function startMachitanDailyReportScheduler(client: Client<true>) {
       const workbook = new ExcelJS.Workbook();
       workbook.creator = "Bot Jolyne";
       
-      // Helper to create sheet
+      // Helper to create sheet with premium styling and sorting enabled
       const createSheet = (name: string, data: MachitanProofPayload[]) => {
         const sheet = workbook.addWorksheet(name);
+        sheet.views = [{ showGridLines: true }]; // Ensure gridlines are visible
+
         sheet.columns = [
           { header: "Waktu (WIB)", key: "time", width: 25 },
-          { header: "Staff", key: "actor", width: 20 },
+          { header: "Staff", key: "actor", width: 18 },
           { header: "Order IDs", key: "orders", width: 25 },
           { header: "Catatan", key: "notes", width: 30 },
-          { header: "Item Summary", key: "items", width: 50 },
-          { header: "Foto (Base64)", key: "photo", width: 15 } // Optional, can be huge
+          { header: "Item Summary", key: "items", width: 55 },
+          { header: "Foto (Base64)", key: "photo", width: 15 }
         ];
 
-        data.forEach(p => {
+        // Format Header Row
+        const headerRow = sheet.getRow(1);
+        headerRow.font = { name: "Segoe UI", bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+        headerRow.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FF2C3E50" } // Professional dark slate
+        };
+        headerRow.alignment = { vertical: "middle", horizontal: "left" };
+        headerRow.height = 26;
+
+        // Populate Data
+        data.forEach((p, idx) => {
           const row = sheet.addRow({
             time: new Date(p.timestamp).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }),
             actor: p.actor,
@@ -54,11 +68,38 @@ export function startMachitanDailyReportScheduler(client: Client<true>) {
             items: p.itemSummary.join("\n"),
             photo: "Has Photo" 
           });
-          
-          // Formatting items to hyperlink if possible
-          const cell = row.getCell("items");
-          cell.alignment = { wrapText: true };
+
+          row.height = 24;
+          row.font = { name: "Segoe UI", size: 10 };
+          row.alignment = { vertical: "middle" };
+
+          // Format items column with text wrapping
+          const itemsCell = row.getCell("items");
+          itemsCell.alignment = { wrapText: true, vertical: "middle" };
+
+          // Subtle Zebra Striping for better readability
+          if (idx % 2 === 1) {
+            row.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: "FFF8F9FA" } // Light gray row background
+            };
+          }
+
+          // Add cell borders to look premium
+          row.eachCell({ includeEmpty: true }, (cell) => {
+            cell.border = {
+              top: { style: "thin", color: { argb: "FFE0E0E0" } },
+              left: { style: "thin", color: { argb: "FFE0E0E0" } },
+              bottom: { style: "thin", color: { argb: "FFE0E0E0" } },
+              right: { style: "thin", color: { argb: "FFE0E0E0" } }
+            };
+          });
         });
+
+        // Enable AutoFilter so user can sort and filter any column
+        const totalRows = data.length + 1;
+        sheet.autoFilter = `A1:F${totalRows}`;
       };
 
       createSheet("Pick Fisik Log", pickFisiks);
