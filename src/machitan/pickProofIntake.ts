@@ -99,7 +99,8 @@ export async function handleMachitanPickProof(
         const productName = item?.productName ?? item?.name ?? "Item";
         const qty = item?.qty ?? item?.quantity ?? "-";
         const source = item?.source ?? "-";
-        const orderId = item?.orderId ?? "-";
+        const orderIdRaw = item?.invoiceNumber ?? item?.invoice_number ?? item?.orderId;
+        const orderId = String(orderIdRaw == null || orderIdRaw === 0 || orderIdRaw === "0" ? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-" : orderIdRaw);
         return [
           `${index + 1}. ${productName}`,
           `   Order: #${orderId} | Order Item: #${orderItemId} | Item: #${itemId}`,
