@@ -258,7 +258,16 @@ export async function handleMachitanPickProof(
       throw new Error(`Cannot send to channel ${targetChannelId}`);
     }
 
+    let mentionContent = "";
+    if (isPackProof && ecommerceRows.length > 0) {
+      const ecomItem = ecommerceRows[0].item;
+      const orderId = String(ecomItem?.invoiceNumber ?? ecomItem?.invoice_number ?? ecomItem?.orderId ?? (Array.isArray(body.orderIds) ? body.orderIds[0] : body.orderIds) ?? "-");
+      const channelName = inferEcommerceChannel(orderId, ecomItem);
+      mentionContent = mentionForEcommerce(channelName);
+    }
+
     await channel.send({
+      content: mentionContent ? mentionContent : undefined,
       embeds: [embed],
       files: [attachment]
     });
