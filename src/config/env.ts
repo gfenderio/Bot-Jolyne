@@ -101,7 +101,7 @@ const envSchema = z.object({
   METABASE_EMAIL: optionalString.pipe(z.string().email().optional()),
   METABASE_PASSWORD: optionalString,
   METABASE_DATABASE_ID: optionalDatabaseId,
-  BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID: optionalString.default("687632832125992979"),
+  BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID: optionalString.default("1500736344182358066"),
   DELIVEREE_ACTION_MODE: delivereeActionMode,
   DELIVEREE_ALERT_CHANNEL_ID: optionalString.default("1501899831268868106"),
   DELIVEREE_ALLOWED_CHANNEL_IDS: optionalStringList,
@@ -132,7 +132,10 @@ const envSchema = z.object({
   DELIVEREE_STUCK_DRIVER_WARNING_MINUTES: pollIntervalSeconds.default(20),
   DELIVEREE_STUCK_DRIVER_CRITICAL_MINUTES: pollIntervalSeconds.default(40),
   DELIVEREE_WEB_AUTOMATION_APPROVED: optionalBoolean,
-  DELIVEREE_WATCH_URLS: optionalStringList.default([])
+  DELIVEREE_WATCH_URLS: optionalStringList.default([]),
+  NOTION_TOKEN: optionalString,
+  NOTION_DATABASE_ID: optionalString,
+  NOTION_STANDUP_CHANNEL_ID: optionalString.default("1501899831268868106")
 });
 
 export const env = envSchema.parse(process.env);

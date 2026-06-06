@@ -14,6 +14,7 @@ import { handleReady } from "./events/ready.js";
 import { startBirthdayNowScheduler } from "./schedulers/birthday-now.js";
 import { startMachitanDailyReportScheduler } from "./machitan/dailyReportScheduler.js";
 import { registerGuildSlashCommands } from "./services/slash-commands.js";
+import { startNotionStandupScheduler } from "./schedulers/notion-standup.js";
 
 startDelivereePoller({
   activeBookingIds: activeMockDelivereeBookingIds,
@@ -36,6 +37,7 @@ if (!env.DISCORD_TOKEN) {
     startDelivereeExtensionIntake(readyClient);
     startDelivereeWebMonitor(readyClient);
     startMachitanDailyReportScheduler(readyClient);
+    startNotionStandupScheduler(readyClient);
   });
   client.on(Events.Error, (error) => {
     console.error("Discord client error", error);
