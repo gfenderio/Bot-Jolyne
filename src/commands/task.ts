@@ -35,10 +35,10 @@ export const command: SlashCommand = {
     if (sub === "add") {
       const name = interaction.options.getString("nama", true);
       const urgency = interaction.options.getString("urgency") || "Medium";
-      await addNotionTask(name, urgency, "Jolyne");
+      await addNotionTask(name, urgency);
       await interaction.editReply(`✅ Tugas **${name}** [${urgency}] ditambahkan ke Jolyne Notion Tracker!`);
     } else if (sub === "list") {
-      const tasks = await getPendingTasks("Jolyne");
+      const tasks = await getPendingTasks();
       if (!tasks.length) {
         await interaction.editReply("🎉 Tidak ada tugas Jolyne yang tertunda. Kerja bagus!");
       } else {

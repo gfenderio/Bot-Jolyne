@@ -3,7 +3,7 @@ import { Client } from '@notionhq/client';
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 const databaseId = process.env.NOTION_DATABASE_ID!;
 
-export async function addNotionTask(taskName: string, urgency: string = 'Medium', project: string = 'Jolyne') {
+export async function addNotionTask(taskName: string, urgency: string = 'Medium') {
   try {
     const response = await notion.pages.create({
       parent: { database_id: databaseId },
@@ -18,9 +18,6 @@ export async function addNotionTask(taskName: string, urgency: string = 'Medium'
         'Status': {
           status: { name: 'To-Do' }
         },
-        'Project': {
-          select: { name: project }
-        },
         'Urgency': {
           select: { name: urgency }
         }
@@ -33,21 +30,13 @@ export async function addNotionTask(taskName: string, urgency: string = 'Medium'
   }
 }
 
-export async function getPendingTasks(project: string = 'Jolyne') {
+export async function getPendingTasks() {
   try {
     const response = await notion.databases.query({
       database_id: databaseId,
       filter: {
-        and: [
-          {
-            property: 'Project',
-            select: { equals: project }
-          },
-          {
-            property: 'Status',
-            status: { does_not_equal: 'Done' }
-          }
-        ]
+        property: 'Status',
+        status: { does_not_equal: 'Done' }
       },
       sorts: [
         {
