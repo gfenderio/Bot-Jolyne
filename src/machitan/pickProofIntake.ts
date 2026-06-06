@@ -106,7 +106,7 @@ export async function handleMachitanPickProof(
                 itemId: String(item?.itemId ?? item?.id ?? "-"),
                 productName: String(item?.productName ?? item?.name ?? "Item"),
                 qty: Number(item?.qty ?? item?.quantity ?? 1),
-                source: (() => { const s = String(item?.source ?? item?.pickRequestType ?? item?.requestType ?? "-").toUpperCase(); return (s === "GIFT" || s === "UREQ" || s === "REGULAR_ORDER" || s === "") ? "BEKASI" : s; })(),
+                source: (() => { const s = String(item?.source ?? item?.pickRequestType ?? item?.requestType ?? "-").toUpperCase(); return s === "GIFT" ? "BEKASI" : s; })(),
                 channel: item?.channel ? String(item.channel) : undefined,
                 invoiceNumber: item?.invoiceNumber ? String(item.invoiceNumber) : undefined,
                 originType: item?.originType ? String(item.originType) : (item?.pickRequestType ? String(item.pickRequestType) : undefined),
@@ -138,7 +138,7 @@ export async function handleMachitanPickProof(
         const productName = item?.productName ?? item?.name ?? "Item";
         const qty = item?.qty ?? item?.quantity ?? "-";
         const rawSource = String(item?.source ?? "-").toUpperCase();
-        const source = (rawSource === "GIFT" || rawSource === "UREQ" || rawSource === "REGULAR_ORDER" || rawSource === "") ? "BEKASI" : rawSource;
+        const source = rawSource === "GIFT" ? "BEKASI" : rawSource;
         const orderIdRaw = item?.invoiceNumber ?? item?.invoice_number ?? item?.orderId;
         const orderId = String(orderIdRaw == null || orderIdRaw === 0 || orderIdRaw === "0" ? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-" : orderIdRaw);
         return [
@@ -170,7 +170,7 @@ export async function handleMachitanPickProof(
         const productName = String(item?.productName ?? item?.name ?? "E-Commerce item");
         const qty = String(item?.qty ?? item?.quantity ?? "-");
         const rawSource2 = String(item?.source ?? "-").toUpperCase();
-        const source = (rawSource2 === "GIFT" || rawSource2 === "UREQ" || rawSource2 === "REGULAR_ORDER" || rawSource2 === "") ? "BEKASI" : rawSource2;
+        const source = rawSource2 === "GIFT" ? "BEKASI" : rawSource2;
         const channelName = inferEcommerceChannel(orderId, item);
         const attachmentName = `ecom_pick_proof_${index + 1}.jpg`;
         const attachment = new AttachmentBuilder(imageBuffer, { name: attachmentName });
