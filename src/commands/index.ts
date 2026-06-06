@@ -8,6 +8,7 @@ import { command as delivereeExtensionHealth } from "./deliveree-extension-healt
 import { command as ping } from "./ping.js";
 import { command as server } from "./server.js";
 import { command as whoami } from "./whoami.js";
+import { command as task } from "./task.js";
 
 export const commands = new Map<string, SlashCommand>();
 
@@ -20,7 +21,8 @@ for (const command of [
   delivereeCase,
   delivereeCases,
   delivereeStatus,
-  delivereeExtensionHealth
+  delivereeExtensionHealth,
+  task
 ]) {
   commands.set(command.data.name, command);
 }
