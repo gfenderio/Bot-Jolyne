@@ -140,7 +140,8 @@ export async function handleMachitanPickProof(
         const rawSource = String(item?.source ?? "-").toUpperCase();
         const source = rawSource === "GIFT" ? "BEKASI" : rawSource;
         const orderIdRaw = item?.invoiceNumber ?? item?.invoice_number ?? item?.orderId;
-        const orderId = String(orderIdRaw == null || orderIdRaw === 0 || orderIdRaw === "0" ? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-" : orderIdRaw);
+        const resolvedId = String(orderIdRaw == null || orderIdRaw === 0 || orderIdRaw === "0" ? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-" : orderIdRaw);
+        const orderId = resolvedId.includes(" ") || resolvedId.length > 30 ? (Array.isArray(body.orderIds) ? String(body.orderIds[index] ?? "-") : String(body.orderIds ?? "-")) : resolvedId;
         return [
           `${index + 1}. ${productName}`,
           `   Order: #${orderId} | Order Item: #${orderItemId} | Item: #${itemId}`,
