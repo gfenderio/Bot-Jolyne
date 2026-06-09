@@ -76,7 +76,17 @@ export async function handleMachitanPickProof(
       return sendJson(response, 400, { error: "Missing required fields", ok: false });
     }
 
-    const orderIdsStr = Array.isArray(body.orderIds) ? body.orderIds.join(", ") : String(body.orderIds);
+    const orderIdsArr = Array.isArray(body.orderIds) ? body.orderIds.map(String) : [String(body.orderIds)];
+    const orderIdsStr = orderIdsArr.join(", ");
+    const orderCount = orderIdsArr.length;
+    // Discord title max 256 char, field value max 1024 char.
+    // Bulk PO bisa puluhan order → ringkas biar embed gak ditolak Discord.
+    const orderTitleStr = orderCount > 5
+      ? `${orderCount} order (${orderIdsArr.slice(0, 3).join(", ")}, …)`
+      : orderIdsStr;
+    const orderFieldStr = orderIdsStr.length > 1000
+      ? `${orderCount} order:\n${orderIdsStr.slice(0, 980)}…`
+      : orderIdsStr;
     const notes = body.notes ? String(body.notes) : "-";
     const proofType = String(body.proofType ?? body.type ?? "pick_proof").toLowerCase();
     const isPackProof = proofType.includes("pack");
@@ -239,9 +249,9 @@ export async function handleMachitanPickProof(
     // Create Embed
     const embed = new EmbedBuilder()
       .setColor(0x00ff00)
-      .setTitle(`${titlePrefix}: Order #${orderIdsStr}`)
+      .setTitle(`${titlePrefix}: Order #${orderTitleStr}`)
       .addFields(
-        { name: "Order ID", value: orderIdsStr, inline: true },
+        { name: "Order ID", value: orderFieldStr, inline: true },
         { name: actorLabel, value: picker, inline: true },
         { name: "Notes", value: notes.slice(0, 1024), inline: !isPackProof },
         ...(isPackProof ? [{ name: "Status", value: "Diproses ke RESI Fulfillment", inline: true }] : []),
