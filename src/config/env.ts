@@ -138,6 +138,8 @@ const envSchema = z.object({
   NOTION_STANDUP_CHANNEL_ID: optionalString.default("1501899831268868106")
 });
 
+// Override dari kode agar mengabaikan setting environment server Coolify
+process.env.BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID = "1500736344182358066";
 export const env = envSchema.parse(process.env);
 
 const requiredDiscordBotEnvSchema = z.object({

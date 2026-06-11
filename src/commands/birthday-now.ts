@@ -151,10 +151,15 @@ export const command: SlashCommand = {
       return;
     }
 
-    await interaction.editReply("Ucapan birthday hari ini sudah dikirim ke channel.");
-    await interaction.followUp({
-      embeds: [buildBirthdayNowEmbed(birthdayRows)]
-    });
+    const channel = await interaction.client.channels.fetch(env.BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID!);
+
+    if (!channel?.isTextBased() || !("send" in channel)) {
+      await interaction.editReply(`Channel ${env.BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID} tidak bisa dikirimi pesan.`);
+      return;
+    }
+
+    await channel.send({ embeds: [buildBirthdayNowEmbed(birthdayRows)] });
+    await interaction.editReply(`Ucapan birthday hari ini sudah dikirim ke <#${env.BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID}>.`);
   }
 };
 
