@@ -3,7 +3,7 @@ import ExcelJS from "exceljs";
 import { AttachmentBuilder, Client, EmbedBuilder, TextChannel } from "discord.js";
 import { getAndClearWsInboxProofs, WsInboxProofPayload } from "./wsInboxStore.js";
 
-const TARGET_CHANNEL_ID = "1501899831268868106"; // Sesuaikan jika channelnya beda
+const TARGET_CHANNEL_ID = "1501899831268868106"; // Target ke channel pick pack / machitan update
 
 function jakartaDateParts(iso: string): { tanggal: string; jam: string } {
   const d = new Date(iso);
@@ -153,7 +153,15 @@ export async function generateWsInboxReportWorkbook(proofs: WsInboxProofPayload[
   return Buffer.from(buffer);
 }
 
-// NOTE: Fungsi ini JANGAN di-cron dulu sesuai instruksi. Nanti tinggal panggil cron.schedule jika app sudah jalan.
+export function startWsInboxDailyReportScheduler(client: Client<true>) {
+  // Cron tiap jam 7 pagi WIB barengan sama pick pack
+  cron.schedule("0 7 * * *", async () => {
+    executeWsInboxDailyReport(client);
+  }, {
+    timezone: "Asia/Jakarta"
+  });
+}
+
 export async function executeWsInboxDailyReport(client: Client<true>) {
   try {
     console.log("[WsInboxReport] Generating report...");
