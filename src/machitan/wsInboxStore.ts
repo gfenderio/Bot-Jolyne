@@ -14,6 +14,8 @@ export interface WsInboxProofPayload {
   actor: string;
   items: WsInboxProofItem[];
   notes?: string;
+  isPartial?: boolean;
+  pickRequestType?: string;
 }
 
 const STORE_PATH = path.join(process.cwd(), "data", "ws-inbox-proofs.json");

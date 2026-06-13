@@ -109,6 +109,7 @@ const envSchema = z.object({
   DELIVEREE_BUTTON_SIGNING_SECRET: optionalString,
   DELIVEREE_CASE_STORE_PATH: optionalString.default("data/deliveree-cases.json"),
   MACHITAN_PICK_PROOF_CHANNEL_ID: optionalString.default("1418827227264450663"),
+  MACHITAN_PACE_PACK_CHANNEL_ID: optionalString.default("1475760273703964826"),
   MACHITAN_ECOMMERCE_PICK_REQUEST_CHANNEL_ID: optionalString.default("1501899831268868106"),
   MACHITAN_ECOMMERCE_PICK_REQUEST_POLL_ENABLED: optionalBoolean,
   MACHITAN_ECOMMERCE_PICK_REQUEST_NOTIFY_EXISTING: optionalBoolean,
@@ -134,7 +135,7 @@ const envSchema = z.object({
   DELIVEREE_WEB_AUTOMATION_APPROVED: optionalBoolean,
   DELIVEREE_WATCH_URLS: optionalStringList.default([]),
   NOTION_TOKEN: optionalString,
-  NOTION_DATABASE_ID: optionalString,
+  NOTION_TASK_DATABASE_ID: optionalString.default("285da332-9369-493d-9931-36c0905a9783"),
   NOTION_STANDUP_CHANNEL_ID: optionalString.default("1501899831268868106")
 });
 
@@ -157,4 +158,3 @@ export function requireDiscordBotEnv() {
 
   return result.data;
 }
-
