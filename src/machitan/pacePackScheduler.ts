@@ -157,6 +157,55 @@ export function startPacePackScheduler(client: Client) {
     }
   }, { timezone: "Asia/Jakarta" });
 
-  // Weekly/Monthly skipped in this refactor to save lines, 
-  // they can use a similar format if you want to add them back later.
+  // Monthly report (1st of month 02:00)
+  cron.schedule("0 2 1 * *", async () => {
+    try {
+      const now = new Date();
+      // Target: 1st of previous month to 1st of current month
+      const end = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      const start = new Date(end.getFullYear(), end.getMonth() - 1, 1, 0, 0, 0, 0);
+
+      const events = await getPacePackEventsBetween(start.toISOString(), end.toISOString());
+      if (events.length === 0) return;
+
+      const byActor: Record<string, number> = {};
+      let totalItems = 0;
+
+      for (const e of events) {
+        if (e.bypass) continue;
+        byActor[e.actor] = (byActor[e.actor] || 0) + e.items;
+        totalItems += e.items;
+      }
+
+      const actors = Object.entries(byActor).sort((a, b) => b[1] - a[1]);
+      if (actors.length === 0) return;
+
+      const monthName = start.toLocaleString("default", { month: "long" });
+      const embed = new EmbedBuilder()
+        .setTitle(`📆 Monthly Packing Report (${monthName} ${start.getFullYear()})`)
+        .setColor("#8A2BE2");
+
+      const medals = ["🥇", "🥈", "🥉"];
+      let breakdown = "**📦 Packer Breakdown:**\n";
+      actors.forEach(([actor, items], i) => {
+        const prefix = i < 3 ? medals[i] : "🏃";
+        breakdown += `${prefix} **${actor}**: ${items} items\n`;
+      });
+
+      embed.setDescription(breakdown);
+
+      embed.addFields(
+        { name: "📦 Total Items", value: totalItems.toString(), inline: true },
+        { name: "👥 Unique Packers", value: actors.length.toString(), inline: true },
+        { name: "🏆 Top Performer", value: `${actors[0][0]} (${actors[0][1]})`, inline: true },
+      );
+
+      const channel = await client.channels.fetch(channelId);
+      if (channel?.isTextBased() && "send" in channel) {
+        await channel.send({ embeds: [embed] });
+      }
+    } catch (e) {
+      console.error("Error in monthly pace pack scheduler:", e);
+    }
+  }, { timezone: "Asia/Jakarta" });
 }
