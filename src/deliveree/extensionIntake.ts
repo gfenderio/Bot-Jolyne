@@ -609,6 +609,17 @@ export async function handleDelivereeExtensionHttpRequest(
     return;
   }
 
+  if (pathname === "/machitan/ws-inbox") {
+    try {
+      const { handleWsInboxIntake } = await import("../machitan/wsInboxIntake.js");
+      await handleWsInboxIntake(request, response);
+    } catch (e) {
+      console.error(e);
+      sendJson(response, 500, { error: "Internal server error handling WS Inbox request", ok: false });
+    }
+    return;
+  }
+
   try {
     const deviceId = assertAuthorized(request, options);
 

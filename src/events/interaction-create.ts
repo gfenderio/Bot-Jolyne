@@ -3,8 +3,31 @@ import type { Interaction } from "discord.js";
 import { handleDelivereeButtonInteraction } from "../commands/deliveree-controls.js";
 import { handleMockOrderButtonInteraction } from "../commands/mock-order-controls.js";
 import { commands } from "../commands/index.js";
+import { TASK_MODAL_ID } from "../commands/task.js";
+import { createTask } from "../services/notion.js";
 
 export async function handleInteractionCreate(interaction: Interaction) {
+  if (interaction.isModalSubmit()) {
+    if (interaction.customId === TASK_MODAL_ID) {
+      await interaction.deferReply({ ephemeral: true });
+      const name = interaction.fields.getTextInputValue("task_name");
+      const project = interaction.fields.getTextInputValue("task_project");
+      const priority = interaction.fields.getTextInputValue("task_priority");
+      const desc = interaction.fields.getTextInputValue("task_desc");
+
+      try {
+        await createTask({ name, priority, project, description: desc || undefined });
+        await interaction.editReply(
+          `✅ Task ditambahkan!\n**${name}**\n> Project: ${project} · Prioritas: ${priority}`
+        );
+      } catch (err) {
+        console.error("Gagal tambah task ke Notion", err);
+        await interaction.editReply("❌ Gagal tambah task. Cek log dan pastikan NOTION_TOKEN sudah diset.");
+      }
+      return;
+    }
+  }
+
   if (interaction.isButton()) {
     const delivereeHandled = await handleDelivereeButtonInteraction(interaction);
 

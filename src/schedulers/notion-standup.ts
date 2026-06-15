@@ -22,14 +22,14 @@ export function startNotionStandupScheduler(client: Client<true>) {
       }
 
       const list = tasks.map(t => {
-        const title = t.properties['Task Name']?.title[0]?.plain_text || 'Untitled';
-        const urgency = t.properties['Urgency']?.select?.name || 'Low';
-        const status = t.properties['Status']?.status?.name || 'To-Do';
-        const emoji = urgency === 'High' ? '🔴' : (urgency === 'Medium' ? '🟡' : '🟢');
+        const title = t.properties['Task']?.title[0]?.plain_text || 'Untitled';
+        const priority = t.properties['Priority']?.select?.name || 'Low';
+        const status = t.properties['Status']?.select?.name || 'Not started';
+        const emoji = priority.includes('High') ? '🔴' : (priority.includes('Medium') ? '🟡' : '🟢');
         return `${emoji} **${title}** (${status})`;
-      }).join('\\n');
+      }).join('\n');
 
-      const message = `Halo Tuan! Selamat Pagi ☕\\nBerikut adalah rekap tugas **Jolyne Tracker** Anda yang belum selesai:\\n\\n${list}`;
+      const message = `Halo Tuan! Selamat Pagi ☕\nBerikut adalah rekap tugas **Jolyne Tracker** Anda yang belum selesai:\n\n${list}`;
       await channel.send(message);
 
     } catch (error) {
@@ -39,5 +39,5 @@ export function startNotionStandupScheduler(client: Client<true>) {
     timezone: "Asia/Jakarta"
   });
 
-  console.log(`Notion Standup scheduler aktif untuk channel ${env.NOTION_STANDUP_CHANNEL_ID || '1501899831268868106'}.`);
+  console.log(`Notion Standup scheduler aktif untuk channel ${env.NOTION_STANDUP_CHANNEL_ID}.`);
 }
