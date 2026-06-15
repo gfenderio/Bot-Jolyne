@@ -213,7 +213,7 @@ export type DelivereeExtensionIntakeOptions = {
     context: { manualTest: boolean }
   ) => void | Promise<void>;
   store: DelivereeExtensionCaseStore;
-  token: string;
+  token?: string;
   discordClient?: import("discord.js").Client<true>;
 };
 
@@ -583,7 +583,8 @@ export async function handleDelivereeExtensionHttpRequest(
     "/deliveree/extension/status",
     "/deliveree/extension/test-discord",
     "/machitan/pick-proof",
-    "/machitan/pack-proof"
+    "/machitan/pack-proof",
+    "/machitan/ws-inbox"
   ];
 
   if (!validPaths.includes(pathname) || !["GET", "POST"].includes(request.method || "")) {
@@ -1040,10 +1041,6 @@ export class DiscordRestDelivereeExtensionNotifier implements DelivereeExtension
 }
 
 export function startDelivereeExtensionIntake(client: Client<true>) {
-  if (!env.DELIVEREE_EXTENSION_ENABLED || !env.DELIVEREE_EXTENSION_TOKEN) {
-    return () => undefined;
-  }
-
   const server = createDelivereeExtensionIntakeServer({
     allowedDeviceIds: env.DELIVEREE_EXTENSION_ALLOWED_DEVICE_IDS,
     notifier: new DiscordBotDelivereeExtensionNotifier(client),
@@ -1053,7 +1050,8 @@ export function startDelivereeExtensionIntake(client: Client<true>) {
   });
 
   server.listen(env.DELIVEREE_EXTENSION_PORT, env.DELIVEREE_EXTENSION_HOST, () => {
-    console.log(`Deliveree extension intake aktif di ${env.DELIVEREE_EXTENSION_HOST}:${env.DELIVEREE_EXTENSION_PORT}.`);
+    const delivereeStatus = env.DELIVEREE_EXTENSION_ENABLED && env.DELIVEREE_EXTENSION_TOKEN ? "aktif" : "disabled";
+    console.log(`HTTP intake aktif di ${env.DELIVEREE_EXTENSION_HOST}:${env.DELIVEREE_EXTENSION_PORT} (Deliveree extension: ${delivereeStatus}).`);
   });
 
   server.on("error", (error) => {
