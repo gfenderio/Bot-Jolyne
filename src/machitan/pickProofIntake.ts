@@ -326,22 +326,6 @@ export async function handleMachitanPickProof(
       bypassReason: body.bypassReason ? String(body.bypassReason) : undefined,
     }).catch(err => console.error("Failed to save proof to store", err));
 
-    if (isPackProof) {
-      import("./pacePackStore.js").then(({ addPacePackEvent }) => {
-        const uniqueOrders = Array.from(new Set(Array.isArray(body.orderIds) ? body.orderIds.map(String) : [String(body.orderIds)])) as string[];
-        const totalItems = Array.isArray(body.items) 
-          ? body.items.reduce((sum: number, item: any) => sum + Number(item?.qty ?? item?.quantity ?? 1), 0)
-          : 0;
-
-        addPacePackEvent({
-          ts: new Date().toISOString(),
-          actor: picker,
-          items: totalItems,
-          orders: uniqueOrders,
-          bypass: isBypass
-        }).catch(err => console.error("Failed to save pace pack event", err));
-      }).catch(err => console.error("Failed to import pacePackStore", err));
-    }
 
     sendJson(response, 200, { message: "Photo received and sent to Discord", ok: true, channelId: targetChannelId });
   } catch (error) {
