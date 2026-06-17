@@ -284,7 +284,7 @@ export function buildWsSheet(workbook: ExcelJS.Workbook, proofs: WsInboxProofPay
   });
 
   // ── Title block (rows 1-3) — sama persis dengan buildSheet ────────────────
-  const colCount = 10;
+  const colCount = 12;
   const lastCol = String.fromCharCode(64 + colCount);
   sheet.mergeCells(`A1:${lastCol}1`);
   const titleCell = sheet.getCell("A1");
@@ -296,8 +296,8 @@ export function buildWsSheet(workbook: ExcelJS.Workbook, proofs: WsInboxProofPay
 
   const allItems = proofs.flatMap(p => p.items);
   const uniqueActors = new Set(proofs.map(p => p.actor)).size;
-  const surplusCount = allItems.filter(i => i.delta > 0).length;
-  const deficitCount = allItems.filter(i => i.delta < 0).length;
+  const surplusCount = allItems.filter(i => i.selisih > 0).length;
+  const deficitCount = allItems.filter(i => i.selisih < 0).length;
 
   sheet.mergeCells(`A2:${lastCol}2`);
   const summaryCell = sheet.getCell("A2");
@@ -310,16 +310,18 @@ export function buildWsSheet(workbook: ExcelJS.Workbook, proofs: WsInboxProofPay
 
   // ── Columns ───────────────────────────────────────────────────────────────
   sheet.columns = [
-    { header: "Tanggal",     key: "tanggal",     width: 12 },
-    { header: "Jam (WIB)",   key: "jam",         width: 11 },
-    { header: theme.actorLabel, key: "actor",    width: 22 },
-    { header: "Item ID",     key: "itemId",      width: 11 },
-    { header: "Nama Barang", key: "productName", width: 46 },
-    { header: "Ekspektasi",  key: "expectedQty", width: 12 },
-    { header: "Aktual",      key: "actualQty",   width: 10 },
-    { header: "Delta",       key: "delta",       width: 10 },
-    { header: "Partial",     key: "partial",     width: 10 },
-    { header: "Catatan",     key: "notes",       width: 28 },
+    { header: "Tanggal",        key: "tanggal",     width: 12 },
+    { header: "Jam (WIB)",      key: "jam",         width: 11 },
+    { header: theme.actorLabel, key: "actor",       width: 22 },
+    { header: "Source",         key: "source",      width: 12 },
+    { header: "Rak",            key: "rack",        width: 14 },
+    { header: "Item ID",        key: "itemId",      width: 11 },
+    { header: "Nama Barang",    key: "productName", width: 46 },
+    { header: "Ekspektasi",     key: "expectedQty", width: 12 },
+    { header: "Aktual",         key: "actualQty",   width: 10 },
+    { header: "Selisih",        key: "selisih",     width: 10 },
+    { header: "Partial",        key: "partial",     width: 10 },
+    { header: "Catatan",        key: "notes",       width: 28 },
   ];
 
   // ── Header row (row 4) — identik dengan buildSheet ────────────────────────
@@ -348,11 +350,13 @@ export function buildWsSheet(workbook: ExcelJS.Workbook, proofs: WsInboxProofPay
         tanggal,
         jam,
         actor: proof.actor,
+        source: item.source || "-",
+        rack: item.rack || "-",
         itemId: item.itemId,
         productName: item.productName,
         expectedQty: item.expectedQty,
         actualQty: item.actualQty,
-        delta: item.delta,
+        selisih: item.selisih,
         partial: proof.isPartial ? "Ya" : "-",
         notes: proof.notes || "-",
       });
@@ -369,22 +373,42 @@ export function buildWsSheet(workbook: ExcelJS.Workbook, proofs: WsInboxProofPay
       }
       productCell.alignment = { vertical: "middle", wrapText: true };
 
-      // Delta: merah/hijau
-      const deltaCell = row.getCell("delta");
-      deltaCell.numFmt = "+#,##0;-#,##0;0";
-      deltaCell.alignment = { vertical: "middle", horizontal: "center" };
-      if (item.delta > 0) {
-        deltaCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8F5E9" } };
-        deltaCell.font = { name: "Segoe UI Semibold", size: 10, bold: true, color: { argb: "FF2E7D32" } };
-      } else if (item.delta < 0) {
-        deltaCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFEBEE" } };
-        deltaCell.font = { name: "Segoe UI Semibold", size: 10, bold: true, color: { argb: "FFC62828" } };
+      // Selisih: merah/hijau
+      const selisihCell = row.getCell("selisih");
+      selisihCell.numFmt = "+#,##0;-#,##0;0";
+      selisihCell.alignment = { vertical: "middle", horizontal: "center" };
+      if (item.selisih > 0) {
+        selisihCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8F5E9" } };
+        selisihCell.font = { name: "Segoe UI Semibold", size: 10, bold: true, color: { argb: "FF2E7D32" } };
+      } else if (item.selisih < 0) {
+        selisihCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFEBEE" } };
+        selisihCell.font = { name: "Segoe UI Semibold", size: 10, bold: true, color: { argb: "FFC62828" } };
       }
 
       (["expectedQty", "actualQty"] as const).forEach(k => {
         row.getCell(k).numFmt = "#,##0";
         row.getCell(k).alignment = { vertical: "middle", horizontal: "center" };
       });
+
+      // Source color badge
+      const src = (item.source || "").toUpperCase();
+      const sourceCell = row.getCell("source");
+      sourceCell.font = { name: "Segoe UI Semibold", size: 10, bold: true };
+      sourceCell.alignment = { vertical: "middle", horizontal: "center" };
+      if (src.includes("OMEGA")) {
+        sourceCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF3E0" } };
+        sourceCell.font = { ...sourceCell.font, color: { argb: "FFE65100" } };
+      } else if (src === "SS" || src.includes("SENTOSA")) {
+        sourceCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE3F2FD" } };
+        sourceCell.font = { ...sourceCell.font, color: { argb: "FF0D47A1" } };
+      } else if (src.includes("DELTA")) {
+        sourceCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8F5E9" } };
+        sourceCell.font = { ...sourceCell.font, color: { argb: "FF1B5E20" } };
+      }
+
+      // Rak bold center
+      row.getCell("rack").font = { name: "Segoe UI", size: 10 };
+      row.getCell("rack").alignment = { vertical: "middle", horizontal: "center" };
 
       // Zebra stripe
       if (rowIndex % 2 === 0) {
@@ -480,8 +504,8 @@ export function startMachitanDailyReportScheduler(client: Client<true>) {
         const wsTotalItems = wsProofs.reduce((sum, p) => sum + p.items.length, 0);
         const wsFileName = `Rekap_WS_Opname_${todayStr.replace(/ /g, "_")}.xlsx`;
         const wsAttachment = new AttachmentBuilder(Buffer.from(wsBuffer), { name: wsFileName });
-        const surplusCount = wsProofs.flatMap(p => p.items).filter(i => i.delta > 0).length;
-        const deficitCount = wsProofs.flatMap(p => p.items).filter(i => i.delta < 0).length;
+        const surplusCount = wsProofs.flatMap(p => p.items).filter(i => i.selisih > 0).length;
+        const deficitCount = wsProofs.flatMap(p => p.items).filter(i => i.selisih < 0).length;
 
         const wsEmbed = new EmbedBuilder()
           .setColor(0x1565C0)

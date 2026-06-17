@@ -42,7 +42,9 @@ export async function handleWsInboxIntake(
       productName: String(it.productName || "Item"),
       expectedQty: Number(it.expectedQty || 0),
       actualQty: Number(it.actualQty || 0),
-      delta: Number(it.delta || 0),
+      selisih: Number(it.selisih ?? it.delta ?? 0),
+      source: it.source ? String(it.source) : undefined,
+      rack: it.rack ? String(it.rack) : undefined,
     }));
 
     const actor = String(body.actor);
@@ -66,7 +68,7 @@ export async function handleWsInboxIntake(
 async function sendWsEmbed(
   client: Client<true>,
   actor: string,
-  items: Array<{ itemId: string; productName: string; expectedQty: number; actualQty: number; delta: number }>,
+  items: Array<{ itemId: string; productName: string; expectedQty: number; actualQty: number; selisih: number; source?: string; rack?: string }>,
   notes: string | undefined,
   isPartial: boolean
 ) {
@@ -74,9 +76,10 @@ async function sendWsEmbed(
   if (!channel || !channel.isTextBased()) return;
 
   const itemLines = items.map(it => {
-    const deltaStr = it.delta > 0 ? `+${it.delta}` : String(it.delta);
-    const emoji = it.delta === 0 ? "✅" : it.delta > 0 ? "⬆️" : "⬇️";
-    return `${emoji} **${it.productName}** (ID: ${it.itemId})\n   Ekspektasi: ${it.expectedQty} → Aktual: ${it.actualQty} (${deltaStr})`;
+    const selisihStr = it.selisih > 0 ? `+${it.selisih}` : String(it.selisih);
+    const emoji = it.selisih === 0 ? "✅" : it.selisih > 0 ? "⬆️" : "⬇️";
+    const loc = [it.source, it.rack].filter(Boolean).join(" / ");
+    return `${emoji} **${it.productName}** (ID: ${it.itemId})${loc ? ` · ${loc}` : ""}\n   Ekspektasi: ${it.expectedQty} → Aktual: ${it.actualQty} (${selisihStr})`;
   }).join("\n");
 
   const embed = new EmbedBuilder()

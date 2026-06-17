@@ -31,7 +31,7 @@ export function buildWsInboxSheet(workbook: ExcelJS.Workbook, proofs: WsInboxPro
   let totalDelta = 0;
   for (const p of proofs) {
     totalItems += p.items.length;
-    for (const it of p.items) totalDelta += it.delta;
+    for (const it of p.items) totalDelta += it.selisih;
   }
 
   sheet.mergeCells("A2:J2");
@@ -52,7 +52,7 @@ export function buildWsInboxSheet(workbook: ExcelJS.Workbook, proofs: WsInboxPro
     { header: "Nama Barang",   key: "productName", width: 46 },
     { header: "Qty Sistem",    key: "expectedQty", width: 12 },
     { header: "Qty Fisik",     key: "actualQty",   width: 12 },
-    { header: "Selisih",       key: "delta",       width: 10 },
+    { header: "Selisih",       key: "selisih",       width: 10 },
     { header: "Tipe",          key: "tipe",        width: 18 },
     { header: "Catatan",       key: "notes",       width: 28 },
   ];
@@ -67,17 +67,17 @@ export function buildWsInboxSheet(workbook: ExcelJS.Workbook, proofs: WsInboxPro
   for (const p of proofs) {
     const { tanggal, jam } = jakartaDateParts(p.timestamp);
     for (const it of p.items) {
-      const isKor = it.delta !== 0;
+      const isKor = it.selisih !== 0;
       let tipeStr = "Opname Normal";
       let tipeColor = "FFE8F5E9"; // green
       
       if (isKor && p.isPartial) {
          tipeStr = "Partial / Pending";
          tipeColor = "FFFFF3E0"; // orange
-      } else if (isKor && it.delta < 0) {
+      } else if (isKor && it.selisih < 0) {
          tipeStr = "KOR (Minus)";
          tipeColor = "FFFFEBEE"; // light red
-      } else if (isKor && it.delta > 0) {
+      } else if (isKor && it.selisih > 0) {
          tipeStr = "KOR (Plus)";
          tipeColor = "FFE3F2FD"; // light blue
       }
@@ -90,7 +90,7 @@ export function buildWsInboxSheet(workbook: ExcelJS.Workbook, proofs: WsInboxPro
         productName: it.productName || "Item",
         expectedQty: it.expectedQty || 0,
         actualQty: it.actualQty || 0,
-        delta: it.delta || 0,
+        selisih: it.selisih || 0,
         tipe: tipeStr,
         notes: p.notes || "-",
       });
@@ -99,8 +99,8 @@ export function buildWsInboxSheet(workbook: ExcelJS.Workbook, proofs: WsInboxPro
       row.font = { name: "Segoe UI", size: 10 };
       row.alignment = { vertical: "middle", wrapText: false };
 
-      row.getCell("delta").numFmt = "+#,##0;-#,##0;0";
-      row.getCell("delta").alignment = { vertical: "middle", horizontal: "center" };
+      row.getCell("selisih").numFmt = "+#,##0;-#,##0;0";
+      row.getCell("selisih").alignment = { vertical: "middle", horizontal: "center" };
       row.getCell("expectedQty").alignment = { vertical: "middle", horizontal: "center" };
       row.getCell("actualQty").alignment = { vertical: "middle", horizontal: "center" };
 
@@ -110,10 +110,10 @@ export function buildWsInboxSheet(workbook: ExcelJS.Workbook, proofs: WsInboxPro
         row.getCell("tipe").alignment = { vertical: "middle", horizontal: "center" };
       }
 
-      if (it.delta < 0) {
-        row.getCell("delta").font = { color: { argb: "FFD32F2F" }, bold: true };
-      } else if (it.delta > 0) {
-        row.getCell("delta").font = { color: { argb: "FF1976D2" }, bold: true };
+      if (it.selisih < 0) {
+        row.getCell("selisih").font = { color: { argb: "FFD32F2F" }, bold: true };
+      } else if (it.selisih > 0) {
+        row.getCell("selisih").font = { color: { argb: "FF1976D2" }, bold: true };
       }
 
       if (rowIndex % 2 === 0) {
@@ -192,30 +192,30 @@ export async function executeWsInboxDailyReport(client: Client<true>) {
     let surplusQty = 0;
 
     // Untuk Top 3 KOR
-    type KorEntry = { name: string; delta: number; actor: string };
+    type KorEntry = { name: string; selisih: number; actor: string };
     const korList: KorEntry[] = [];
 
     for (const p of proofs) {
       if (p.isPartial) continue; // Skip pending stats from embed metrics
 
       for (const it of p.items) {
-        if (it.delta === 0) {
+        if (it.selisih === 0) {
           totalSuccess++;
           totalSuccessQty += it.actualQty;
-        } else if (it.delta < 0) {
+        } else if (it.selisih < 0) {
           missingItems++;
-          missingQty += Math.abs(it.delta);
-          korList.push({ name: it.productName, delta: it.delta, actor: p.actor });
+          missingQty += Math.abs(it.selisih);
+          korList.push({ name: it.productName, selisih: it.selisih, actor: p.actor });
         } else {
           surplusItems++;
-          surplusQty += it.delta;
-          korList.push({ name: it.productName, delta: it.delta, actor: p.actor });
+          surplusQty += it.selisih;
+          korList.push({ name: it.productName, selisih: it.selisih, actor: p.actor });
         }
       }
     }
 
     // Sort KOR by highest absolute delta
-    korList.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+    korList.sort((a, b) => Math.abs(b.selisih) - Math.abs(a.selisih));
     const top3 = korList.slice(0, 3);
 
     const totalKorItems = missingItems + surplusItems;
@@ -226,8 +226,8 @@ export async function executeWsInboxDailyReport(client: Client<true>) {
     } else {
       dangerText = `* 📉 **Barang Hilang:** ${missingItems} SKU (Total -${missingQty} pcs)\n* 📈 **Barang Lebih:** ${surplusItems} SKU (Total +${surplusQty} pcs)\n\n**🚨 Top 3 Selisih Ekstrem:**\n`;
       top3.forEach((kor, idx) => {
-        const typeStr = kor.delta < 0 ? "(Hilang)" : "(Lebih)";
-        dangerText += `${idx + 1}. *${kor.name.substring(0,40)}* ➔ **${kor.delta > 0 ? '+'+kor.delta : kor.delta} pcs ${typeStr}** *(Admin: ${kor.actor})*\n`;
+        const typeStr = kor.selisih < 0 ? "(Hilang)" : "(Lebih)";
+        dangerText += `${idx + 1}. *${kor.name.substring(0,40)}* ➔ **${kor.selisih > 0 ? '+'+kor.selisih : kor.selisih} pcs ${typeStr}** *(Admin: ${kor.actor})*\n`;
       });
     }
 

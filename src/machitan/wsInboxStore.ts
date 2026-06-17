@@ -6,7 +6,9 @@ export interface WsInboxProofItem {
   productName: string;
   expectedQty: number;
   actualQty: number;
-  delta: number;
+  selisih: number;
+  source?: string;
+  rack?: string;
 }
 
 export interface WsInboxProofPayload {
