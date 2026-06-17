@@ -463,7 +463,6 @@ export function startMachitanDailyReportScheduler(client: Client<true>) {
         return;
       }
 
-      const todayStr = new Date().toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "long", year: "numeric" });
       const footerText = `Generated ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB · Auto-cron 00:00`;
 
       const channel = await client.channels.fetch(TARGET_CHANNEL_ID);
@@ -475,14 +474,16 @@ export function startMachitanDailyReportScheduler(client: Client<true>) {
 
       // ── Message 1: Pick / Mark Pick / Pack / Archive ──────────────────────
       if (proofs.length > 0) {
-        const { buffer, pickFisiks, markPicks, packProofs, archives } = await generateMachitanReportWorkbook(proofs, todayStr);
+        const earliestProof = proofs.reduce((min, p) => p.timestamp < min.timestamp ? p : min, proofs[0]);
+        const warehouseDateStr = new Date(earliestProof.timestamp).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "long", year: "numeric" });
+        const { buffer, pickFisiks, markPicks, packProofs, archives } = await generateMachitanReportWorkbook(proofs, warehouseDateStr);
         const totalItems = proofs.reduce((sum, p) => sum + (Array.isArray(p.items) ? p.items.length : 0), 0);
-        const fileName = `Rekap_Warehouse_${todayStr.replace(/ /g, "_")}.xlsx`;
+        const fileName = `Rekap_Warehouse_${warehouseDateStr.replace(/ /g, "_")}.xlsx`;
         const attachment = new AttachmentBuilder(Buffer.from(buffer), { name: fileName });
 
         const embed = new EmbedBuilder()
           .setColor(0x2E7D32)
-          .setTitle(`📊 Rekap Harian Warehouse — ${todayStr}`)
+          .setTitle(`📊 Rekap Harian Warehouse — ${warehouseDateStr}`)
           .setDescription(`File Excel berisi 4 sheet: **Pick Fisik**, **Mark Pick**, **Pack**, **Archive Log**. Setiap baris = 1 item. Klik nama produk untuk buka di Kyou.`)
           .addFields(
             { name: "📦 Pick Fisik",   value: `${pickFisiks.length} proof`, inline: true },
@@ -495,21 +496,23 @@ export function startMachitanDailyReportScheduler(client: Client<true>) {
           .setTimestamp();
 
         await textChannel.send({ embeds: [embed], files: [attachment] });
-        console.log(`[DailyReport] Sent warehouse report for ${todayStr} (${totalItems} item rows)`);
+        console.log(`[DailyReport] Sent warehouse report for ${warehouseDateStr} (${totalItems} item rows)`);
       }
 
       // ── Message 2: WS Opname ──────────────────────────────────────────────
       if (wsProofs.length > 0) {
-        const wsBuffer = await generateWsReportWorkbook(wsProofs, todayStr);
+        const earliestWs = wsProofs.reduce((min, p) => p.timestamp < min.timestamp ? p : min, wsProofs[0]);
+        const wsDateStr = new Date(earliestWs.timestamp).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "long", year: "numeric" });
+        const wsBuffer = await generateWsReportWorkbook(wsProofs, wsDateStr);
         const wsTotalItems = wsProofs.reduce((sum, p) => sum + p.items.length, 0);
-        const wsFileName = `Rekap_WS_Opname_${todayStr.replace(/ /g, "_")}.xlsx`;
+        const wsFileName = `Rekap_WS_Opname_${wsDateStr.replace(/ /g, "_")}.xlsx`;
         const wsAttachment = new AttachmentBuilder(Buffer.from(wsBuffer), { name: wsFileName });
         const surplusCount = wsProofs.flatMap(p => p.items).filter(i => i.selisih > 0).length;
         const deficitCount = wsProofs.flatMap(p => p.items).filter(i => i.selisih < 0).length;
 
         const wsEmbed = new EmbedBuilder()
           .setColor(0x1565C0)
-          .setTitle(`🏭 Rekap WS Opname — ${todayStr}`)
+          .setTitle(`🏭 Rekap WS Opname — ${wsDateStr}`)
           .setDescription(`Rekap opname harian per source. Delta positif = lebih stok, negatif = kurang stok.`)
           .addFields(
             { name: "Total Submit",  value: `${wsProofs.length}`,  inline: true },
@@ -521,7 +524,7 @@ export function startMachitanDailyReportScheduler(client: Client<true>) {
           .setTimestamp();
 
         await textChannel.send({ embeds: [wsEmbed], files: [wsAttachment] });
-        console.log(`[DailyReport] Sent WS opname report for ${todayStr} (${wsTotalItems} item rows)`);
+        console.log(`[DailyReport] Sent WS opname report for ${wsDateStr} (${wsTotalItems} item rows)`);
       }
     } catch (e) {
       console.error("[DailyReport] Error:", e);
