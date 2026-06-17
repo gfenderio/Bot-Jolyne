@@ -40,46 +40,50 @@ export async function handleMachitanShipping(
     const bodyStr = await readRequestBody(request);
     const body = JSON.parse(bodyStr);
 
-    if (!body.actor || !body.imageBase64 || !body.orderIds) {
-      return sendJson(response, 400, { error: "Missing required fields: actor, imageBase64, orderIds", ok: false });
+    if (!body.actor || !body.orderIds) {
+      return sendJson(response, 400, { error: "Missing required fields: actor, orderIds", ok: false });
+    }
+
+    // Support both old single imageBase64 and new images[]
+    const rawImages: string[] = Array.isArray(body.images)
+      ? body.images.map(String)
+      : body.imageBase64
+      ? [String(body.imageBase64)]
+      : [];
+
+    if (rawImages.length === 0) {
+      return sendJson(response, 400, { error: "Missing required field: images", ok: false });
     }
 
     const orderIdsArr = Array.isArray(body.orderIds) ? body.orderIds.map(String) : [String(body.orderIds)];
     const orderCount = orderIdsArr.length;
     const actorName = String(body.actor);
     const notes = body.notes ? String(body.notes) : "-";
-    const imageBase64 = String(body.imageBase64);
 
     const requestedChannelId = body.channelId ?? body.channel_id;
     const targetChannelId = requestedChannelId ? String(requestedChannelId) : "1441739180043669595"; // shipping-today default
 
-    // Decode image
-    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
-    const imageBuffer = Buffer.from(base64Data, "base64");
-    const attachmentName = `shipping-proof-${Date.now()}.jpg`;
-    const attachment = new AttachmentBuilder(imageBuffer, { name: attachmentName });
+    // Decode images
+    const attachments = rawImages.map((b64, i) => {
+      const base64Data = b64.replace(/^data:image\/\w+;base64,/, "");
+      return new AttachmentBuilder(Buffer.from(base64Data, "base64"), {
+        name: `shipping-proof-${i + 1}.jpg`,
+      });
+    });
+    const firstAttachmentName = attachments[0].name as string;
 
     // Format List of Orders
-    const chunkSize = 15;
-    const orderChunks = [];
-    for (let i = 0; i < orderIdsArr.length; i += chunkSize) {
-      orderChunks.push(orderIdsArr.slice(i, i + chunkSize));
-    }
-    
-    let orderDescription = "";
-    orderChunks.forEach(chunk => {
-      orderDescription += chunk.join("\n") + "\n\n";
-    });
-
-    if (orderDescription.length > 2000) {
-      orderDescription = orderDescription.slice(0, 1990) + "\n...";
+    let orderDescription = orderIdsArr.join("\n");
+    if (orderDescription.length > 1900) {
+      orderDescription = orderDescription.slice(0, 1890) + "\n...";
     }
 
+    const photoLabel = rawImages.length > 1 ? ` · ${rawImages.length} foto` : "";
     const embed = new EmbedBuilder()
-      .setTitle(`📦 Shipping Out — ${notes !== "-" ? notes : `${orderCount} Orders`}`)
-      .setDescription(`**Total:** ${orderCount} Order(s)\n\n**List Order ID:**\n\`\`\`\n${orderDescription.trim()}\n\`\`\``)
+      .setTitle(`📦 Shipping Out — ${notes !== "-" ? notes : `${orderCount} Order(s)`}${photoLabel}`)
+      .setDescription(`**Total:** ${orderCount} Order(s)\n\n**List Order ID:**\n\`\`\`\n${orderDescription}\n\`\`\``)
       .setColor("#3498db")
-      .setImage(`attachment://${attachmentName}`)
+      .setImage(`attachment://${firstAttachmentName}`)
       .setFooter({ text: `Shipped by ${actorName}` })
       .setTimestamp(new Date());
 
@@ -88,10 +92,16 @@ export async function handleMachitanShipping(
       return sendJson(response, 404, { error: `Channel ${targetChannelId} not found or not a text channel`, ok: false });
     }
 
-    await (channel as import("discord.js").TextChannel).send({
-      embeds: [embed],
-      files: [attachment]
-    });
+    const ch = channel as import("discord.js").TextChannel;
+    const chunks: (typeof attachments)[] = [];
+    for (let i = 0; i < attachments.length; i += 10) {
+      chunks.push(attachments.slice(i, i + 10));
+    }
+
+    await ch.send({ embeds: [embed], files: chunks[0] });
+    for (let i = 1; i < chunks.length; i++) {
+      await ch.send({ files: chunks[i] });
+    }
 
     return sendJson(response, 200, { message: "Shipping proof sent to Discord", ok: true });
 
