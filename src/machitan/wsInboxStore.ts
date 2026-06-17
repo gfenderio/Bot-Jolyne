@@ -4,6 +4,7 @@ import path from "node:path";
 export interface WsInboxProofItem {
   itemId: string;
   productName: string;
+  qtySent: number;
   expectedQty: number;
   actualQty: number;
   selisih: number;

@@ -40,6 +40,7 @@ export async function handleWsInboxIntake(
     const items = body.items.map((it: any) => ({
       itemId: String(it.itemId || "-"),
       productName: String(it.productName || "Item"),
+      qtySent: Number(it.qtySent || 0),
       expectedQty: Number(it.expectedQty || 0),
       actualQty: Number(it.actualQty || 0),
       selisih: Number(it.selisih ?? it.delta ?? 0),

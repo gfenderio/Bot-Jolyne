@@ -145,6 +145,9 @@ export function buildSheet(workbook: ExcelJS.Workbook, kind: SheetKind, proofs: 
 
   // ── Header row (row 4) ─────────────────────────────────────────────────────
   const headerRow = sheet.getRow(4);
+  // ExcelJS menulis `header` dari sheet.columns ke row 1 (tertimpa title merge).
+  // Tulis eksplisit ke row 4.
+  baseColumns.forEach((col, i) => { headerRow.getCell(i + 1).value = col.header ?? ""; });
   headerRow.font = { name: "Segoe UI", bold: true, size: 11, color: { argb: "FFFFFFFF" } };
   headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: theme.headerColor } };
   headerRow.alignment = { vertical: "middle", horizontal: "left" };
@@ -309,7 +312,7 @@ export function buildWsSheet(workbook: ExcelJS.Workbook, proofs: WsInboxProofPay
   sheet.getRow(3).height = 6;
 
   // ── Columns ───────────────────────────────────────────────────────────────
-  sheet.columns = [
+  const wsColumns = [
     { header: "Tanggal",        key: "tanggal",     width: 12 },
     { header: "Jam (WIB)",      key: "jam",         width: 11 },
     { header: theme.actorLabel, key: "actor",       width: 22 },
@@ -317,15 +320,17 @@ export function buildWsSheet(workbook: ExcelJS.Workbook, proofs: WsInboxProofPay
     { header: "Rak",            key: "rack",        width: 14 },
     { header: "Item ID",        key: "itemId",      width: 11 },
     { header: "Nama Barang",    key: "productName", width: 46 },
-    { header: "Ekspektasi",     key: "expectedQty", width: 12 },
-    { header: "Aktual",         key: "actualQty",   width: 10 },
+    { header: "Qty Dikirim",    key: "qtySent",     width: 12 },
+    { header: "Qty Seharusnya", key: "expectedQty", width: 14 },
+    { header: "Qty Aktual",     key: "actualQty",   width: 11 },
     { header: "Selisih",        key: "selisih",     width: 10 },
-    { header: "Partial",        key: "partial",     width: 10 },
-    { header: "Catatan",        key: "notes",       width: 28 },
+    { header: "Pending",        key: "pending",     width: 10 },
   ];
+  sheet.columns = wsColumns;
 
-  // ── Header row (row 4) — identik dengan buildSheet ────────────────────────
+  // ── Header row (row 4) ────────────────────────────────────────────────────
   const headerRow = sheet.getRow(4);
+  wsColumns.forEach((col, i) => { headerRow.getCell(i + 1).value = col.header; });
   headerRow.font = { name: "Segoe UI", bold: true, size: 11, color: { argb: "FFFFFFFF" } };
   headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: theme.headerColor } };
   headerRow.alignment = { vertical: "middle", horizontal: "left" };
@@ -354,11 +359,11 @@ export function buildWsSheet(workbook: ExcelJS.Workbook, proofs: WsInboxProofPay
         rack: item.rack || "-",
         itemId: item.itemId,
         productName: item.productName,
+        qtySent: item.qtySent,
         expectedQty: item.expectedQty,
         actualQty: item.actualQty,
         selisih: item.selisih,
-        partial: proof.isPartial ? "Ya" : "-",
-        notes: proof.notes || "-",
+        pending: proof.isPartial ? "Ya" : "-",
       });
       row.height = 26;
       row.font = { name: "Segoe UI", size: 10 };
@@ -385,7 +390,7 @@ export function buildWsSheet(workbook: ExcelJS.Workbook, proofs: WsInboxProofPay
         selisihCell.font = { name: "Segoe UI Semibold", size: 10, bold: true, color: { argb: "FFC62828" } };
       }
 
-      (["expectedQty", "actualQty"] as const).forEach(k => {
+      (["qtySent", "expectedQty", "actualQty"] as const).forEach(k => {
         row.getCell(k).numFmt = "#,##0";
         row.getCell(k).alignment = { vertical: "middle", horizontal: "center" };
       });
