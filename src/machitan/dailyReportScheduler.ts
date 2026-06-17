@@ -2,13 +2,14 @@ import cron from "node-cron";
 import ExcelJS from "exceljs";
 import { AttachmentBuilder, Client, EmbedBuilder, TextChannel } from "discord.js";
 import { getAndClearMachitanProofs, MachitanProofPayload, MachitanProofItem } from "./proofStore.js";
+import { getAndClearWsInboxProofs, WsInboxProofPayload } from "./wsInboxStore.js";
 
 const TARGET_CHANNEL_ID = "1501899831268868106";
 const MARK_PICK_CHANNEL = "1418827227264450663";
 const PICK_FISIK_CHANNEL = "1390221553333043200";
 const PACK_PROOF_CHANNEL = "1209860901914677368";
 
-type SheetKind = "pick_fisik" | "mark_pick" | "pack" | "archive";
+type SheetKind = "pick_fisik" | "mark_pick" | "pack" | "archive" | "ws_opname";
 
 interface SheetTheme {
   title: string;
@@ -18,10 +19,11 @@ interface SheetTheme {
 }
 
 const SHEET_THEMES: Record<SheetKind, SheetTheme> = {
-  pick_fisik: { title: "Pick Fisik Log",         headerColor: "FF1B5E20", accentColor: "FFE8F5E9", actorLabel: "Picker" },
-  mark_pick:  { title: "Mark Pick Log",          headerColor: "FF0D47A1", accentColor: "FFE3F2FD", actorLabel: "Picker" },
-  pack:       { title: "Pack Log",               headerColor: "FF4A148C", accentColor: "FFF3E5F5", actorLabel: "Packer" },
-  archive:    { title: "Archive Log",            headerColor: "FFBF360C", accentColor: "FFFFE0B2", actorLabel: "Archiver" },
+  pick_fisik: { title: "Pick Fisik Log",  headerColor: "FF1B5E20", accentColor: "FFE8F5E9", actorLabel: "Picker"   },
+  mark_pick:  { title: "Mark Pick Log",   headerColor: "FF0D47A1", accentColor: "FFE3F2FD", actorLabel: "Picker"   },
+  pack:       { title: "Pack Log",        headerColor: "FF4A148C", accentColor: "FFF3E5F5", actorLabel: "Packer"   },
+  archive:    { title: "Archive Log",     headerColor: "FFBF360C", accentColor: "FFFFE0B2", actorLabel: "Archiver" },
+  ws_opname:  { title: "WS Opname Log",   headerColor: "FF1A237E", accentColor: "FFE8EAF6", actorLabel: "Staff"    },
 };
 
 function isArchiveProof(p: MachitanProofPayload): boolean {
@@ -250,7 +252,6 @@ export function buildSheet(workbook: ExcelJS.Workbook, kind: SheetKind, proofs: 
 }
 
 export async function generateMachitanReportWorkbook(proofs: MachitanProofPayload[], todayStr: string): Promise<{ buffer: ArrayBuffer; pickFisiks: MachitanProofPayload[]; markPicks: MachitanProofPayload[]; packProofs: MachitanProofPayload[]; archives: MachitanProofPayload[]; }> {
-  // Pisahkan archive entries dari channel ID-nya (tidak tergantung channel, tergantung proofType)
   const archives   = proofs.filter(p => isArchiveProof(p));
   const regular    = proofs.filter(p => !isArchiveProof(p));
 
@@ -274,47 +275,230 @@ export async function generateMachitanReportWorkbook(proofs: MachitanProofPayloa
   return { buffer, pickFisiks, markPicks, packProofs, archives };
 }
 
+export function buildWsSheet(workbook: ExcelJS.Workbook, proofs: WsInboxProofPayload[], reportDateStr: string) {
+  const theme = SHEET_THEMES["ws_opname"];
+  const sheet = workbook.addWorksheet(theme.title, {
+    views: [{ state: "frozen", ySplit: 4, showGridLines: false }],
+    pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 },
+    properties: { defaultRowHeight: 22 },
+  });
+
+  // ── Title block (rows 1-3) — sama persis dengan buildSheet ────────────────
+  const colCount = 10;
+  const lastCol = String.fromCharCode(64 + colCount);
+  sheet.mergeCells(`A1:${lastCol}1`);
+  const titleCell = sheet.getCell("A1");
+  titleCell.value = `${theme.title} — ${reportDateStr}`;
+  titleCell.font = { name: "Segoe UI Semibold", size: 16, bold: true, color: { argb: "FFFFFFFF" } };
+  titleCell.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
+  titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: theme.headerColor } };
+  sheet.getRow(1).height = 32;
+
+  const allItems = proofs.flatMap(p => p.items);
+  const uniqueActors = new Set(proofs.map(p => p.actor)).size;
+  const surplusCount = allItems.filter(i => i.delta > 0).length;
+  const deficitCount = allItems.filter(i => i.delta < 0).length;
+
+  sheet.mergeCells(`A2:${lastCol}2`);
+  const summaryCell = sheet.getCell("A2");
+  summaryCell.value = `Total Item: ${allItems.length}    Total Submit: ${proofs.length}    Unique ${theme.actorLabel}: ${uniqueActors}    Lebih: ${surplusCount}    Kurang: ${deficitCount}`;
+  summaryCell.font = { name: "Segoe UI", size: 10, color: { argb: "FF424242" }, italic: true };
+  summaryCell.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
+  summaryCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: theme.accentColor } };
+  sheet.getRow(2).height = 22;
+  sheet.getRow(3).height = 6;
+
+  // ── Columns ───────────────────────────────────────────────────────────────
+  sheet.columns = [
+    { header: "Tanggal",     key: "tanggal",     width: 12 },
+    { header: "Jam (WIB)",   key: "jam",         width: 11 },
+    { header: theme.actorLabel, key: "actor",    width: 22 },
+    { header: "Item ID",     key: "itemId",      width: 11 },
+    { header: "Nama Barang", key: "productName", width: 46 },
+    { header: "Ekspektasi",  key: "expectedQty", width: 12 },
+    { header: "Aktual",      key: "actualQty",   width: 10 },
+    { header: "Delta",       key: "delta",       width: 10 },
+    { header: "Partial",     key: "partial",     width: 10 },
+    { header: "Catatan",     key: "notes",       width: 28 },
+  ];
+
+  // ── Header row (row 4) — identik dengan buildSheet ────────────────────────
+  const headerRow = sheet.getRow(4);
+  headerRow.font = { name: "Segoe UI", bold: true, size: 11, color: { argb: "FFFFFFFF" } };
+  headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: theme.headerColor } };
+  headerRow.alignment = { vertical: "middle", horizontal: "left" };
+  headerRow.height = 28;
+  headerRow.eachCell({ includeEmpty: true }, cell => {
+    cell.border = {
+      top: { style: "medium", color: { argb: theme.headerColor } },
+      bottom: { style: "medium", color: { argb: theme.headerColor } },
+      left: { style: "thin", color: { argb: "FFE0E0E0" } },
+      right: { style: "thin", color: { argb: "FFE0E0E0" } },
+    };
+  });
+  headerRow.commit();
+
+  // ── Data rows ─────────────────────────────────────────────────────────────
+  let rowIndex = 0;
+  for (const proof of proofs) {
+    const { tanggal, jam } = jakartaDateParts(proof.timestamp);
+    for (const item of proof.items) {
+      rowIndex++;
+      const row = sheet.addRow({
+        tanggal,
+        jam,
+        actor: proof.actor,
+        itemId: item.itemId,
+        productName: item.productName,
+        expectedQty: item.expectedQty,
+        actualQty: item.actualQty,
+        delta: item.delta,
+        partial: proof.isPartial ? "Ya" : "-",
+        notes: proof.notes || "-",
+      });
+      row.height = 26;
+      row.font = { name: "Segoe UI", size: 10 };
+      row.alignment = { vertical: "middle", wrapText: false };
+
+      // Hyperlink productName → sama dengan buildSheet
+      const productCell = row.getCell("productName");
+      const url = itemKyouUrl(item.itemId);
+      if (url) {
+        productCell.value = { text: item.productName, hyperlink: url };
+        productCell.font = { name: "Segoe UI", size: 10, color: { argb: "FF1565C0" }, underline: true };
+      }
+      productCell.alignment = { vertical: "middle", wrapText: true };
+
+      // Delta: merah/hijau
+      const deltaCell = row.getCell("delta");
+      deltaCell.numFmt = "+#,##0;-#,##0;0";
+      deltaCell.alignment = { vertical: "middle", horizontal: "center" };
+      if (item.delta > 0) {
+        deltaCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8F5E9" } };
+        deltaCell.font = { name: "Segoe UI Semibold", size: 10, bold: true, color: { argb: "FF2E7D32" } };
+      } else if (item.delta < 0) {
+        deltaCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFEBEE" } };
+        deltaCell.font = { name: "Segoe UI Semibold", size: 10, bold: true, color: { argb: "FFC62828" } };
+      }
+
+      (["expectedQty", "actualQty"] as const).forEach(k => {
+        row.getCell(k).numFmt = "#,##0";
+        row.getCell(k).alignment = { vertical: "middle", horizontal: "center" };
+      });
+
+      // Zebra stripe
+      if (rowIndex % 2 === 0) {
+        row.eachCell({ includeEmpty: false }, cell => {
+          if (!cell.fill || (cell.fill as any).type !== "pattern") {
+            cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFAFAFA" } };
+          }
+        });
+      }
+
+      // Borders
+      row.eachCell({ includeEmpty: true }, cell => {
+        cell.border = {
+          top: { style: "hair", color: { argb: "FFE0E0E0" } },
+          left: { style: "hair", color: { argb: "FFE0E0E0" } },
+          bottom: { style: "hair", color: { argb: "FFE0E0E0" } },
+          right: { style: "hair", color: { argb: "FFE0E0E0" } },
+        };
+      });
+    }
+  }
+
+  if (rowIndex === 0) {
+    sheet.mergeCells(`A5:${lastCol}5`);
+    const emptyCell = sheet.getCell("A5");
+    emptyCell.value = `Tidak ada data ${theme.title} untuk tanggal ${reportDateStr}.`;
+    emptyCell.font = { name: "Segoe UI", size: 11, italic: true, color: { argb: "FF9E9E9E" } };
+    emptyCell.alignment = { vertical: "middle", horizontal: "center" };
+    sheet.getRow(5).height = 40;
+  } else {
+    sheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: colCount } };
+  }
+}
+
+export async function generateWsReportWorkbook(wsProofs: WsInboxProofPayload[], todayStr: string): Promise<ArrayBuffer> {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "Bot Jolyne";
+  workbook.created = new Date();
+  workbook.title = `Rekap WS Opname — ${todayStr}`;
+  buildWsSheet(workbook, wsProofs, todayStr);
+  return workbook.xlsx.writeBuffer();
+}
+
 export function startMachitanDailyReportScheduler(client: Client<true>) {
   cron.schedule("0 0 * * *", async () => {
     try {
       console.log("[DailyReport] Running Machitan Daily Report Scheduler...");
-      const proofs = await getAndClearMachitanProofs();
+      const [proofs, wsProofs] = await Promise.all([getAndClearMachitanProofs(), getAndClearWsInboxProofs()]);
 
-      if (proofs.length === 0) {
+      if (proofs.length === 0 && wsProofs.length === 0) {
         console.log("[DailyReport] No proofs to report today.");
         return;
       }
 
       const todayStr = new Date().toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "long", year: "numeric" });
-      const { buffer, pickFisiks, markPicks, packProofs, archives } = await generateMachitanReportWorkbook(proofs, todayStr);
+      const footerText = `Generated ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB · Auto-cron 00:00`;
 
       const channel = await client.channels.fetch(TARGET_CHANNEL_ID);
       if (!channel || !channel.isTextBased()) {
         console.error("[DailyReport] Cannot fetch target channel");
         return;
       }
+      const textChannel = channel as TextChannel;
 
-      const fileName = `Rekap_Warehouse_${todayStr.replace(/ /g, "_")}.xlsx`;
-      const attachment = new AttachmentBuilder(Buffer.from(buffer), { name: fileName });
+      // ── Message 1: Pick / Mark Pick / Pack / Archive ──────────────────────
+      if (proofs.length > 0) {
+        const { buffer, pickFisiks, markPicks, packProofs, archives } = await generateMachitanReportWorkbook(proofs, todayStr);
+        const totalItems = proofs.reduce((sum, p) => sum + (Array.isArray(p.items) ? p.items.length : 0), 0);
+        const fileName = `Rekap_Warehouse_${todayStr.replace(/ /g, "_")}.xlsx`;
+        const attachment = new AttachmentBuilder(Buffer.from(buffer), { name: fileName });
 
-      const totalItems = (proofs as MachitanProofPayload[]).reduce((sum, p) => sum + (Array.isArray(p.items) ? p.items.length : 0), 0);
+        const embed = new EmbedBuilder()
+          .setColor(0x2E7D32)
+          .setTitle(`📊 Rekap Harian Warehouse — ${todayStr}`)
+          .setDescription(`File Excel berisi 4 sheet: **Pick Fisik**, **Mark Pick**, **Pack**, **Archive Log**. Setiap baris = 1 item. Klik nama produk untuk buka di Kyou.`)
+          .addFields(
+            { name: "📦 Pick Fisik",   value: `${pickFisiks.length} proof`, inline: true },
+            { name: "📝 Mark Pick",    value: `${markPicks.length} proof`,  inline: true },
+            { name: "✅ Pack",          value: `${packProofs.length} proof`, inline: true },
+            { name: "🗄️ Archive",       value: `${archives.length} item`,   inline: true },
+            { name: "Total Item Rows", value: `${totalItems}`,              inline: true },
+          )
+          .setFooter({ text: footerText })
+          .setTimestamp();
 
-      const embed = new EmbedBuilder()
-        .setColor(0x2E7D32)
-        .setTitle(`📊 Rekap Harian Warehouse — ${todayStr}`)
-        .setDescription(`File Excel berisi 4 sheet terpisah: **Pick Fisik**, **Mark Pick**, **Pack**, dan **Archive Log**. Setiap baris = 1 item. Klik nama produk untuk buka di Kyou.`)
-        .addFields(
-          { name: "📦 Pick Fisik",         value: `${pickFisiks.length} proof`, inline: true },
-          { name: "📝 Mark Pick",          value: `${markPicks.length} proof`,  inline: true },
-          { name: "✅ Pack",                value: `${packProofs.length} proof`, inline: true },
-          { name: "🗄️ Archive",             value: `${archives.length} item`,    inline: true },
-          { name: "Total Item Rows",       value: `${totalItems}`,              inline: true },
-        )
-        .setFooter({ text: `Generated ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB · Auto-cron 00:00` })
-        .setTimestamp();
+        await textChannel.send({ embeds: [embed], files: [attachment] });
+        console.log(`[DailyReport] Sent warehouse report for ${todayStr} (${totalItems} item rows)`);
+      }
 
-      await (channel as TextChannel).send({ embeds: [embed], files: [attachment] });
-      console.log(`[DailyReport] Sent daily report for ${todayStr} (${totalItems} item rows)`);
+      // ── Message 2: WS Opname ──────────────────────────────────────────────
+      if (wsProofs.length > 0) {
+        const wsBuffer = await generateWsReportWorkbook(wsProofs, todayStr);
+        const wsTotalItems = wsProofs.reduce((sum, p) => sum + p.items.length, 0);
+        const wsFileName = `Rekap_WS_Opname_${todayStr.replace(/ /g, "_")}.xlsx`;
+        const wsAttachment = new AttachmentBuilder(Buffer.from(wsBuffer), { name: wsFileName });
+        const surplusCount = wsProofs.flatMap(p => p.items).filter(i => i.delta > 0).length;
+        const deficitCount = wsProofs.flatMap(p => p.items).filter(i => i.delta < 0).length;
+
+        const wsEmbed = new EmbedBuilder()
+          .setColor(0x1565C0)
+          .setTitle(`🏭 Rekap WS Opname — ${todayStr}`)
+          .setDescription(`Rekap opname harian per source. Delta positif = lebih stok, negatif = kurang stok.`)
+          .addFields(
+            { name: "Total Submit",  value: `${wsProofs.length}`,  inline: true },
+            { name: "Total Item",    value: `${wsTotalItems}`,      inline: true },
+            { name: "⬆️ Lebih",      value: `${surplusCount} item`, inline: true },
+            { name: "⬇️ Kurang",     value: `${deficitCount} item`, inline: true },
+          )
+          .setFooter({ text: footerText })
+          .setTimestamp();
+
+        await textChannel.send({ embeds: [wsEmbed], files: [wsAttachment] });
+        console.log(`[DailyReport] Sent WS opname report for ${todayStr} (${wsTotalItems} item rows)`);
+      }
     } catch (e) {
       console.error("[DailyReport] Error:", e);
     }

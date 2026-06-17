@@ -584,7 +584,8 @@ export async function handleDelivereeExtensionHttpRequest(
     "/deliveree/extension/test-discord",
     "/machitan/pick-proof",
     "/machitan/pack-proof",
-    "/machitan/ws-inbox"
+    "/machitan/ws-inbox",
+    "/machitan/shipping"
   ];
 
   if (!validPaths.includes(pathname) || !["GET", "POST"].includes(request.method || "")) {
@@ -610,10 +611,29 @@ export async function handleDelivereeExtensionHttpRequest(
     return;
   }
 
+  if (pathname === "/machitan/shipping") {
+    if (!options.discordClient) {
+      sendJson(response, 500, { error: "Discord client not configured", ok: false });
+      return;
+    }
+    try {
+      const { handleMachitanShipping } = await import("../machitan/shippingIntake.js");
+      await handleMachitanShipping(request, response, options.discordClient);
+    } catch (e) {
+      console.error(e);
+      sendJson(response, 500, { error: "Internal server error handling Machitan shipping request", ok: false });
+    }
+    return;
+  }
+
   if (pathname === "/machitan/ws-inbox") {
+    if (!options.discordClient) {
+      sendJson(response, 500, { error: "Discord client not configured", ok: false });
+      return;
+    }
     try {
       const { handleWsInboxIntake } = await import("../machitan/wsInboxIntake.js");
-      await handleWsInboxIntake(request, response);
+      await handleWsInboxIntake(request, response, options.discordClient);
     } catch (e) {
       console.error(e);
       sendJson(response, 500, { error: "Internal server error handling WS Inbox request", ok: false });

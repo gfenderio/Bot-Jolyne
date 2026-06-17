@@ -13,7 +13,6 @@ import { handleInteractionCreate } from "./events/interaction-create.js";
 import { handleReady } from "./events/ready.js";
 import { startBirthdayNowScheduler } from "./schedulers/birthday-now.js";
 import { startMachitanDailyReportScheduler } from "./machitan/dailyReportScheduler.js";
-import { startWsInboxDailyReportScheduler } from "./machitan/wsInboxDailyReportScheduler.js";
 import { registerGuildSlashCommands } from "./services/slash-commands.js";
 import { startNotionStandupScheduler } from "./schedulers/notion-standup.js";
 
@@ -38,7 +37,6 @@ if (!env.DISCORD_TOKEN) {
     startDelivereeExtensionIntake(readyClient);
     startDelivereeWebMonitor(readyClient);
     startMachitanDailyReportScheduler(readyClient);
-    startWsInboxDailyReportScheduler(readyClient);
     startNotionStandupScheduler(readyClient);
   });
   client.on(Events.Error, (error) => {
