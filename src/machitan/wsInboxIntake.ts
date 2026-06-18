@@ -1,8 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { Client, EmbedBuilder, TextChannel } from "discord.js";
 import { addWsInboxProof } from "./wsInboxStore.js";
-
-const WS_CHANNEL_ID = "1501899831268868106";
 
 function sendJson(response: ServerResponse, statusCode: number, payload: unknown) {
   response.writeHead(statusCode, { "Content-Type": "application/json" });
@@ -21,7 +18,6 @@ async function readRequestBody(request: IncomingMessage, maxBytes = 5 * 1024 * 1
 export async function handleWsInboxIntake(
   request: IncomingMessage,
   response: ServerResponse,
-  client: Client<true>
 ) {
   if (request.method !== "POST") return sendJson(response, 405, { error: "Method not allowed", ok: false });
 
@@ -54,42 +50,9 @@ export async function handleWsInboxIntake(
 
     await addWsInboxProof({ timestamp: new Date().toISOString(), actor, items, notes, isPartial });
 
-    // Send embed to Discord
-    sendWsEmbed(client, actor, items, notes, isPartial).catch(e =>
-      console.error("[WsInboxIntake] Embed error:", e)
-    );
-
     return sendJson(response, 200, { message: "WS Inbox log saved", ok: true });
   } catch (error) {
     console.error("WS Inbox Intake Error:", error);
     return sendJson(response, 500, { error: error instanceof Error ? error.message : "Internal Server Error", ok: false });
   }
-}
-
-async function sendWsEmbed(
-  client: Client<true>,
-  actor: string,
-  items: Array<{ itemId: string; productName: string; expectedQty: number; actualQty: number; selisih: number; source?: string; rack?: string }>,
-  notes: string | undefined,
-  isPartial: boolean
-) {
-  const channel = await client.channels.fetch(WS_CHANNEL_ID).catch(() => null);
-  if (!channel || !channel.isTextBased()) return;
-
-  const itemLines = items.map(it => {
-    const selisihStr = it.selisih > 0 ? `+${it.selisih}` : String(it.selisih);
-    const emoji = it.selisih === 0 ? "✅" : it.selisih > 0 ? "⬆️" : "⬇️";
-    const loc = [it.source, it.rack].filter(Boolean).join(" / ");
-    return `${emoji} **${it.productName}** (ID: ${it.itemId})${loc ? ` · ${loc}` : ""}\n   Ekspektasi: ${it.expectedQty} → Aktual: ${it.actualQty} (${selisihStr})`;
-  }).join("\n");
-
-  const embed = new EmbedBuilder()
-    .setColor(isPartial ? 0xFFA726 : 0x43A047)
-    .setTitle(`🏭 WS Opname${isPartial ? " (Partial)" : ""} — ${actor}`)
-    .setDescription(itemLines || "-")
-    .setTimestamp();
-
-  if (notes) embed.addFields({ name: "Catatan", value: notes });
-
-  await (channel as TextChannel).send({ embeds: [embed] });
 }

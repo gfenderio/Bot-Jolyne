@@ -678,7 +678,7 @@ export async function handleDelivereeExtensionHttpRequest(
     }
     try {
       const { handleWsInboxIntake } = await import("../machitan/wsInboxIntake.js");
-      await handleWsInboxIntake(request, response, options.discordClient);
+      await handleWsInboxIntake(request, response);
     } catch (e) {
       console.error(e);
       sendJson(response, 500, { error: "Internal server error handling WS Inbox request", ok: false });
