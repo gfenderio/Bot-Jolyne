@@ -585,7 +585,8 @@ export async function handleDelivereeExtensionHttpRequest(
     "/machitan/pick-proof",
     "/machitan/pack-proof",
     "/machitan/ws-inbox",
-    "/machitan/shipping"
+    "/machitan/shipping",
+    "/machitan/ws-report-now"
   ];
 
   if (!validPaths.includes(pathname) || !["GET", "POST"].includes(request.method || "")) {
@@ -636,37 +637,12 @@ export async function handleDelivereeExtensionHttpRequest(
       return;
     }
     try {
-      const { generateWsReportWorkbook } = await import("../machitan/dailyReportScheduler.js");
-      const { getAndClearWsInboxProofs } = await import("../machitan/wsInboxStore.js");
-      const { AttachmentBuilder, EmbedBuilder, TextChannel } = await import("discord.js");
-      const wsProofs = await getAndClearWsInboxProofs();
-      if (wsProofs.length === 0) { sendJson(response, 200, { message: "No WS data in store", ok: true }); return; }
-      const todayStr = new Date().toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "long", year: "numeric" });
-      const earliestWs = wsProofs.reduce((min, p) => p.timestamp < min.timestamp ? p : min, wsProofs[0]);
-      const wsDateStr = new Date(earliestWs.timestamp).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "long", year: "numeric" });
-      const wsBuffer = await generateWsReportWorkbook(wsProofs, wsDateStr);
-      const channel = await options.discordClient.channels.fetch("1501899831268868106");
-      if (!channel || !channel.isTextBased()) { sendJson(response, 500, { error: "Channel not found", ok: false }); return; }
-      const surplusCount = wsProofs.flatMap(p => p.items).filter(i => i.selisih > 0).length;
-      const deficitCount = wsProofs.flatMap(p => p.items).filter(i => i.selisih < 0).length;
-      const embed = new EmbedBuilder()
-        .setColor(0x1565C0)
-        .setTitle(`🏭 Rekap WS Opname — ${wsDateStr}`)
-        .setDescription(`Manual trigger. Rekap opname per source.`)
-        .addFields(
-          { name: "Total Submit", value: `${wsProofs.length}`, inline: true },
-          { name: "Total Item", value: `${wsProofs.flatMap(p => p.items).length}`, inline: true },
-          { name: "⬆️ Lebih", value: `${surplusCount} item`, inline: true },
-          { name: "⬇️ Kurang", value: `${deficitCount} item`, inline: true },
-        )
-        .setFooter({ text: `Manual trigger ${todayStr}` })
-        .setTimestamp();
-      const attachment = new AttachmentBuilder(Buffer.from(wsBuffer), { name: `Rekap_WS_Opname_${wsDateStr.replace(/ /g, "_")}.xlsx` });
-      await (channel as any).send({ embeds: [embed], files: [attachment] });
-      sendJson(response, 200, { message: "WS report sent", ok: true });
+      const { executeWsInboxDailyReport } = await import("../machitan/wsInboxDailyReportScheduler.js");
+      await executeWsInboxDailyReport(options.discordClient);
+      sendJson(response, 200, { message: "WS inbox report sent", ok: true });
     } catch (e) {
       console.error(e);
-      sendJson(response, 500, { error: "Failed to send WS report", ok: false });
+      sendJson(response, 500, { error: "Failed to send WS inbox report", ok: false });
     }
     return;
   }
