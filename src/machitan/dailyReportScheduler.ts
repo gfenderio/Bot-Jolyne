@@ -299,8 +299,10 @@ export function buildWsSheet(workbook: ExcelJS.Workbook, proofs: WsInboxProofPay
 
   const allItems = proofs.flatMap(p => p.items);
   const uniqueActors = new Set(proofs.map(p => p.actor)).size;
-  const surplusCount = allItems.filter(i => i.selisih > 0).length;
-  const deficitCount = allItems.filter(i => i.selisih < 0).length;
+  // Partial = opname belum final → jangan dihitung sebagai Lebih/Kurang.
+  const finalItems = proofs.flatMap(p => p.isPartial ? [] : p.items);
+  const surplusCount = finalItems.filter(i => i.selisih > 0).length;
+  const deficitCount = finalItems.filter(i => i.selisih < 0).length;
 
   sheet.mergeCells(`A2:${lastCol}2`);
   const summaryCell = sheet.getCell("A2");
@@ -512,8 +514,10 @@ export function startMachitanDailyReportScheduler(client: Client<true>) {
         const wsTotalItems = wsProofs.reduce((sum, p) => sum + p.items.length, 0);
         const wsFileName = `Rekap_WS_Opname_${wsDateStr.replace(/ /g, "_")}.xlsx`;
         const wsAttachment = new AttachmentBuilder(Buffer.from(wsBuffer), { name: wsFileName });
-        const surplusCount = wsProofs.flatMap(p => p.items).filter(i => i.selisih > 0).length;
-        const deficitCount = wsProofs.flatMap(p => p.items).filter(i => i.selisih < 0).length;
+        // Partial = opname belum final → jangan dihitung sebagai Lebih/Kurang.
+        const wsFinalItems = wsProofs.flatMap(p => p.isPartial ? [] : p.items);
+        const surplusCount = wsFinalItems.filter(i => i.selisih > 0).length;
+        const deficitCount = wsFinalItems.filter(i => i.selisih < 0).length;
 
         const wsEmbed = new EmbedBuilder()
           .setColor(0x1565C0)

@@ -165,7 +165,13 @@ export function startWsInboxDailyReportScheduler(client: Client<true>) {
 export async function executeWsInboxDailyReport(client: Client<true>) {
   try {
     console.log("[WsInboxReport] Generating report...");
-    const proofs = await getAndClearWsInboxProofs();
+    let proofs = await getAndClearWsInboxProofs();
+
+    // Filter out test proofs globally (notes ada di level proof, bukan item)
+    proofs = proofs.filter(p => {
+      const notesLower = (p.notes || "").toLowerCase();
+      return p.notes !== "Sheet sync: confirm KOR" && !notesLower.includes("test pda");
+    });
 
     if (proofs.length === 0) {
       console.log("[WsInboxReport] No proofs to report today.");
