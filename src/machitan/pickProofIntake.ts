@@ -16,7 +16,11 @@ function inferEcommerceChannel(orderId: string, item: any) {
   const explicit = String(item?.channel ?? item?.ecommerce ?? item?.marketplace ?? "").toLowerCase();
   if (explicit.includes("shopee")) return "Shopee";
   if (explicit.includes("tokopedia") || explicit.includes("toped")) return "Tokopedia";
-  if (/^\d+$/.test(orderId) && orderId.length >= 12) return "Tokopedia";
+  // Order ID kadang dapat suffix non-digit dari PDA (mis. "584... BOX MULUS")
+  // yang bikin /^\d+$/ gagal → salah default ke Shopee. Ambil grup digit pertama
+  // dulu, baru cek panjangnya (order numerik panjang = Tokopedia).
+  const digits = orderId.match(/\d+/)?.[0] ?? "";
+  if (digits.length >= 12) return "Tokopedia";
   return "Shopee";
 }
 
@@ -29,6 +33,16 @@ function mentionForEcommerce(channel: string) {
 
 function itemKyouUrl(itemId: string) {
   return itemId && itemId !== "-" ? `https://kyou.id/items/${encodeURIComponent(itemId)}` : undefined;
+}
+
+// Order ID marketplace kadang punya deskripsi nempel di belakang angka
+// (mis. "584653665670366416 BOX MULUS"). Pisahkan jadi order id bersih + deskripsi
+// supaya tidak ngerusak deteksi channel (tag) & tampil di kolom sendiri.
+function splitOrderDescription(raw: unknown): { orderId: string; description: string | null } {
+  const s = String(raw ?? "").trim();
+  const m = s.match(/^(\d{6,})\s+(\S.*)$/);
+  if (m) return { orderId: m[1], description: m[2].trim() };
+  return { orderId: s, description: null };
 }
 
 
@@ -76,13 +90,16 @@ export async function handleMachitanPickProof(
       return sendJson(response, 400, { error: "Missing required fields", ok: false });
     }
 
-    const orderIdsArr = Array.isArray(body.orderIds) ? body.orderIds.map(String) : [String(body.orderIds)];
-    const orderIdsStr = orderIdsArr.join(", ");
-    const orderCount = orderIdsArr.length;
+    const orderIdsArr: string[] = Array.isArray(body.orderIds) ? body.orderIds.map(String) : [String(body.orderIds)];
+    const orderSplits = orderIdsArr.map(splitOrderDescription);
+    const cleanOrderIdsArr = orderSplits.map(s => s.orderId);
+    const orderDescriptions = [...new Set(orderSplits.map(s => s.description).filter((d): d is string => !!d))];
+    const orderIdsStr = cleanOrderIdsArr.join(", ");
+    const orderCount = cleanOrderIdsArr.length;
     // Discord title max 256 char, field value max 1024 char.
     // Bulk PO bisa puluhan order → ringkas biar embed gak ditolak Discord.
     const orderTitleStr = orderCount > 5
-      ? `${orderCount} order (${orderIdsArr.slice(0, 3).join(", ")}, …)`
+      ? `${orderCount} order (${cleanOrderIdsArr.slice(0, 3).join(", ")}, …)`
       : orderIdsStr;
     const orderFieldStr = orderIdsStr.length > 1000
       ? `${orderCount} order:\n${orderIdsStr.slice(0, 980)}…`
@@ -175,7 +192,8 @@ export async function handleMachitanPickProof(
 
       const imageBuffer = Buffer.from(imageBase64, "base64");
       for (const { item, index } of ecommerceRows) {
-        const orderId = String(item?.invoiceNumber ?? item?.invoice_number ?? item?.orderId ?? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-");
+        const rawOrderId = String(item?.invoiceNumber ?? item?.invoice_number ?? item?.orderId ?? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-");
+        const { orderId, description } = splitOrderDescription(rawOrderId);
         const itemId = String(item?.itemId ?? item?.id ?? "-");
         const productName = String(item?.productName ?? item?.name ?? "E-Commerce item");
         const qty = String(item?.qty ?? item?.quantity ?? "-");
@@ -189,6 +207,7 @@ export async function handleMachitanPickProof(
           .addFields(
             { name: "Order ID", value: orderId, inline: true },
             { name: actorLabel, value: picker, inline: true },
+            ...(description ? [{ name: "Deskripsi", value: description.slice(0, 1024), inline: true }] : []),
             { name: "Notes", value: notes.slice(0, 1024), inline: !isPackProof },
             ...(isPackProof ? [{ name: "Status", value: "Diproses ke RESI Fulfillment", inline: true }] : []),
             { name: "Items", value: `Qty: ${qty} | Source: ${source}`, inline: false }
@@ -214,7 +233,8 @@ export async function handleMachitanPickProof(
         orderIds: Array.isArray(body.orderIds) ? body.orderIds.map(String) : [String(body.orderIds)],
         actor: picker,
         items: ecommerceRows.map(({ item, index }: any) => {
-           const orderId = String(item?.invoiceNumber ?? item?.invoice_number ?? item?.orderId ?? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-");
+           const rawOrderId = String(item?.invoiceNumber ?? item?.invoice_number ?? item?.orderId ?? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-");
+           const { orderId, description } = splitOrderDescription(rawOrderId);
            return {
              orderId: orderId,
              orderItemId: item?.orderItemId != null ? String(item.orderItemId) : undefined,
@@ -223,7 +243,8 @@ export async function handleMachitanPickProof(
              qty: Number(item?.qty ?? item?.quantity ?? 1),
              source: String(item?.source ?? item?.pickRequestType ?? item?.requestType ?? "-"),
              channel: item?.channel ? String(item.channel) : undefined,
-             invoiceNumber: item?.invoiceNumber ? String(item.invoiceNumber) : undefined,
+             invoiceNumber: orderId,
+             description: description ?? undefined,
              originType: item?.originType ? String(item.originType) : (item?.pickRequestType ? String(item.pickRequestType) : undefined),
            };
         }),
@@ -253,6 +274,7 @@ export async function handleMachitanPickProof(
       .addFields(
         { name: "Order ID", value: orderFieldStr, inline: true },
         { name: actorLabel, value: picker, inline: true },
+        ...(orderDescriptions.length ? [{ name: "Deskripsi", value: orderDescriptions.join(", ").slice(0, 1024), inline: true }] : []),
         { name: "Notes", value: notes.slice(0, 1024), inline: !isPackProof },
         ...(isPackProof ? [{ name: "Status", value: "Diproses ke RESI Fulfillment", inline: true }] : []),
         { name: "Items", value: itemDetails, inline: false }
@@ -291,16 +313,17 @@ export async function handleMachitanPickProof(
       actor: picker,
       items: Array.isArray(body.items) && body.items.length > 0
         ? body.items.map((item: any, index: number) => {
-            const orderId = String(item?.orderId ?? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-");
+            const split = splitOrderDescription(item?.invoiceNumber ?? item?.orderId ?? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-");
             return {
-              orderId: orderId,
+              orderId: split.orderId,
               orderItemId: item?.orderItemId != null ? String(item.orderItemId) : undefined,
               itemId: String(item?.itemId ?? item?.id ?? "-"),
               productName: String(item?.productName ?? item?.name ?? "Item"),
               qty: Number(item?.qty ?? item?.quantity ?? 1),
               source: String(item?.source ?? item?.pickRequestType ?? item?.requestType ?? "-"),
               channel: item?.channel ? String(item.channel) : undefined,
-              invoiceNumber: item?.invoiceNumber ? String(item.invoiceNumber) : undefined,
+              invoiceNumber: item?.invoiceNumber ? split.orderId : undefined,
+              description: split.description ?? undefined,
               originType: item?.originType ? String(item.originType) : (item?.pickRequestType ? String(item.pickRequestType) : undefined),
               packLocation: item?.packLocation ? String(item.packLocation) : (body?.packLocation ? String(body.packLocation) : undefined),
               rackName: item?.rackName ? String(item.rackName) : undefined,

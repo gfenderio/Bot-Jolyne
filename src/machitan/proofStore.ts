@@ -14,6 +14,7 @@ export interface MachitanProofItem {
   packLocation?: string;
   rackName?: string;
   archiveReason?: string;
+  description?: string;
 }
 
 export interface MachitanProofPayload {

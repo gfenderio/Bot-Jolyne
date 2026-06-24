@@ -130,6 +130,7 @@ export function buildSheet(workbook: ExcelJS.Workbook, kind: SheetKind, proofs: 
     { header: "Tipe",            key: "tipe",         width: 18 },
     { header: "Source",          key: "source",       width: 14 },
     { header: "Catatan",         key: "notes",        width: 28 },
+    { header: "Deskripsi",       key: "description",  width: 22 },
   ];
 
   // Pack sheet uses "Lokasi Pack / Rack" instead of plain Source
@@ -166,7 +167,11 @@ export function buildSheet(workbook: ExcelJS.Workbook, kind: SheetKind, proofs: 
   let rowIndex = 0;
   for (const r of flatRows) {
     const { tanggal, jam } = jakartaDateParts(r._proof.timestamp);
-    const orderDisplay = r.invoiceNumber && r.invoiceNumber !== "-" ? r.invoiceNumber : (r.orderId || r._proof.orderIds.join(", ") || "-");
+    const rawOrderDisplay = r.invoiceNumber && r.invoiceNumber !== "-" ? r.invoiceNumber : (r.orderId || r._proof.orderIds.join(", ") || "-");
+    // Pisahkan deskripsi yang mungkin masih nempel di order id data lama.
+    const odMatch = String(rawOrderDisplay).match(/^(\d{6,})\s+(\S.*)$/);
+    const orderDisplay = odMatch ? odMatch[1] : rawOrderDisplay;
+    const description = r.description || (odMatch ? odMatch[2].trim() : "");
     const tipe = kind === "archive"
       ? (r.archiveReason || "Lain-lain")
       : classifyType(r);
@@ -186,6 +191,7 @@ export function buildSheet(workbook: ExcelJS.Workbook, kind: SheetKind, proofs: 
       tipe,
       source: sourceValue,
       notes: r._proof.notes || "-",
+      description: description || "-",
     });
     rowIndex++;
     row.height = 26;
