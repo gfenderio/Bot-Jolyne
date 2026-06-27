@@ -1,7 +1,5 @@
 import { DiscordAPIError } from "discord.js";
 import type { Interaction } from "discord.js";
-import { handleDelivereeButtonInteraction } from "../commands/deliveree-controls.js";
-import { handleMockOrderButtonInteraction } from "../commands/mock-order-controls.js";
 import { commands } from "../commands/index.js";
 import { TASK_MODAL_ID } from "../commands/task.js";
 import { createTask } from "../services/notion.js";
@@ -29,17 +27,8 @@ export async function handleInteractionCreate(interaction: Interaction) {
   }
 
   if (interaction.isButton()) {
-    const delivereeHandled = await handleDelivereeButtonInteraction(interaction);
-
-    if (delivereeHandled) {
-      return;
-    }
-
-    const handled = await handleMockOrderButtonInteraction(interaction);
-
-    if (handled) {
-      return;
-    }
+    // Deliveree buttons removed
+    return;
   }
 
   if (!interaction.isChatInputCommand()) {
