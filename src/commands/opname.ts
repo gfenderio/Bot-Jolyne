@@ -2,12 +2,14 @@ import { SlashCommandBuilder, AttachmentBuilder, EmbedBuilder } from "discord.js
 import type { SlashCommand } from "../types/command.js";
 import ExcelJS from "exceljs";
 import { buildWsInboxSheet } from "../machitan/wsInboxDailyReportScheduler.js";
+import { env } from "../config/env.js";
 
-const KYOU_TOKEN = process.env.KYOU_TOKEN;
+const KYOU_TOKEN = env.MACHITAN_KYOU_API_TOKEN;
+const BASE_URL = env.MACHITAN_KYOU_API_BASE_URL;
 const SOURCES = ["Alpha", "Omega", "SS", "Delta", "Beta", "Gamma", "Lambda", "OP"];
 
 async function fetchReport(source: string, date: string) {
-  const res = await fetch(`https://api.kyou.id/api/admin/pda/opname/report?source=${source}&date=${date}`, {
+  const res = await fetch(`${BASE_URL}/admin/pda/opname/report?source=${source}&date=${date}`, {
     headers: { Authorization: `Bearer ${KYOU_TOKEN}`, "X-App-Name": "machitan" },
   });
   const json: any = await res.json();
