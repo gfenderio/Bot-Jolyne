@@ -6,6 +6,7 @@ import { startBirthdayNowScheduler } from "./schedulers/birthday-now.js";
 import { startMachitanDailyReportScheduler } from "./machitan/dailyReportScheduler.js";
 import { registerGuildSlashCommands } from "./services/slash-commands.js";
 import { startNotionStandupScheduler } from "./schedulers/notion-standup.js";
+import { startMachitanHttpServer } from "./machitan/httpServer.js";
 
 if (!env.DISCORD_TOKEN) {
   console.warn("DISCORD_TOKEN belum diisi. Discord bot client dilewati.");
@@ -16,6 +17,7 @@ if (!env.DISCORD_TOKEN) {
 
   client.once(Events.ClientReady, (readyClient) => {
     handleReady(readyClient);
+    startMachitanHttpServer(readyClient);
     startBirthdayNowScheduler(readyClient);
     startMachitanDailyReportScheduler(readyClient);
     startNotionStandupScheduler(readyClient);
