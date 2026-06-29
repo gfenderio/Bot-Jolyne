@@ -104,7 +104,15 @@ export async function handleMachitanPickProof(
     const orderFieldStr = orderIdsStr.length > 1000
       ? `${orderCount} order:\n${orderIdsStr.slice(0, 980)}…`
       : orderIdsStr;
-    const notes = body.notes ? String(body.notes) : "-";
+    const userNotesRaw = body.userNotes ?? body.user_notes ?? body.notes;
+    const userNotes = userNotesRaw ? String(userNotesRaw) : "-";
+    const adminNotesRaw = body.adminNotes ?? body.admin_notes;
+    const adminNotes = adminNotesRaw ? String(adminNotesRaw) : "-";
+
+    const combinedNotesForStore = [
+      userNotes !== "-" ? `User: ${userNotes}` : "",
+      adminNotes !== "-" ? `Admin: ${adminNotes}` : ""
+    ].filter(Boolean).join(" | ") || "-";
     const proofType = String(body.proofType ?? body.type ?? "pick_proof").toLowerCase();
     const isPackProof = proofType.includes("pack");
     const isBypass = body.isBypass === true || proofType.includes("bypass");
@@ -142,7 +150,7 @@ export async function handleMachitanPickProof(
               };
             })
           : [],
-        notes: notes,
+        notes: combinedNotesForStore,
         imageBase64: "",
         proofType: String(body.proofType ?? body.type ?? "PICK_FISIK_LOG"),
       }).catch(err => console.error("Failed to save pick-log to store", err));
@@ -208,7 +216,8 @@ export async function handleMachitanPickProof(
             { name: "Order ID", value: orderId, inline: true },
             { name: actorLabel, value: picker, inline: true },
             ...(description ? [{ name: "Deskripsi", value: description.slice(0, 1024), inline: true }] : []),
-            { name: "Notes", value: notes.slice(0, 1024), inline: !isPackProof },
+            { name: "User Notes", value: userNotes.slice(0, 1024), inline: !isPackProof },
+            ...(adminNotes !== "-" ? [{ name: "Admin Notes", value: adminNotes.slice(0, 1024), inline: !isPackProof }] : []),
             ...(isPackProof ? [{ name: "Status", value: "Diproses ke RESI Fulfillment", inline: true }] : []),
             { name: "Items", value: `Qty: ${qty} | Source: ${source}`, inline: false }
           )
@@ -248,7 +257,7 @@ export async function handleMachitanPickProof(
              originType: item?.originType ? String(item.originType) : (item?.pickRequestType ? String(item.pickRequestType) : undefined),
            };
         }),
-        notes: notes,
+        notes: combinedNotesForStore,
         imageBase64: imageBase64,
         proofType: String(body.proofType ?? body.type ?? "ECOM_PHYSICAL_PICK_PROOF"),
       }).catch(err => console.error("Failed to save e-com proof to store", err));
@@ -275,7 +284,8 @@ export async function handleMachitanPickProof(
         { name: "Order ID", value: orderFieldStr, inline: true },
         { name: actorLabel, value: picker, inline: true },
         ...(orderDescriptions.length ? [{ name: "Deskripsi", value: orderDescriptions.join(", ").slice(0, 1024), inline: true }] : []),
-        { name: "Notes", value: notes.slice(0, 1024), inline: !isPackProof },
+        { name: "User Notes", value: userNotes.slice(0, 1024), inline: !isPackProof },
+        ...(adminNotes !== "-" ? [{ name: "Admin Notes", value: adminNotes.slice(0, 1024), inline: !isPackProof }] : []),
         ...(isPackProof ? [{ name: "Status", value: "Diproses ke RESI Fulfillment", inline: true }] : []),
         { name: "Items", value: itemDetails, inline: false }
       )
