@@ -352,7 +352,7 @@ export async function handleMachitanPickProof(
             qty: 1,
             source: "-"
           }]),
-      notes: notes,
+      notes: combinedNotesForStore,
       imageBase64: imageBase64,
       proofType: String(body.proofType ?? body.type ?? "PICK_PROOF"),
       isBypass: isBypass,
