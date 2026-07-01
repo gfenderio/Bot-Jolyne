@@ -54,12 +54,14 @@ function sendJson(response: ServerResponse, statusCode: number, payload: unknown
   response.end(`${JSON.stringify(payload)}\n`);
 }
 
-async function readRequestBody(request: IncomingMessage, maxBytes = 5 * 1024 * 1024) {
+export class PayloadTooLargeError extends Error {}
+
+async function readRequestBody(request: IncomingMessage, maxBytes = 10 * 1024 * 1024) {
   let body = "";
   for await (const chunk of request) {
     body += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
     if (Buffer.byteLength(body, "utf8") > maxBytes) {
-      throw new Error("Payload terlalu besar.");
+      throw new PayloadTooLargeError("Payload terlalu besar.");
     }
   }
   return body;
@@ -363,6 +365,9 @@ export async function handleMachitanPickProof(
     sendJson(response, 200, { message: "Photo received and sent to Discord", ok: true, channelId: targetChannelId });
   } catch (error) {
     console.error("Machitan Pick Proof Intake Error:", error);
+    if (error instanceof PayloadTooLargeError) {
+      return sendJson(response, 413, { error: error.message, ok: false });
+    }
     sendJson(response, 500, { error: error instanceof Error ? error.message : "Internal Server Error", ok: false });
   }
 }

@@ -47,6 +47,10 @@ function withLock<T>(fn: () => Promise<T>): Promise<T> {
 
 // Baca store dengan toleransi: file hilang / kosong / korup dianggap array kosong,
 // jangan sampai JSON.parse melempar "Unexpected end of JSON input".
+//
+// Format lama (sebelum migrasi NDJSON) = JSON array pretty-printed. Format baru = NDJSON
+// (satu proof per baris) supaya addMachitanProof bisa append tanpa baca-ulang seluruh file.
+// Deteksi format by content: array lama selalu diawali "[" setelah trim.
 async function readProofsSafe(): Promise<MachitanProofPayload[]> {
   let content: string;
   try {
@@ -54,37 +58,54 @@ async function readProofsSafe(): Promise<MachitanProofPayload[]> {
   } catch {
     return [];
   }
-  if (content.trim() === "") return [];
-  try {
-    const parsed = JSON.parse(content);
-    return Array.isArray(parsed) ? (parsed as MachitanProofPayload[]) : [];
-  } catch (err) {
-    console.error("machitan-proofs.json korup, di-reset ke []:", err);
-    return [];
+  const trimmed = content.trim();
+  if (trimmed === "") return [];
+
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      return Array.isArray(parsed) ? (parsed as MachitanProofPayload[]) : [];
+    } catch (err) {
+      console.error("machitan-proofs.json (format lama) korup, di-reset ke []:", err);
+      return [];
+    }
   }
+
+  const proofs: MachitanProofPayload[] = [];
+  for (const line of trimmed.split("\n")) {
+    const trimmedLine = line.trim();
+    if (trimmedLine === "") continue;
+    try {
+      proofs.push(JSON.parse(trimmedLine) as MachitanProofPayload);
+    } catch (err) {
+      console.error("Satu baris machitan-proofs.json korup, dilewati:", err);
+    }
+  }
+  return proofs;
 }
 
 // Tulis atomik: tulis ke file sementara lalu rename, agar file utama tidak pernah
 // dalam keadaan setengah-ketulis kalau proses mati di tengah jalan.
-async function writeProofsAtomic(proofs: MachitanProofPayload[]): Promise<void> {
+async function writeRawAtomic(content: string): Promise<void> {
   await fs.mkdir(path.dirname(STORE_PATH), { recursive: true });
   const tmpPath = `${STORE_PATH}.${process.pid}.tmp`;
-  await fs.writeFile(tmpPath, JSON.stringify(proofs, null, 2), "utf-8");
+  await fs.writeFile(tmpPath, content, "utf-8");
   await fs.rename(tmpPath, STORE_PATH);
 }
 
+// Append-only (NDJSON): satu baris per proof, O(1) per submit — tidak baca-ulang +
+// tulis-ulang seluruh file tiap kali (dulu jadi berat makin lama makin banyak proof numpuk).
 export function addMachitanProof(payload: MachitanProofPayload): Promise<void> {
   return withLock(async () => {
-    const proofs = await readProofsSafe();
-    proofs.push(payload);
-    await writeProofsAtomic(proofs);
+    await fs.mkdir(path.dirname(STORE_PATH), { recursive: true });
+    await fs.appendFile(STORE_PATH, JSON.stringify(payload) + "\n", "utf-8");
   });
 }
 
 export function getAndClearMachitanProofs(): Promise<MachitanProofPayload[]> {
   return withLock(async () => {
     const proofs = await readProofsSafe();
-    await writeProofsAtomic([]);
+    await writeRawAtomic("");
     return proofs;
   });
 }
