@@ -219,7 +219,7 @@ export async function handleMachitanPickProof(
             { name: "User Notes", value: userNotes.slice(0, 1024), inline: !isPackProof },
             ...(adminNotes !== "-" ? [{ name: "Admin Notes", value: adminNotes.slice(0, 1024), inline: !isPackProof }] : []),
             ...(isPackProof ? [{ name: "Status", value: "Diproses ke RESI Fulfillment", inline: true }] : []),
-            { name: "Items", value: `Qty: ${qty} | Source: ${source}`, inline: false }
+            { name: "Items", value: `Item: #${itemId} | Qty: ${qty} | Source: ${source}`, inline: false }
           )
           .setImage(`attachment://${attachmentName}`)
           .setTimestamp();
