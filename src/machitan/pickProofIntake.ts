@@ -58,7 +58,8 @@ function sendJson(response: ServerResponse, statusCode: number, payload: unknown
 
 export class PayloadTooLargeError extends Error {}
 
-async function readRequestBody(request: IncomingMessage, maxBytes = 10 * 1024 * 1024) {
+// 20MB: multi-foto (base64 +33%) bisa lewat 10MB dengan 4+ foto hasil kompres PDA.
+async function readRequestBody(request: IncomingMessage, maxBytes = 20 * 1024 * 1024) {
   let body = "";
   for await (const chunk of request) {
     body += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
@@ -90,7 +91,8 @@ export async function handleMachitanPickProof(
 
     const logOnly = body.logOnly === true || String(body.proofType ?? body.type ?? "").toLowerCase().includes("log");
 
-    if (!body.orderIds || !body.picker || (!logOnly && !body.imageBase64)) {
+    const hasAnyImage = !!body.imageBase64 || (Array.isArray(body.images) && body.images.length > 0);
+    if (!body.orderIds || !body.picker || (!logOnly && !hasAnyImage)) {
       return sendJson(response, 400, { error: "Missing required fields", ok: false });
     }
 
@@ -124,12 +126,22 @@ export async function handleMachitanPickProof(
     const actorName = String(isPackProof ? (body.packer ?? body.picker ?? "-") : (body.picker ?? body.packer ?? "-"));
     const picker = actorName;
     const titlePrefix = isPackProof ? (isBypass ? "📦 Pack Proof Bypass" : "📦 Pack Proof") : "📸 Pick Proof";
-    const imageBase64 = String(body.imageBase64 ?? "");
+    // Multi-foto: images[] (PDA ≥1.4.5), fallback imageBase64 tunggal (PDA lama).
+    const imagesBase64: string[] = Array.isArray(body.images) && body.images.length > 0
+      ? body.images.map(String).filter(Boolean)
+      : body.imageBase64
+      ? [String(body.imageBase64)]
+      : [];
+    const imageBase64 = imagesBase64[0] ?? "";
 
     // Bot Discord dibatasi ~8MB per attachment (beda dari limit user biasa) — cek di
     // sini biar gagalnya rapi (413), bukan crash mentah pas channel.send ke Discord.
-    if (!logOnly && Buffer.byteLength(imageBase64, "base64") > DISCORD_BOT_ATTACHMENT_LIMIT_BYTES) {
-      throw new PayloadTooLargeError("Foto terlalu besar untuk diupload ke Discord (maks ~8MB).");
+    if (!logOnly) {
+      for (const b64 of imagesBase64) {
+        if (Buffer.byteLength(b64, "base64") > DISCORD_BOT_ATTACHMENT_LIMIT_BYTES) {
+          throw new PayloadTooLargeError("Salah satu foto terlalu besar untuk diupload ke Discord (maks ~8MB).");
+        }
+      }
     }
 
     // logOnly mode: save to store untuk daily Excel report, skip Discord embed
@@ -245,6 +257,19 @@ export async function handleMachitanPickProof(
         });
       }
 
+      // Foto tambahan (multi-foto) cukup dikirim sekali, bukan diulang per item.
+      if (imagesBase64.length > 1) {
+        const extraAttachments = imagesBase64.slice(1).map((b64, i) =>
+          new AttachmentBuilder(Buffer.from(b64, "base64"), { name: `ecom_pick_proof_extra_${i + 2}.jpg` })
+        );
+        for (let i = 0; i < extraAttachments.length; i += 10) {
+          await channel.send({
+            content: i === 0 ? `📷 Foto tambahan (Order #${orderTitleStr})` : undefined,
+            files: extraAttachments.slice(i, i + 10)
+          });
+        }
+      }
+
       // Save to local store for daily excel export
       addMachitanProof({
         timestamp: new Date().toISOString(),
@@ -280,16 +305,18 @@ export async function handleMachitanPickProof(
       });
     }
 
-    // Convert Base64 back to buffer
-    const imageBuffer = Buffer.from(imageBase64, "base64");
-    
-    // Create Attachment
-    const attachment = new AttachmentBuilder(imageBuffer, { name: isPackProof ? "pack_proof.jpg" : "pick_proof.jpg" });
+    // Semua foto jadi attachment; embed menampilkan foto pertama, sisanya tampil
+    // sebagai attachment tambahan di pesan yang sama.
+    const proofBaseName = isPackProof ? "pack_proof" : "pick_proof";
+    const attachments = imagesBase64.map((b64, i) =>
+      new AttachmentBuilder(Buffer.from(b64, "base64"), { name: i === 0 ? `${proofBaseName}.jpg` : `${proofBaseName}_${i + 1}.jpg` })
+    );
+    const photoLabel = imagesBase64.length > 1 ? ` · ${imagesBase64.length} foto` : "";
 
     // Create Embed
     const embed = new EmbedBuilder()
       .setColor(0x00ff00)
-      .setTitle(`${titlePrefix}: Order #${orderTitleStr}`)
+      .setTitle(`${titlePrefix}: Order #${orderTitleStr}${photoLabel}`)
       .addFields(
         { name: "Order ID", value: orderFieldStr, inline: true },
         { name: actorLabel, value: picker, inline: true },
@@ -319,11 +346,19 @@ export async function handleMachitanPickProof(
       mentionContent = mentionForEcommerce(channelName);
     }
 
+    // Discord max 10 file per pesan — chunk kalau lebih (jaga-jaga).
+    const fileChunks: (typeof attachments)[] = [];
+    for (let i = 0; i < attachments.length; i += 10) {
+      fileChunks.push(attachments.slice(i, i + 10));
+    }
     await channel.send({
       content: mentionContent ? mentionContent : undefined,
       embeds: [embed],
-      files: [attachment]
+      files: fileChunks[0]
     });
+    for (let i = 1; i < fileChunks.length; i++) {
+      await channel.send({ files: fileChunks[i] });
+    }
 
     // Save to local store for daily excel export
     addMachitanProof({
