@@ -66,7 +66,11 @@ async function readProofsSafe(): Promise<MachitanProofPayload[]> {
       const parsed = JSON.parse(trimmed);
       return Array.isArray(parsed) ? (parsed as MachitanProofPayload[]) : [];
     } catch (err) {
-      console.error("machitan-proofs.json (format lama) korup, di-reset ke []:", err);
+      // Backup isi mentah dulu sebelum dianggap kosong — jangan hilang permanen kalau
+      // ternyata korup gara-gara migrasi format / write setengah jalan (kejadian 1 Jul).
+      const backupPath = `${STORE_PATH}.corrupt.${Date.now()}.bak`;
+      await fs.writeFile(backupPath, content, "utf-8").catch(() => {});
+      console.error(`machitan-proofs.json (format lama) korup, backup di ${backupPath}, di-reset ke []:`, err);
       return [];
     }
   }
@@ -102,10 +106,12 @@ export function addMachitanProof(payload: MachitanProofPayload): Promise<void> {
   });
 }
 
-export function getAndClearMachitanProofs(): Promise<MachitanProofPayload[]> {
-  return withLock(async () => {
-    const proofs = await readProofsSafe();
-    await writeRawAtomic("");
-    return proofs;
-  });
+// Baca tanpa clear — dipakai scheduler yang harus konfirmasi kirim Discord berhasil
+// dulu sebelum data di-drain (drain-before-send bikin proof ilang kalau kirim gagal).
+export function peekMachitanProofs(): Promise<MachitanProofPayload[]> {
+  return withLock(() => readProofsSafe());
+}
+
+export function clearMachitanProofs(): Promise<void> {
+  return withLock(() => writeRawAtomic(""));
 }

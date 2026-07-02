@@ -1,8 +1,8 @@
 import cron from "node-cron";
 import ExcelJS from "exceljs";
 import { AttachmentBuilder, Client, EmbedBuilder, TextChannel } from "discord.js";
-import { getAndClearMachitanProofs, MachitanProofPayload, MachitanProofItem } from "./proofStore.js";
-import { getAndClearWsInboxProofs, WsInboxProofPayload } from "./wsInboxStore.js";
+import { peekMachitanProofs, clearMachitanProofs, MachitanProofPayload, MachitanProofItem } from "./proofStore.js";
+import { peekWsInboxProofs, clearWsInboxProofs, WsInboxProofPayload } from "./wsInboxStore.js";
 
 const TARGET_CHANNEL_ID = "1501899831268868106";
 const MARK_PICK_CHANNEL = "1418827227264450663";
@@ -467,26 +467,31 @@ export async function generateWsReportWorkbook(wsProofs: WsInboxProofPayload[], 
 
 export function startMachitanDailyReportScheduler(client: Client<true>) {
   cron.schedule("0 0 * * *", async () => {
-    try {
-      console.log("[DailyReport] Running Machitan Daily Report Scheduler...");
-      const [proofs, wsProofs] = await Promise.all([getAndClearMachitanProofs(), getAndClearWsInboxProofs()]);
+    console.log("[DailyReport] Running Machitan Daily Report Scheduler...");
 
-      if (proofs.length === 0 && wsProofs.length === 0) {
-        console.log("[DailyReport] No proofs to report today.");
-        return;
-      }
+    // Peek dulu (bukan drain) — data cuma di-clear per bagian SETELAH pesannya
+    // sukses terkirim. Sebelumnya drain-before-send bikin data warehouse/WS
+    // permanen hilang kalau ada error di tengah jalan (embed gagal, dsb),
+    // padahal filenya udah keburu ditimpa kosong duluan.
+    const [proofs, wsProofs] = await Promise.all([peekMachitanProofs(), peekWsInboxProofs()]);
 
-      const footerText = `Generated ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB · Auto-cron 00:00`;
+    if (proofs.length === 0 && wsProofs.length === 0) {
+      console.log("[DailyReport] No proofs to report today.");
+      return;
+    }
 
-      const channel = await client.channels.fetch(TARGET_CHANNEL_ID);
-      if (!channel || !channel.isTextBased()) {
-        console.error("[DailyReport] Cannot fetch target channel");
-        return;
-      }
-      const textChannel = channel as TextChannel;
+    const footerText = `Generated ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB · Auto-cron 00:00`;
 
-      // ── Message 1: Pick / Mark Pick / Pack / Archive ──────────────────────
-      if (proofs.length > 0) {
+    const channel = await client.channels.fetch(TARGET_CHANNEL_ID).catch(() => null);
+    if (!channel || !channel.isTextBased()) {
+      console.error("[DailyReport] Cannot fetch target channel — proofs NOT cleared, will retry next run");
+      return;
+    }
+    const textChannel = channel as TextChannel;
+
+    // ── Message 1: Pick / Mark Pick / Pack / Archive ──────────────────────
+    if (proofs.length > 0) {
+      try {
         const earliestProof = proofs.reduce((min, p) => p.timestamp < min.timestamp ? p : min, proofs[0]);
         const warehouseDateStr = new Date(earliestProof.timestamp).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "long", year: "numeric" });
         const { buffer, pickFisiks, markPicks, packProofs, archives } = await generateMachitanReportWorkbook(proofs, warehouseDateStr);
@@ -510,10 +515,15 @@ export function startMachitanDailyReportScheduler(client: Client<true>) {
 
         await textChannel.send({ embeds: [embed], files: [attachment] });
         console.log(`[DailyReport] Sent warehouse report for ${warehouseDateStr} (${totalItems} item rows)`);
+        await clearMachitanProofs();
+      } catch (e) {
+        console.error("[DailyReport] Warehouse report FAILED, proofs kept for retry next run:", e);
       }
+    }
 
-      // ── Message 2: WS Opname ──────────────────────────────────────────────
-      if (wsProofs.length > 0) {
+    // ── Message 2: WS Opname ──────────────────────────────────────────────
+    if (wsProofs.length > 0) {
+      try {
         const earliestWs = wsProofs.reduce((min, p) => p.timestamp < min.timestamp ? p : min, wsProofs[0]);
         const wsDateStr = new Date(earliestWs.timestamp).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "long", year: "numeric" });
         const wsBuffer = await generateWsReportWorkbook(wsProofs, wsDateStr);
@@ -540,9 +550,10 @@ export function startMachitanDailyReportScheduler(client: Client<true>) {
 
         await textChannel.send({ embeds: [wsEmbed], files: [wsAttachment] });
         console.log(`[DailyReport] Sent WS opname report for ${wsDateStr} (${wsTotalItems} item rows)`);
+        await clearWsInboxProofs();
+      } catch (e) {
+        console.error("[DailyReport] WS opname report FAILED, proofs kept for retry next run:", e);
       }
-    } catch (e) {
-      console.error("[DailyReport] Error:", e);
     }
-  });
+  }, { timezone: "Asia/Jakarta" });
 }

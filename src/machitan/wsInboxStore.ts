@@ -73,3 +73,13 @@ export function getAndClearWsInboxProofs(): Promise<WsInboxProofPayload[]> {
     return proofs;
   });
 }
+
+// Baca tanpa clear — dipakai scheduler yang harus konfirmasi kirim Discord berhasil
+// dulu sebelum data di-drain (drain-before-send bikin proof ilang kalau kirim gagal).
+export function peekWsInboxProofs(): Promise<WsInboxProofPayload[]> {
+  return withLock(() => readProofsSafe());
+}
+
+export function clearWsInboxProofs(): Promise<void> {
+  return withLock(() => writeProofsAtomic([]));
+}
