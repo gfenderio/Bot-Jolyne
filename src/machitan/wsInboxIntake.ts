@@ -6,11 +6,14 @@ function sendJson(response: ServerResponse, statusCode: number, payload: unknown
   response.end(`${JSON.stringify(payload)}\n`);
 }
 
+class PayloadTooLargeError extends Error {}
+
+// Payload di sini murni JSON metadata (tanpa foto), 5MB udah lebih dari cukup.
 async function readRequestBody(request: IncomingMessage, maxBytes = 5 * 1024 * 1024) {
   let body = "";
   for await (const chunk of request) {
     body += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
-    if (Buffer.byteLength(body, "utf8") > maxBytes) throw new Error("Payload terlalu besar.");
+    if (Buffer.byteLength(body, "utf8") > maxBytes) throw new PayloadTooLargeError("Payload terlalu besar.");
   }
   return body;
 }
@@ -53,6 +56,9 @@ export async function handleWsInboxIntake(
     return sendJson(response, 200, { message: "WS Inbox log saved", ok: true });
   } catch (error) {
     console.error("WS Inbox Intake Error:", error);
+    if (error instanceof PayloadTooLargeError) {
+      return sendJson(response, 413, { error: error.message, ok: false });
+    }
     return sendJson(response, 500, { error: error instanceof Error ? error.message : "Internal Server Error", ok: false });
   }
 }

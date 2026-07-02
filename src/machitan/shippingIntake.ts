@@ -10,12 +10,19 @@ function sendJson(response: ServerResponse, statusCode: number, payload: unknown
   response.end(`${JSON.stringify(payload)}\n`);
 }
 
-async function readRequestBody(request: IncomingMessage, maxBytes = 5 * 1024 * 1024) {
+class PayloadTooLargeError extends Error {}
+
+// Discord bot API upload limit ~8MB per attachment (beda dari limit user biasa/boosted server).
+const DISCORD_BOT_ATTACHMENT_LIMIT_BYTES = 8 * 1024 * 1024;
+
+// Shipping bisa bawa banyak foto sekaligus (array `images`, bukan 1 foto per submit
+// kayak pick-proof), jadi cap-nya perlu lebih longgar daripada endpoint pick-proof.
+async function readRequestBody(request: IncomingMessage, maxBytes = 20 * 1024 * 1024) {
   let body = "";
   for await (const chunk of request) {
     body += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
     if (Buffer.byteLength(body, "utf8") > maxBytes) {
-      throw new Error("Payload terlalu besar.");
+      throw new PayloadTooLargeError("Payload terlalu besar.");
     }
   }
   return body;
@@ -53,6 +60,14 @@ export async function handleMachitanShipping(
 
     if (rawImages.length === 0) {
       return sendJson(response, 400, { error: "Missing required field: images", ok: false });
+    }
+
+    // Cek per-foto (bukan cuma total payload) — Discord bot dibatasi ~8MB per attachment.
+    for (const b64 of rawImages) {
+      const base64Data = b64.replace(/^data:image\/\w+;base64,/, "");
+      if (Buffer.byteLength(base64Data, "base64") > DISCORD_BOT_ATTACHMENT_LIMIT_BYTES) {
+        throw new PayloadTooLargeError("Salah satu foto terlalu besar untuk diupload ke Discord (maks ~8MB).");
+      }
     }
 
     const orderIdsArr = Array.isArray(body.orderIds) ? body.orderIds.map(String) : [String(body.orderIds)];
@@ -107,6 +122,9 @@ export async function handleMachitanShipping(
 
   } catch (err: any) {
     console.error("Error processing shipping payload", err);
+    if (err instanceof PayloadTooLargeError) {
+      return sendJson(response, 413, { error: err.message, ok: false });
+    }
     return sendJson(response, 500, { error: err.message || "Internal server error", ok: false });
   }
 }

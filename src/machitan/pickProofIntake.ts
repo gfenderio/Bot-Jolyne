@@ -6,6 +6,8 @@ import { addMachitanProof } from "./proofStore.js";
 const ECOM_PICK_PROOF_CHANNEL_ID = "1390221553333043200";
 const SHOPEE_MENTION = "<@804685637252939788>";
 const TOKOPEDIA_MENTION = "<@833000054880206888>";
+// Discord bot API upload limit ~8MB per attachment (beda dari limit user biasa/boosted server).
+const DISCORD_BOT_ATTACHMENT_LIMIT_BYTES = 8 * 1024 * 1024;
 
 function isEcommerceProofItem(item: any) {
   const origin = String(item?.originType ?? item?.pickRequestType ?? item?.requestType ?? "").toLowerCase();
@@ -123,6 +125,12 @@ export async function handleMachitanPickProof(
     const picker = actorName;
     const titlePrefix = isPackProof ? (isBypass ? "📦 Pack Proof Bypass" : "📦 Pack Proof") : "📸 Pick Proof";
     const imageBase64 = String(body.imageBase64 ?? "");
+
+    // Bot Discord dibatasi ~8MB per attachment (beda dari limit user biasa) — cek di
+    // sini biar gagalnya rapi (413), bukan crash mentah pas channel.send ke Discord.
+    if (!logOnly && Buffer.byteLength(imageBase64, "base64") > DISCORD_BOT_ATTACHMENT_LIMIT_BYTES) {
+      throw new PayloadTooLargeError("Foto terlalu besar untuk diupload ke Discord (maks ~8MB).");
+    }
 
     // logOnly mode: save to store untuk daily Excel report, skip Discord embed
     if (logOnly) {
