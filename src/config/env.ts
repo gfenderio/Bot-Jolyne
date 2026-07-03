@@ -135,7 +135,10 @@ const envSchema = z.object({
   DELIVEREE_WATCH_URLS: optionalStringList.default([]),
   NOTION_TOKEN: optionalString,
   NOTION_TASK_DATABASE_ID: optionalString.default("285da332-9369-493d-9931-36c0905a9783"),
-  NOTION_STANDUP_CHANNEL_ID: optionalString.default("1501899831268868106")
+  NOTION_STANDUP_CHANNEL_ID: optionalString.default("1501899831268868106"),
+  BAITO_REXY_USER_ID: optionalString.default("593313231137931264"),
+  BAITO_AZIS_USER_ID: optionalString.default("286790867329613824"),
+  BAITO_ATTENDANCE_CHANNEL_ID: optionalString.default("1457554536934936769")
 });
 
 // Override dari kode agar mengabaikan setting environment server Coolify

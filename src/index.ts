@@ -8,6 +8,8 @@ import { registerGuildSlashCommands } from "./services/slash-commands.js";
 import { startNotionStandupScheduler } from "./schedulers/notion-standup.js";
 import { startMachitanHttpServer } from "./machitan/httpServer.js";
 
+import { startBaitoAttendanceScheduler } from "./schedulers/baito-attendance.js";
+
 if (!env.DISCORD_TOKEN) {
   console.warn("DISCORD_TOKEN belum diisi. Discord bot client dilewati.");
 } else {
@@ -21,6 +23,7 @@ if (!env.DISCORD_TOKEN) {
     startBirthdayNowScheduler(readyClient);
     startMachitanDailyReportScheduler(readyClient);
     startNotionStandupScheduler(readyClient);
+    startBaitoAttendanceScheduler(readyClient);
   });
   client.on(Events.Error, (error) => {
     console.error("Discord client error", error);

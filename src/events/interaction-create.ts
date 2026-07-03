@@ -3,9 +3,15 @@ import type { Interaction } from "discord.js";
 import { commands } from "../commands/index.js";
 import { TASK_MODAL_ID } from "../commands/task.js";
 import { createTask } from "../services/notion.js";
+import { handleBaitoButton, handleBaitoModal } from "../handlers/baitoAttendance.js";
 
 export async function handleInteractionCreate(interaction: Interaction) {
   if (interaction.isModalSubmit()) {
+    if (interaction.customId === "baito_modal_in" || interaction.customId === "baito_modal_out") {
+      await handleBaitoModal(interaction);
+      return;
+    }
+
     if (interaction.customId === TASK_MODAL_ID) {
       await interaction.deferReply({ ephemeral: true });
       const name = interaction.fields.getTextInputValue("task_name");
@@ -27,6 +33,10 @@ export async function handleInteractionCreate(interaction: Interaction) {
   }
 
   if (interaction.isButton()) {
+    if (interaction.customId === "baito_btn_in" || interaction.customId === "baito_btn_out") {
+      await handleBaitoButton(interaction);
+      return;
+    }
     // Deliveree buttons removed
     return;
   }
