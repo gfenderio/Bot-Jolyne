@@ -112,7 +112,7 @@ export async function handleBaitoModal(interaction: ModalSubmitInteraction) {
     const channelId = env.BAITO_ATTENDANCE_CHANNEL_ID;
     if (channelId) {
       const channel = await interaction.client.channels.fetch(channelId);
-      if (channel && channel.isTextBased()) {
+      if (channel && channel.isTextBased() && 'send' in channel) {
         await channel.send({ embeds: [embed] });
       }
     }
