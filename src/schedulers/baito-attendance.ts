@@ -43,14 +43,14 @@ export async function sendBaitoAttendanceForm(client: Client, userId: string) {
 }
 
 export function startBaitoAttendanceScheduler(client: Client) {
-  cron.schedule("0 9 * * *", async () => {
+  cron.schedule("0 9 * * 1-6", async () => {
     console.log("Menjalankan jadwal absensi baito jam 09:00 WIB...");
     for (const userId of baitoIds) {
       await sendBaitoAttendanceForm(client, userId).catch(err => console.error("Gagal kirim form absensi ke", userId, err));
     }
   }, { timezone: "Asia/Jakarta" });
 
-  cron.schedule("0,30 9-17 * * *", async () => {
+  cron.schedule("0,30 9-17 * * 1-6", async () => {
     const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }));
     const h = now.getHours();
     const m = now.getMinutes();
