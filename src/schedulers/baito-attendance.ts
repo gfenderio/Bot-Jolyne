@@ -50,20 +50,18 @@ export function startBaitoAttendanceScheduler(client: Client) {
     }
   }, { timezone: "Asia/Jakarta" });
 
-  cron.schedule("0,30 9-17 * * 1-6", async () => {
-    const now = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }));
-    const h = now.getHours();
-    const m = now.getMinutes();
-    
-    if (h === 9 && m < 10) return;
+  // Reminder: setiap 30 menit mulai dari 09:30 (bukan 09:00 agar form sempat dikirim dulu)
+  cron.schedule("30 9 * * 1-6", () => sendReminders(client), { timezone: "Asia/Jakarta" });
+  cron.schedule("0,30 10-17 * * 1-6", () => sendReminders(client), { timezone: "Asia/Jakarta" });
+}
 
-    for (const userId of baitoIds) {
-      if (!hasAttendedToday(userId)) {
-        const user = await client.users.fetch(userId).catch(() => null);
-        if (user) {
-          await user.send("⚠️ **Ping!** Kamu belum isi kehadiran hari ini loh, yuk isi sekarang! Cek form di atas ya.").catch(() => null);
-        }
+async function sendReminders(client: Client) {
+  for (const userId of baitoIds) {
+    if (!hasAttendedToday(userId)) {
+      const user = await client.users.fetch(userId).catch(() => null);
+      if (user) {
+        await user.send("⚠️ **Ping!** Kamu belum isi kehadiran hari ini loh, yuk isi sekarang! Cek form di atas ya.").catch(() => null);
       }
     }
-  }, { timezone: "Asia/Jakarta" });
+  }
 }
