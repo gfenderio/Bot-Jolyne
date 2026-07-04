@@ -117,6 +117,13 @@ const envSchema = z.object({
   MACHITAN_ECOMMERCE_PICK_REQUEST_SEEN_STORE_PATH: optionalString.default("data/machitan-ecommerce-pick-requests-seen.json"),
   MACHITAN_KYOU_API_BASE_URL: optionalString.default("https://api.kyou.id/api"),
   MACHITAN_KYOU_API_TOKEN: optionalString,
+  // Token yang diterima intake Machitan (pick-proof, shipping, ws-inbox).
+  // Default berisi token lama + baru selama masa rotasi; setelah semua PDA
+  // update ke APK bertoken baru, set env ini ke token baru saja.
+  MACHITAN_INTAKE_TOKENS: optionalStringList.default([
+    "kyou-machitan-secret-2026",
+    "1951f1b0273f41995232d32ff73f09c435a4b5dca71594b882307e9d2ea8e558",
+  ]),
   DELIVEREE_EXTENSION_ALLOWED_DEVICE_IDS: optionalStringList.default(["yugi-browser"]),
   DELIVEREE_EXTENSION_ENABLED: optionalBoolean,
   DELIVEREE_EXTENSION_HOST: optionalString.default("0.0.0.0"),

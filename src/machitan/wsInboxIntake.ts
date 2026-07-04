@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { addWsInboxProof } from "./wsInboxStore.js";
+import { isAuthorizedMachitanIntake } from "./intakeAuth.js";
 
 function sendJson(response: ServerResponse, statusCode: number, payload: unknown) {
   response.writeHead(statusCode, { "Content-Type": "application/json" });
@@ -24,7 +25,7 @@ export async function handleWsInboxIntake(
 ) {
   if (request.method !== "POST") return sendJson(response, 405, { error: "Method not allowed", ok: false });
 
-  if (request.headers.authorization !== "Bearer kyou-machitan-secret-2026") {
+  if (!isAuthorizedMachitanIntake(request.headers.authorization)) {
     return sendJson(response, 401, { error: "Unauthorized", ok: false });
   }
 

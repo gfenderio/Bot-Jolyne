@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { AttachmentBuilder, Client, EmbedBuilder } from "discord.js";
 import { env } from "../config/env.js";
 import { addMachitanProof } from "./proofStore.js";
+import { isAuthorizedMachitanIntake } from "./intakeAuth.js";
 
 const ECOM_PICK_PROOF_CHANNEL_ID = "1390221553333043200";
 const SHOPEE_MENTION = "<@804685637252939788>";
@@ -79,9 +80,7 @@ export async function handleMachitanPickProof(
     return sendJson(response, 405, { error: "Method not allowed", ok: false });
   }
 
-  // Very simple auth check
-  const authHeader = request.headers.authorization;
-  if (authHeader !== "Bearer kyou-machitan-secret-2026") {
+  if (!isAuthorizedMachitanIntake(request.headers.authorization)) {
     return sendJson(response, 401, { error: "Unauthorized", ok: false });
   }
 
