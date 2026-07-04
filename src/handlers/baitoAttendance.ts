@@ -8,7 +8,7 @@ import {
   ModalSubmitInteraction
 } from "discord.js";
 import { env } from "../config/env.js";
-import { markAttendedToday } from "../services/baitoAttendanceStore.js";
+
 
 export async function handleBaitoButton(interaction: ButtonInteraction) {
   if (interaction.customId === "baito_btn_in") {
@@ -100,6 +100,7 @@ export async function handleBaitoModal(interaction: ModalSubmitInteraction) {
       { name: "Status", value: isMasuk ? "✅ Masuk" : "❌ Tidak Masuk", inline: false }
     )
     .setColor(isMasuk ? 0x00ff00 : 0xff0000)
+    .setFooter({ text: `UID: ${interaction.user.id}` })
     .setTimestamp();
 
   if (isMasuk) {
@@ -117,7 +118,7 @@ export async function handleBaitoModal(interaction: ModalSubmitInteraction) {
       }
     }
 
-    markAttendedToday(interaction.user.id);
+
 
     await interaction.editReply("✅ Terima kasih! Absensi Anda berhasil disubmit.");
   } catch (error) {
