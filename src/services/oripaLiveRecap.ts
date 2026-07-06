@@ -217,6 +217,7 @@ export async function buildOripaLiveRecap(range: OripaLiveRecapRange): Promise<O
   const sheet = workbook.addWorksheet("Rekap Live");
   sheet.columns = [
     { header: "Tanggal", key: "tanggal", width: 16 },
+    { header: "Staff", key: "staff", width: 18 },
     { header: "Platform", key: "platform", width: 12 },
     { header: "Mulai", key: "mulai", width: 20 },
     { header: "Selesai", key: "selesai", width: 20 },
@@ -225,19 +226,44 @@ export async function buildOripaLiveRecap(range: OripaLiveRecapRange): Promise<O
     { header: "Peak Penonton", key: "peak", width: 14 },
     { header: "Durasi versi Insight (menit)", key: "insightDurasi", width: 24 },
     { header: "Selisih Durasi (menit)", key: "selisihDurasi", width: 20 },
+    { header: "Flag", key: "flag", width: 34 },
     { header: "Komentar", key: "comments", width: 11 },
     { header: "Likes", key: "likes", width: 11 },
+    { header: "Share", key: "shares", width: 11 },
     { header: "Keterangan Mulai", key: "noteStart", width: 40 },
     { header: "Keterangan Selesai", key: "noteEnd", width: 40 },
-    { header: "Proof Selfie", key: "proofStart", width: 40 },
-    { header: "Proof Insight", key: "proofEnd", width: 40 },
-    { header: "Link Live/Replay", key: "link", width: 40 }
+    { header: "Proof Selfie", key: "proofStart", width: 16 },
+    { header: "Proof Insight", key: "proofEnd", width: 16 },
+    { header: "Link Live/Replay", key: "link", width: 20 }
   ];
   sheet.getRow(1).font = { bold: true };
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+
+  const setLinkCell = (row: ExcelJS.Row, key: string, url: string | undefined, label: string) => {
+    if (!url) {
+      return;
+    }
+
+    const cell = row.getCell(key);
+    cell.value = { text: label, hyperlink: url };
+    cell.font = { color: { argb: "FF1155CC" }, underline: true };
+  };
 
   for (const session of sessions) {
-    sheet.addRow({
+    const selisihDurasi =
+      session.insight?.durationMinutes != null
+        ? Math.abs(session.insight.durationMinutes - session.durationMinutes)
+        : null;
+    const flags = [
+      session.durationMinutes < ANOMALY_MIN_MINUTES ? "durasi pendek (<15 mnt)" : null,
+      session.durationMinutes > ANOMALY_MAX_MINUTES ? "durasi panjang (>6 jam)" : null,
+      selisihDurasi != null && selisihDurasi > 15 ? "durasi bot vs screenshot beda >15 mnt" : null,
+      session.insight == null ? "insight tidak terbaca otomatis" : null
+    ].filter(Boolean) as string[];
+
+    const row = sheet.addRow({
       tanggal: wibDateKey(session.startedAt),
+      staff: session.userTag,
       platform: PLATFORM_LABELS[session.platform],
       mulai: formatWibDateTime(session.startedAt),
       selesai: formatWibDateTime(session.endedAt),
@@ -245,19 +271,35 @@ export async function buildOripaLiveRecap(range: OripaLiveRecapRange): Promise<O
       viewers: session.insight?.viewers ?? "",
       peak: session.insight?.peakViewers ?? "",
       insightDurasi: session.insight?.durationMinutes ?? "",
-      selisihDurasi:
-        session.insight?.durationMinutes != null
-          ? Math.abs(session.insight.durationMinutes - session.durationMinutes)
-          : "",
+      selisihDurasi: selisihDurasi ?? "",
+      flag: flags.length > 0 ? `⚠️ ${flags.join(" · ")}` : "",
       comments: session.insight?.comments ?? "",
       likes: session.insight?.likes ?? "",
+      shares: session.insight?.shares ?? "",
       noteStart: session.startNote,
-      noteEnd: session.endNote,
-      proofStart: session.startProofUrls[0] ?? "",
-      proofEnd: session.endProofUrls[0] ?? "",
-      link: session.endLink ?? ""
+      noteEnd: session.endNote
     });
+
+    setLinkCell(row, "proofStart", session.startProofUrls[0], "Lihat Selfie");
+    setLinkCell(row, "proofEnd", session.endProofUrls[0], "Lihat Insight");
+    setLinkCell(row, "link", session.endLink, "Buka Link");
   }
+
+  const sumInsight = (pick: (s: OripaLiveSession) => number | null | undefined) => {
+    const values = sessions.map(pick).filter((v): v is number => v != null);
+    return values.length > 0 ? values.reduce((a, b) => a + b, 0) : "";
+  };
+
+  const totalRow = sheet.addRow({
+    tanggal: "TOTAL",
+    staff: `${sessions.length} sesi`,
+    durasi: totalMinutes,
+    viewers: sumInsight((s) => s.insight?.viewers),
+    comments: sumInsight((s) => s.insight?.comments),
+    likes: sumInsight((s) => s.insight?.likes),
+    shares: sumInsight((s) => s.insight?.shares)
+  });
+  totalRow.font = { bold: true };
 
   const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
   const attachment = new AttachmentBuilder(buffer, {
