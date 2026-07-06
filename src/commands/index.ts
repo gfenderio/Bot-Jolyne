@@ -7,6 +7,8 @@ import { command as whoami } from "./whoami.js";
 import { command as task } from "./task.js";
 import { command as opname } from "./opname.js";
 import { command as baito } from "./baito.js";
+import { command as oripaLive } from "./oripa-live.js";
+import { command as oripaLiveRecap } from "./oripa-live-recap.js";
 
 export const commands = new Map<string, SlashCommand>();
 
@@ -18,7 +20,9 @@ for (const command of [
   whoami,
   task,
   opname,
-  baito
+  baito,
+  oripaLive,
+  oripaLiveRecap
 ]) {
   commands.set(command.data.name, command);
 }

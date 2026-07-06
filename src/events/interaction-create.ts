@@ -4,11 +4,24 @@ import { commands } from "../commands/index.js";
 import { TASK_MODAL_ID } from "../commands/task.js";
 import { createTask } from "../services/notion.js";
 import { handleBaitoButton, handleBaitoModal } from "../handlers/baitoAttendance.js";
+import {
+  handleOripaLiveModal,
+  ORIPA_LIVE_END_MODAL_ID,
+  ORIPA_LIVE_START_MODAL_ID
+} from "../handlers/oripaLive.js";
 
 export async function handleInteractionCreate(interaction: Interaction) {
   if (interaction.isModalSubmit()) {
     if (interaction.customId === "baito_modal_in" || interaction.customId === "baito_modal_out") {
       await handleBaitoModal(interaction);
+      return;
+    }
+
+    if (
+      interaction.customId === ORIPA_LIVE_START_MODAL_ID ||
+      interaction.customId === ORIPA_LIVE_END_MODAL_ID
+    ) {
+      await handleOripaLiveModal(interaction);
       return;
     }
 
