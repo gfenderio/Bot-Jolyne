@@ -112,6 +112,33 @@ const PLATFORM_LABELS: Record<OripaLiveSession["platform"], string> = {
 const ANOMALY_MIN_MINUTES = 15;
 const ANOMALY_MAX_MINUTES = 6 * 60;
 
+function buildViewerFields(sessions: OripaLiveSession[]) {
+  const withViewers = sessions.filter((s) => s.insight?.viewers != null);
+
+  if (withViewers.length === 0) {
+    return [
+      {
+        name: "👁 Penonton (dari screenshot)",
+        value: "Belum ada angka penonton yang terbaca otomatis pada periode ini.",
+        inline: false
+      }
+    ];
+  }
+
+  const totalViewers = withViewers.reduce((sum, s) => sum + (s.insight?.viewers ?? 0), 0);
+  const avgViewers = Math.round(totalViewers / withViewers.length);
+
+  return [
+    {
+      name: "👁 Penonton (dari screenshot)",
+      value:
+        `Total: **${totalViewers.toLocaleString("id-ID")}** · rata-rata **${avgViewers.toLocaleString("id-ID")}**/sesi` +
+        ` (terbaca otomatis di ${withViewers.length} dari ${sessions.length} sesi)`,
+      inline: false
+    }
+  ];
+}
+
 export type OripaLiveRecapResult = {
   sessionCount: number;
   embed: EmbedBuilder;
@@ -165,6 +192,7 @@ export async function buildOripaLiveRecap(range: OripaLiveRecapRange): Promise<O
         inline: false
       }
     )
+    .addFields(buildViewerFields(sessions))
     .setFooter({ text: "Rincian per sesi + link proof ada di file Excel terlampir." })
     .setTimestamp();
 
@@ -193,6 +221,12 @@ export async function buildOripaLiveRecap(range: OripaLiveRecapRange): Promise<O
     { header: "Mulai", key: "mulai", width: 20 },
     { header: "Selesai", key: "selesai", width: 20 },
     { header: "Durasi (menit)", key: "durasi", width: 14 },
+    { header: "Penonton", key: "viewers", width: 12 },
+    { header: "Peak Penonton", key: "peak", width: 14 },
+    { header: "Durasi versi Insight (menit)", key: "insightDurasi", width: 24 },
+    { header: "Selisih Durasi (menit)", key: "selisihDurasi", width: 20 },
+    { header: "Komentar", key: "comments", width: 11 },
+    { header: "Likes", key: "likes", width: 11 },
     { header: "Keterangan Mulai", key: "noteStart", width: 40 },
     { header: "Keterangan Selesai", key: "noteEnd", width: 40 },
     { header: "Proof Selfie", key: "proofStart", width: 40 },
@@ -208,6 +242,15 @@ export async function buildOripaLiveRecap(range: OripaLiveRecapRange): Promise<O
       mulai: formatWibDateTime(session.startedAt),
       selesai: formatWibDateTime(session.endedAt),
       durasi: session.durationMinutes,
+      viewers: session.insight?.viewers ?? "",
+      peak: session.insight?.peakViewers ?? "",
+      insightDurasi: session.insight?.durationMinutes ?? "",
+      selisihDurasi:
+        session.insight?.durationMinutes != null
+          ? Math.abs(session.insight.durationMinutes - session.durationMinutes)
+          : "",
+      comments: session.insight?.comments ?? "",
+      likes: session.insight?.likes ?? "",
       noteStart: session.startNote,
       noteEnd: session.endNote,
       proofStart: session.startProofUrls[0] ?? "",

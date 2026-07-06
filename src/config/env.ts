@@ -147,6 +147,7 @@ const envSchema = z.object({
   ORIPA_LIVE_ALLOWED_USER_IDS: optionalStringList.default(["419213146209779713"]),
   ORIPA_LIVE_STORE_PATH: optionalString.default("data/oripa-live-sessions.json"),
   ORIPA_LIVE_RECAP_USER_IDS: optionalStringList.default(["419213146209779713"]),
+  GEMINI_API_KEY: optionalString,
   BAITO_REXY_USER_ID: optionalString.default("593313231137931264"),
   BAITO_AZIS_USER_ID: optionalString.default("286790867329613824"),
   BAITO_ATTENDANCE_CHANNEL_ID: optionalString.default("1457554536934936769")

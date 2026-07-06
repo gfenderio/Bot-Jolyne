@@ -13,12 +13,22 @@ export type OripaLiveActiveSession = {
   startProofUrls: string[];
 };
 
+export type OripaLiveInsight = {
+  viewers: number | null;
+  peakViewers: number | null;
+  durationMinutes: number | null;
+  comments: number | null;
+  likes: number | null;
+  shares: number | null;
+};
+
 export type OripaLiveSession = OripaLiveActiveSession & {
   endedAt: string;
   durationMinutes: number;
   endNote: string;
   endProofUrls: string[];
   endLink?: string;
+  insight?: OripaLiveInsight;
 };
 
 type OripaLiveStoreData = {
@@ -65,6 +75,7 @@ export function endLiveSession(input: {
   endNote: string;
   endProofUrls: string[];
   endLink?: string;
+  insight?: OripaLiveInsight;
 }): OripaLiveSession | null {
   const store = readStore();
 
@@ -82,7 +93,8 @@ export function endLiveSession(input: {
     durationMinutes,
     endNote: input.endNote,
     endProofUrls: input.endProofUrls,
-    endLink: input.endLink
+    endLink: input.endLink,
+    insight: input.insight
   };
 
   store.sessions.push(completed);

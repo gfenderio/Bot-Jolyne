@@ -17,6 +17,7 @@ import {
   getActiveLiveSession,
   startLiveSession
 } from "../services/oripaLiveStore.js";
+import { readLiveInsightFromImage } from "../services/insightReader.js";
 import type { OripaLivePlatform } from "../services/oripaLiveStore.js";
 
 export const ORIPA_LIVE_START_MODAL_ID = "oripa_live_modal_start";
@@ -119,6 +120,12 @@ function discordTimestamp(iso: string): string {
   return `<t:${Math.floor(Date.parse(iso) / 1000)}:f>`;
 }
 
+function formatNumber(value: number): string {
+  return value.toLocaleString("id-ID");
+}
+
+const DURATION_MISMATCH_THRESHOLD_MINUTES = 15;
+
 function formatDuration(totalMinutes: number): string {
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
@@ -213,11 +220,13 @@ export async function handleOripaLiveModal(interaction: ModalSubmitInteraction) 
     if (interaction.customId === ORIPA_LIVE_END_MODAL_ID) {
       const endedAt = new Date().toISOString();
       const link = interaction.fields.getTextInputValue("live_link").trim();
+      const insightResult = await readLiveInsightFromImage(proof.url, proof.contentType);
       const completed = endLiveSession({
         endedAt,
         endNote: note,
         endProofUrls: [proof.url],
-        endLink: link || undefined
+        endLink: link || undefined,
+        insight: insightResult.ok ? insightResult.insight : undefined
       });
 
       if (!completed) {
@@ -242,10 +251,54 @@ export async function handleOripaLiveModal(interaction: ModalSubmitInteraction) 
         .setFooter({ text: `UID: ${interaction.user.id}` })
         .setTimestamp();
 
+      if (insightResult.ok) {
+        const i = insightResult.insight;
+        const lines = [
+          i.viewers != null ? `Penonton: **${formatNumber(i.viewers)}**` : null,
+          i.peakViewers != null ? `Peak bersamaan: **${formatNumber(i.peakViewers)}**` : null,
+          i.durationMinutes != null
+            ? `Durasi versi platform: **${formatDuration(i.durationMinutes)}**`
+            : null,
+          i.comments != null ? `Komentar: ${formatNumber(i.comments)}` : null,
+          i.likes != null ? `Likes: ${formatNumber(i.likes)}` : null,
+          i.shares != null ? `Share: ${formatNumber(i.shares)}` : null
+        ].filter(Boolean) as string[];
+
+        embed.addFields({
+          name: "🤖 Dibaca Otomatis dari Screenshot",
+          value: lines.length > 0 ? lines.join("\n") : "Screenshot dikenali, tapi tidak ada angka yang terbaca.",
+          inline: false
+        });
+
+        if (
+          i.durationMinutes != null &&
+          Math.abs(i.durationMinutes - completed.durationMinutes) > DURATION_MISMATCH_THRESHOLD_MINUTES
+        ) {
+          embed.addFields({
+            name: "⚠️ Cek Durasi",
+            value: `Durasi versi screenshot (${formatDuration(i.durationMinutes)}) beda lebih dari ${DURATION_MISMATCH_THRESHOLD_MINUTES} menit dari durasi versi bot (${formatDuration(completed.durationMinutes)}).`,
+            inline: false
+          });
+        }
+      } else if (insightResult.reason !== "disabled") {
+        embed.addFields({
+          name: "🤖 Insight Otomatis Gagal",
+          value: `⚠️ ${insightResult.message}`,
+          inline: false
+        });
+      }
+
       await sendToLiveChannel(interaction, { embeds: [embed], files: [file] });
-      await interaction.editReply(
-        `✅ Sesi live ${PLATFORM_LABELS[completed.platform]} ditutup. Durasi: ${formatDuration(completed.durationMinutes)}.`
-      );
+
+      let replyMessage = `✅ Sesi live ${PLATFORM_LABELS[completed.platform]} ditutup. Durasi: ${formatDuration(completed.durationMinutes)}.`;
+
+      if (insightResult.ok) {
+        replyMessage += " Angka insight terbaca otomatis dari screenshot. ✅";
+      } else if (insightResult.reason !== "disabled") {
+        replyMessage += `\n⚠️ Insight tidak terbaca otomatis: ${insightResult.message}\nLaporanmu tetap tercatat — HR akan cek angka dari foto secara manual.`;
+      }
+
+      await interaction.editReply(replyMessage);
       return;
     }
   } catch (error) {
