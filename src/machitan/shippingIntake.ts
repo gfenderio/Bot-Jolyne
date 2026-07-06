@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { AttachmentBuilder, Client, EmbedBuilder } from "discord.js";
 import { env } from "../config/env.js";
 import { isAuthorizedMachitanIntake } from "./intakeAuth.js";
+import { fitImageToLimit } from "./imageFit.js";
 
 // Helper for sending JSON response
 function sendJson(response: ServerResponse, statusCode: number, payload: unknown) {
@@ -17,8 +18,9 @@ class PayloadTooLargeError extends Error {}
 const DISCORD_BOT_ATTACHMENT_LIMIT_BYTES = 8 * 1024 * 1024;
 
 // Shipping bisa bawa banyak foto sekaligus (array `images`, bukan 1 foto per submit
-// kayak pick-proof), jadi cap-nya perlu lebih longgar daripada endpoint pick-proof.
-async function readRequestBody(request: IncomingMessage, maxBytes = 20 * 1024 * 1024) {
+// kayak pick-proof), jadi cap-nya perlu longgar; oversize per-foto ditangani
+// fitImageToLimit (resize server-side), bukan ditolak 413.
+async function readRequestBody(request: IncomingMessage, maxBytes = 40 * 1024 * 1024) {
   let body = "";
   for await (const chunk of request) {
     body += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
@@ -61,10 +63,16 @@ export async function handleMachitanShipping(
       return sendJson(response, 400, { error: "Missing required field: images", ok: false });
     }
 
-    // Cek per-foto (bukan cuma total payload) — Discord bot dibatasi ~8MB per attachment.
-    for (const b64 of rawImages) {
-      const base64Data = b64.replace(/^data:image\/\w+;base64,/, "");
-      if (Buffer.byteLength(base64Data, "base64") > DISCORD_BOT_ATTACHMENT_LIMIT_BYTES) {
+    // Discord bot dibatasi ~8MB per attachment. Foto oversize di-resize bertahap
+    // server-side (fitImageToLimit) sampai muat, bukan ditolak — foto yang sudah
+    // muat lewat utuh tanpa re-encode. 413 tinggal fallback ekstrem.
+    const imageBuffers = await Promise.all(
+      rawImages.map((b64) =>
+        fitImageToLimit(Buffer.from(b64.replace(/^data:image\/\w+;base64,/, ""), "base64"))
+      )
+    );
+    for (const buf of imageBuffers) {
+      if (buf.length > DISCORD_BOT_ATTACHMENT_LIMIT_BYTES) {
         throw new PayloadTooLargeError("Salah satu foto terlalu besar untuk diupload ke Discord (maks ~8MB).");
       }
     }
@@ -78,12 +86,9 @@ export async function handleMachitanShipping(
     const targetChannelId = requestedChannelId ? String(requestedChannelId) : "1441739180043669595"; // shipping-today default
 
     // Decode images
-    const attachments = rawImages.map((b64, i) => {
-      const base64Data = b64.replace(/^data:image\/\w+;base64,/, "");
-      return new AttachmentBuilder(Buffer.from(base64Data, "base64"), {
-        name: `shipping-proof-${i + 1}.jpg`,
-      });
-    });
+    const attachments = imageBuffers.map((buf, i) =>
+      new AttachmentBuilder(buf, { name: `shipping-proof-${i + 1}.jpg` })
+    );
     const firstAttachmentName = attachments[0].name as string;
 
     // Format List of Orders

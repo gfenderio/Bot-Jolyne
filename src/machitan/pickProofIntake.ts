@@ -3,6 +3,7 @@ import { AttachmentBuilder, Client, EmbedBuilder } from "discord.js";
 import { env } from "../config/env.js";
 import { addMachitanProof } from "./proofStore.js";
 import { isAuthorizedMachitanIntake } from "./intakeAuth.js";
+import { fitImageToLimit } from "./imageFit.js";
 
 const ECOM_PICK_PROOF_CHANNEL_ID = "1390221553333043200";
 const SHOPEE_MENTION = "<@804685637252939788>";
@@ -59,8 +60,10 @@ function sendJson(response: ServerResponse, statusCode: number, payload: unknown
 
 export class PayloadTooLargeError extends Error {}
 
-// 20MB: multi-foto (base64 +33%) bisa lewat 10MB dengan 4+ foto hasil kompres PDA.
-async function readRequestBody(request: IncomingMessage, maxBytes = 20 * 1024 * 1024) {
+// 40MB: multi-foto (base64 +33%) bisa lewat 20MB dengan 6+ foto hasil kompres PDA.
+// Oversize per-foto ditangani fitImageToLimit (resize server-side), jadi limit body
+// cukup longgar — yang penting PDA tidak pernah keblock 413.
+async function readRequestBody(request: IncomingMessage, maxBytes = 40 * 1024 * 1024) {
   let body = "";
   for await (const chunk of request) {
     body += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
@@ -133,13 +136,16 @@ export async function handleMachitanPickProof(
       : [];
     const imageBase64 = imagesBase64[0] ?? "";
 
-    // Bot Discord dibatasi ~8MB per attachment (beda dari limit user biasa) — cek di
-    // sini biar gagalnya rapi (413), bukan crash mentah pas channel.send ke Discord.
-    if (!logOnly) {
-      for (const b64 of imagesBase64) {
-        if (Buffer.byteLength(b64, "base64") > DISCORD_BOT_ATTACHMENT_LIMIT_BYTES) {
-          throw new PayloadTooLargeError("Salah satu foto terlalu besar untuk diupload ke Discord (maks ~8MB).");
-        }
+    // Bot Discord dibatasi ~8MB per attachment (beda dari limit user biasa).
+    // Foto oversize TIDAK ditolak 413 lagi — di-resize bertahap server-side
+    // (fitImageToLimit) sampai muat; foto yang sudah muat lewat utuh tanpa
+    // re-encode. 413 tinggal fallback kalau resize pun mustahil muat.
+    const imageBuffers: Buffer[] = logOnly
+      ? []
+      : await Promise.all(imagesBase64.map((b64) => fitImageToLimit(Buffer.from(b64, "base64"))));
+    for (const buf of imageBuffers) {
+      if (buf.length > DISCORD_BOT_ATTACHMENT_LIMIT_BYTES) {
+        throw new PayloadTooLargeError("Salah satu foto terlalu besar untuk diupload ke Discord (maks ~8MB).");
       }
     }
 
@@ -219,7 +225,7 @@ export async function handleMachitanPickProof(
         throw new Error(`Cannot send to channel ${ECOM_PICK_PROOF_CHANNEL_ID}`);
       }
 
-      const imageBuffer = Buffer.from(imageBase64, "base64");
+      const imageBuffer = imageBuffers[0] ?? Buffer.alloc(0);
       for (const { item, index } of ecommerceRows) {
         const rawOrderId = String(item?.invoiceNumber ?? item?.invoice_number ?? item?.orderId ?? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-");
         const { orderId, description } = splitOrderDescription(rawOrderId);
@@ -257,9 +263,9 @@ export async function handleMachitanPickProof(
       }
 
       // Foto tambahan (multi-foto) cukup dikirim sekali, bukan diulang per item.
-      if (imagesBase64.length > 1) {
-        const extraAttachments = imagesBase64.slice(1).map((b64, i) =>
-          new AttachmentBuilder(Buffer.from(b64, "base64"), { name: `ecom_pick_proof_extra_${i + 2}.jpg` })
+      if (imageBuffers.length > 1) {
+        const extraAttachments = imageBuffers.slice(1).map((buf, i) =>
+          new AttachmentBuilder(buf, { name: `ecom_pick_proof_extra_${i + 2}.jpg` })
         );
         for (let i = 0; i < extraAttachments.length; i += 10) {
           await channel.send({
@@ -307,8 +313,8 @@ export async function handleMachitanPickProof(
     // Semua foto jadi attachment; embed menampilkan foto pertama, sisanya tampil
     // sebagai attachment tambahan di pesan yang sama.
     const proofBaseName = isPackProof ? "pack_proof" : "pick_proof";
-    const attachments = imagesBase64.map((b64, i) =>
-      new AttachmentBuilder(Buffer.from(b64, "base64"), { name: i === 0 ? `${proofBaseName}.jpg` : `${proofBaseName}_${i + 1}.jpg` })
+    const attachments = imageBuffers.map((buf, i) =>
+      new AttachmentBuilder(buf, { name: i === 0 ? `${proofBaseName}.jpg` : `${proofBaseName}_${i + 1}.jpg` })
     );
     const photoLabel = imagesBase64.length > 1 ? ` · ${imagesBase64.length} foto` : "";
 
