@@ -18,6 +18,7 @@ export type OripaLiveSession = OripaLiveActiveSession & {
   durationMinutes: number;
   endNote: string;
   endProofUrls: string[];
+  endLink?: string;
 };
 
 type OripaLiveStoreData = {
@@ -63,6 +64,7 @@ export function endLiveSession(input: {
   endedAt: string;
   endNote: string;
   endProofUrls: string[];
+  endLink?: string;
 }): OripaLiveSession | null {
   const store = readStore();
 
@@ -79,7 +81,8 @@ export function endLiveSession(input: {
     endedAt: input.endedAt,
     durationMinutes,
     endNote: input.endNote,
-    endProofUrls: input.endProofUrls
+    endProofUrls: input.endProofUrls,
+    endLink: input.endLink
   };
 
   store.sessions.push(completed);

@@ -88,6 +88,16 @@ export function buildOripaLiveEndModal(): ModalBuilder {
             .setMaxValues(1)
         ),
       new LabelBuilder()
+        .setLabel("Link live/replay (opsional)")
+        .setDescription("Contoh: link replay TikTok atau link live IG.")
+        .setTextInputComponent(
+          new TextInputBuilder()
+            .setCustomId("live_link")
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false)
+            .setMaxLength(300)
+        ),
+      new LabelBuilder()
         .setLabel("Keterangan")
         .setDescription("Contoh: total penonton, hasil penjualan, kendala.")
         .setTextInputComponent(
@@ -202,10 +212,12 @@ export async function handleOripaLiveModal(interaction: ModalSubmitInteraction) 
 
     if (interaction.customId === ORIPA_LIVE_END_MODAL_ID) {
       const endedAt = new Date().toISOString();
+      const link = interaction.fields.getTextInputValue("live_link").trim();
       const completed = endLiveSession({
         endedAt,
         endNote: note,
-        endProofUrls: [proof.url]
+        endProofUrls: [proof.url],
+        endLink: link || undefined
       });
 
       if (!completed) {
@@ -222,6 +234,7 @@ export async function handleOripaLiveModal(interaction: ModalSubmitInteraction) 
           { name: "Jam Mulai", value: discordTimestamp(completed.startedAt), inline: true },
           { name: "Jam Selesai", value: discordTimestamp(completed.endedAt), inline: true },
           { name: "Durasi", value: formatDuration(completed.durationMinutes), inline: true },
+          ...(completed.endLink ? [{ name: "Link", value: completed.endLink, inline: false }] : []),
           { name: "Keterangan", value: note, inline: false }
         )
         .setImage(`attachment://${file.name}`)

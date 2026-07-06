@@ -196,7 +196,8 @@ export async function buildOripaLiveRecap(range: OripaLiveRecapRange): Promise<O
     { header: "Keterangan Mulai", key: "noteStart", width: 40 },
     { header: "Keterangan Selesai", key: "noteEnd", width: 40 },
     { header: "Proof Selfie", key: "proofStart", width: 40 },
-    { header: "Proof Insight", key: "proofEnd", width: 40 }
+    { header: "Proof Insight", key: "proofEnd", width: 40 },
+    { header: "Link Live/Replay", key: "link", width: 40 }
   ];
   sheet.getRow(1).font = { bold: true };
 
@@ -210,7 +211,8 @@ export async function buildOripaLiveRecap(range: OripaLiveRecapRange): Promise<O
       noteStart: session.startNote,
       noteEnd: session.endNote,
       proofStart: session.startProofUrls[0] ?? "",
-      proofEnd: session.endProofUrls[0] ?? ""
+      proofEnd: session.endProofUrls[0] ?? "",
+      link: session.endLink ?? ""
     });
   }
 
