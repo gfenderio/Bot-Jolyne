@@ -9,6 +9,10 @@ import {
   ORIPA_LIVE_END_MODAL_ID,
   ORIPA_LIVE_START_MODAL_ID
 } from "../handlers/oripaLive.js";
+import {
+  handleOripaLiveRecapModal,
+  ORIPA_LIVE_RECAP_MODAL_ID
+} from "../handlers/oripaLiveRecap.js";
 
 export async function handleInteractionCreate(interaction: Interaction) {
   if (interaction.isModalSubmit()) {
@@ -22,6 +26,11 @@ export async function handleInteractionCreate(interaction: Interaction) {
       interaction.customId === ORIPA_LIVE_END_MODAL_ID
     ) {
       await handleOripaLiveModal(interaction);
+      return;
+    }
+
+    if (interaction.customId === ORIPA_LIVE_RECAP_MODAL_ID) {
+      await handleOripaLiveRecapModal(interaction);
       return;
     }
 
