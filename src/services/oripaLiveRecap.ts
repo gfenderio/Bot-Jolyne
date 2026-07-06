@@ -93,6 +93,91 @@ export function resolveRecapRange(period: OripaLiveRecapPeriod, now = new Date()
   }
 }
 
+function parseDateInput(raw: string): { year: number; month: number; day: number } | null {
+  const trimmed = raw.trim();
+
+  // Format YYYY-MM-DD
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(trimmed);
+  if (iso) {
+    return { year: Number(iso[1]), month: Number(iso[2]) - 1, day: Number(iso[3]) };
+  }
+
+  // Format DD-MM-YYYY atau DD/MM/YYYY
+  const idFormat = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(trimmed);
+  if (idFormat) {
+    return { year: Number(idFormat[3]), month: Number(idFormat[2]) - 1, day: Number(idFormat[1]) };
+  }
+
+  return null;
+}
+
+function isValidDateParts(parts: { year: number; month: number; day: number }): boolean {
+  const probe = new Date(Date.UTC(parts.year, parts.month, parts.day));
+  return (
+    probe.getUTCFullYear() === parts.year &&
+    probe.getUTCMonth() === parts.month &&
+    probe.getUTCDate() === parts.day
+  );
+}
+
+export type CustomRangeResult =
+  | { ok: true; range: OripaLiveRecapRange }
+  | { ok: false; error: string };
+
+export function resolveCustomRecapRange(
+  dariRaw: string,
+  sampaiRaw: string | null,
+  now = new Date()
+): CustomRangeResult {
+  const dari = parseDateInput(dariRaw);
+
+  if (!dari || !isValidDateParts(dari)) {
+    return {
+      ok: false,
+      error: `Tanggal \`dari\` tidak valid: \`${dariRaw}\`. Pakai format \`2026-07-01\` atau \`01-07-2026\`.`
+    };
+  }
+
+  let endMs: number;
+  let endLabelMs: number;
+
+  if (sampaiRaw && sampaiRaw.trim() !== "") {
+    const sampai = parseDateInput(sampaiRaw);
+
+    if (!sampai || !isValidDateParts(sampai)) {
+      return {
+        ok: false,
+        error: `Tanggal \`sampai\` tidak valid: \`${sampaiRaw}\`. Pakai format \`2026-07-06\` atau \`06-07-2026\`.`
+      };
+    }
+
+    // Inklusif: sampai akhir hari tanggal `sampai` (WIB)
+    endMs = wibStartOfDayMs(sampai.year, sampai.month, sampai.day + 1);
+    endLabelMs = wibStartOfDayMs(sampai.year, sampai.month, sampai.day);
+  } else {
+    endMs = now.getTime();
+    endLabelMs = now.getTime();
+  }
+
+  const startMs = wibStartOfDayMs(dari.year, dari.month, dari.day);
+
+  if (startMs >= endMs) {
+    return {
+      ok: false,
+      error: `Tanggal \`dari\` (${formatWibDate(startMs)}) harus sebelum \`sampai\` (${formatWibDate(endLabelMs)}).`
+    };
+  }
+
+  return {
+    ok: true,
+    range: {
+      label: `${formatWibDate(startMs)} - ${formatWibDate(endLabelMs)}`,
+      startMs,
+      endMs
+    }
+  };
+}
+
 function formatDuration(totalMinutes: number): string {
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
