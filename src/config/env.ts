@@ -154,7 +154,10 @@ const envSchema = z.object({
   // Digest harian "order belum diproses > N hari" di fulfillment kyou.id.
   FULFILLMENT_STALE_ENABLED: optionalBoolean,
   FULFILLMENT_STALE_CHANNEL_ID: optionalString.default("1501899831268868106"),
-  FULFILLMENT_STALE_THRESHOLD_DAYS: pollIntervalSeconds.default(3)
+  FULFILLMENT_STALE_THRESHOLD_DAYS: pollIntervalSeconds.default(3),
+  // Batas atas: order lebih lama = abandoned, tidak masuk digest (samakan
+  // dgn App\Support\FulfillmentStale::MAX_DAYS di kyou.id).
+  FULFILLMENT_STALE_MAX_DAYS: pollIntervalSeconds.default(30)
 });
 
 // Override dari kode agar mengabaikan setting environment server Coolify

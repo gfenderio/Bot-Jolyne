@@ -57,7 +57,7 @@ function metabaseConfig(): MetabaseConfig | null {
   };
 }
 
-function buildQuery(thresholdDays: number): string {
+function buildQuery(thresholdDays: number, maxDays: number): string {
   // Tanpa LIMIT — fetchNativeQueryWithPagination yang menambah LIMIT/OFFSET.
   return `
     SELECT
@@ -88,7 +88,7 @@ function buildQuery(thresholdDays: number): string {
     FROM orders o
     JOIN users u ON u.user_id = o.user_id
     WHERE o.status = 'paid'
-      AND DATEDIFF(NOW(), o.updated_at) >= ${thresholdDays}
+      AND DATEDIFF(NOW(), o.updated_at) BETWEEN ${thresholdDays} AND ${maxDays}
     ORDER BY days_stuck DESC
   `.trim();
 }
@@ -97,13 +97,16 @@ function truncate(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }
 
-export async function fetchStaleOrders(thresholdDays: number): Promise<StaleOrder[]> {
+export async function fetchStaleOrders(
+  thresholdDays: number,
+  maxDays: number
+): Promise<StaleOrder[]> {
   const config = metabaseConfig();
   if (!config) {
     throw new Error("Metabase belum dikonfigurasi (METABASE_URL/EMAIL/PASSWORD).");
   }
 
-  const { columns, rows } = await fetchNativeQueryWithPagination(config, buildQuery(thresholdDays));
+  const { columns, rows } = await fetchNativeQueryWithPagination(config, buildQuery(thresholdDays, maxDays));
   const idx = (name: string) => columns.indexOf(name);
   const iOrder = idx("order_id");
   const iDays = idx("days_stuck");
@@ -145,12 +148,17 @@ function chunkLines(lines: string[]): string[] {
   return chunks;
 }
 
-export function buildDigestEmbed(orders: StaleOrder[], thresholdDays: number): EmbedBuilder {
+export function buildDigestEmbed(
+  orders: StaleOrder[],
+  thresholdDays: number,
+  maxDays: number
+): EmbedBuilder {
   const jakartaNow = new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });
+  const window = `${thresholdDays}-${maxDays} hari`;
 
   if (orders.length === 0) {
     return new EmbedBuilder()
-      .setTitle(`✅ Tidak ada order nyangkut > ${thresholdDays} hari`)
+      .setTitle(`✅ Tidak ada order nyangkut ${window}`)
       .setDescription("Semua order fulfillment sudah diproses dalam batas waktu. Mantap.")
       .setColor(0x2f8f5b)
       .setFooter({ text: `Rekap ${jakartaNow} WIB · anchor updated_at` });
@@ -162,9 +170,9 @@ export function buildDigestEmbed(orders: StaleOrder[], thresholdDays: number): E
   const overflow = orders.length - shown.length;
 
   const embed = new EmbedBuilder()
-    .setTitle(`⏳ Order nyangkut > ${thresholdDays} hari — ${orders.length} order`)
+    .setTitle(`⏳ Order nyangkut ${window} — ${orders.length} order`)
     .setDescription(
-      "Belum tuntas diproses sejak update terakhir (anchor `updated_at`)." +
+      `Belum tuntas diproses ${window} sejak update terakhir (anchor \`updated_at\`). Order > ${maxDays} hari dianggap abandoned & tidak dihitung.` +
         (overflow > 0 ? `\nMenampilkan ${shown.length} paling lama; **${overflow} order lagi** tidak ditampilkan.` : "")
     )
     .setColor(EMBED_COLOR)
@@ -195,9 +203,10 @@ export async function sendFulfillmentStaleDigest(client: Client): Promise<void> 
   }
 
   const thresholdDays = env.FULFILLMENT_STALE_THRESHOLD_DAYS;
+  const maxDays = env.FULFILLMENT_STALE_MAX_DAYS;
   let orders: StaleOrder[];
   try {
-    orders = await fetchStaleOrders(thresholdDays);
+    orders = await fetchStaleOrders(thresholdDays, maxDays);
   } catch (error) {
     console.error("[fulfillment-stale] gagal ambil data dari Metabase:", error);
     return;
@@ -209,7 +218,7 @@ export async function sendFulfillmentStaleDigest(client: Client): Promise<void> 
     return;
   }
 
-  await (channel as TextChannel).send({ embeds: [buildDigestEmbed(orders, thresholdDays)] });
+  await (channel as TextChannel).send({ embeds: [buildDigestEmbed(orders, thresholdDays, maxDays)] });
   console.log(`[fulfillment-stale] digest terkirim — ${orders.length} order nyangkut.`);
 }
 
