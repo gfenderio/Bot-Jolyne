@@ -150,7 +150,11 @@ const envSchema = z.object({
   GEMINI_API_KEY: optionalString,
   BAITO_REXY_USER_ID: optionalString.default("593313231137931264"),
   BAITO_AZIS_USER_ID: optionalString.default("286790867329613824"),
-  BAITO_ATTENDANCE_CHANNEL_ID: optionalString.default("1457554536934936769")
+  BAITO_ATTENDANCE_CHANNEL_ID: optionalString.default("1457554536934936769"),
+  // Digest harian "order belum diproses > N hari" di fulfillment kyou.id.
+  FULFILLMENT_STALE_ENABLED: optionalBoolean,
+  FULFILLMENT_STALE_CHANNEL_ID: optionalString.default("1501899831268868106"),
+  FULFILLMENT_STALE_THRESHOLD_DAYS: pollIntervalSeconds.default(3)
 });
 
 // Override dari kode agar mengabaikan setting environment server Coolify
