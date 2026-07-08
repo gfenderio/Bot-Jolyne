@@ -155,6 +155,10 @@ const envSchema = z.object({
   BAITO_ATTENDANCE_CHANNEL_ID: optionalString.default("1457554536934936769"),
   // Digest harian "order belum diproses > N hari" di fulfillment kyou.id.
   FULFILLMENT_STALE_ENABLED: optionalBoolean,
+  // Kirim digest sekali langsung saat bot start (selain jadwal harian 09:00).
+  // Berguna supaya hari pertama enable / setiap redeploy tidak ke-skip kalau
+  // prosesnya baru hidup setelah lewat 09:00 WIB.
+  FULFILLMENT_STALE_RUN_ON_START: optionalBoolean,
   FULFILLMENT_STALE_CHANNEL_ID: optionalString.default("1501899831268868106"),
   FULFILLMENT_STALE_THRESHOLD_DAYS: pollIntervalSeconds.default(3),
   // Batas atas: order lebih lama = abandoned, tidak masuk digest (samakan

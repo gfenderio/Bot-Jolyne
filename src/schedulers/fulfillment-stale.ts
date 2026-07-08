@@ -240,4 +240,14 @@ export function startFulfillmentStaleScheduler(client: Client): void {
     { timezone: "Asia/Jakarta" }
   );
   console.log("[fulfillment-stale] scheduler aktif — harian 09:00 WIB.");
+
+  // Kirim sekali saat start (opsional). cron hanya memicu di 09:00 berikutnya,
+  // jadi kalau proses baru hidup setelah lewat 09:00 (mis. hari pertama enable
+  // atau redeploy tengah hari), tanpa ini digest hari itu ke-skip.
+  if (env.FULFILLMENT_STALE_RUN_ON_START) {
+    console.log("[fulfillment-stale] RUN_ON_START aktif — kirim digest sekarang...");
+    sendFulfillmentStaleDigest(client).catch((err) =>
+      console.error("[fulfillment-stale] gagal kirim digest (run-on-start):", err)
+    );
+  }
 }
