@@ -3,32 +3,44 @@ import type { AbsenBatch, AbsenItem } from "./absenStore.js";
 
 /**
  * Generate output Absen Arrival: dua workbook meniru file contoh
- *  - RES (restock): item status "ready", per-source di-unpivot jadi baris.
+ *  - RES (restock): item ACTION "Cont", per-source di-unpivot jadi baris.
  *      kolom: item_id, source, stock, cogs, opnamed_at, notes
- *  - CONV (convert): item status "pre", per-source jadi kolom (gamma selalu 0).
+ *  - CONV (convert): item ACTION "Conv", per-source jadi kolom (gamma selalu 0).
  *      kolom: item_id, cogs, price, alpha, ss, omega, beta, sigma, lambda, gamma, barcode, notes
- * Hanya item yang sudah diabsen (done/manual) yang diekspor. Item manual
- * (barcode tak ada di data) dipisah ke workbook MANUAL biar tak mengotori template.
+ *
+ * KLASIFIKASI PAKAI KOLOM `ACTION`, BUKAN `STATUS`. Di Q2C ada item ber-STATUS
+ * "ready" yang tetap masuk CONV (mis. item 210056/210057 di CONV 070726 FAS.xlsx),
+ * jadi status bukan penentu. ACTION konsisten di Q2C maupun Q2J:
+ *   "Cont 5" → RES · "Conv 10" → CONV · "Led 1 | Conv 9" → CONV
+ *   "No Stock" / "Led 2 | No Stock" / kosong → tidak diekspor.
+ *
+ * Hanya item yang sudah diabsen (done/manual) yang diekspor. Item manual (barcode
+ * tak ada di data) dipisah ke workbook MANUAL biar tak mengotori template.
  * Data ditulis polos (values only) supaya gampang copy-paste ke jurnal.
  */
 
-const SOURCE_DISPLAY: Record<keyof AbsenItem["alloc"], string> = {
+type SourceKey = keyof AbsenItem["alloc"];
+
+const SOURCE_DISPLAY: Record<SourceKey, string> = {
   alpha: "Alpha",
   ss: "SS",
   omega: "Omega",
   beta: "Beta",
   sigma: "Sigma",
   lambda: "Lambda",
+  op: "OP",
 };
 
-const SOURCE_ORDER: (keyof AbsenItem["alloc"])[] = [
-  "alpha",
-  "ss",
-  "omega",
-  "beta",
-  "sigma",
-  "lambda",
-];
+// Urut sesuai kolom sheet; `op` ditaruh terakhir (hanya ada di Q2J).
+const SOURCE_ORDER: SourceKey[] = ["alpha", "ss", "omega", "beta", "sigma", "lambda", "op"];
+
+/** "Conv 10" → conv · "Cont 5" → cont · "Led 1 | Conv 9" → conv · lainnya → null. */
+export function classifyAction(action: string): "conv" | "cont" | null {
+  const a = (action || "").toLowerCase();
+  if (a.includes("conv")) return "conv";
+  if (a.includes("cont")) return "cont";
+  return null;
+}
 
 // item_id / barcode angka murni ditulis sebagai number (biar sama dengan contoh).
 function numOrStr(v: string): number | string {
@@ -44,6 +56,10 @@ export interface AbsenExportResult {
   resRows: number;
   convRows: number;
   manualRows: number;
+  /** Item sudah diabsen tapi ACTION-nya bukan Cont/Conv (mis. "No Stock") — tidak diekspor. */
+  skipped: { itemId: string; name: string; action: string }[];
+  /** Anomali: item CONV yang punya alokasi OP. Template CONV tak punya kolom OP. */
+  convWithOp: { itemId: string; op: number }[];
 }
 
 export async function generateAbsenExport(batch: AbsenBatch): Promise<AbsenExportResult> {
@@ -56,8 +72,15 @@ export async function generateAbsenExport(batch: AbsenBatch): Promise<AbsenExpor
   const manualItems = worked.filter((it) => it.absenStatus === "manual");
   const listedItems = worked.filter((it) => it.absenStatus === "done");
 
-  const convItems = listedItems.filter((it) => it.status === "pre");
-  const resItems = listedItems.filter((it) => it.status !== "pre");
+  const convItems: AbsenItem[] = [];
+  const resItems: AbsenItem[] = [];
+  const skipped: AbsenExportResult["skipped"] = [];
+  for (const it of listedItems) {
+    const cls = classifyAction(it.action);
+    if (cls === "conv") convItems.push(it);
+    else if (cls === "cont") resItems.push(it);
+    else skipped.push({ itemId: it.itemId, name: it.name, action: it.action });
+  }
 
   // ── RES workbook ─────────────────────────────────────────────────────────
   const resWb = new ExcelJS.Workbook();
@@ -83,6 +106,9 @@ export async function generateAbsenExport(batch: AbsenBatch): Promise<AbsenExpor
   const resBuffer = Buffer.from(await resWb.xlsx.writeBuffer());
 
   // ── CONV workbook ────────────────────────────────────────────────────────
+  // Template contoh punya 12 kolom tanpa `op`. Sejauh data Q2J, alokasi OP hanya
+  // melekat pada item Cont — jadi tak pernah bentrok. Kalau suatu saat bentrok,
+  // dicatat di convWithOp dan dilaporkan, BUKAN dibuang diam-diam.
   const convWb = new ExcelJS.Workbook();
   convWb.creator = "Bot Jolyne";
   const convSheet = convWb.addWorksheet("Sheet1");
@@ -92,8 +118,13 @@ export async function generateAbsenExport(batch: AbsenBatch): Promise<AbsenExpor
     "barcode", "notes",
   ]);
   let convRows = 0;
+  const convWithOp: AbsenExportResult["convWithOp"] = [];
   for (const it of convItems) {
-    const barcode = (it.barcode || "").trim() || it.itemId;
+    if (it.alloc.op > 0) convWithOp.push({ itemId: it.itemId, op: it.alloc.op });
+    // Barcode dipakai hanya kalau murni angka. Sheet punya barcode kotor
+    // (mis. "6976739639542_1") — output jurnal asli jatuh ke item_id untuk itu.
+    const raw = (it.barcode || "").trim();
+    const barcode = /^\d+$/.test(raw) ? raw : it.itemId;
     convSheet.addRow([
       numOrStr(it.itemId),
       it.cogs,
@@ -140,5 +171,7 @@ export async function generateAbsenExport(batch: AbsenBatch): Promise<AbsenExpor
     resRows,
     convRows,
     manualRows: manualItems.length,
+    skipped,
+    convWithOp,
   };
 }

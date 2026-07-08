@@ -11,8 +11,13 @@ import path from "node:path";
  * withLock sama dengan wsInboxStore.ts / proofStore.ts.
  */
 
-// 6 tujuan alokasi. Lambda menyerap Gamma (1 kota, Surabaya) — kolom gamma di
-// output CONV selalu 0. Urutan mengikuti kolom U..Z di sheet.
+/**
+ * Tujuan alokasi — UNION dari kedua sheet jurnal:
+ *  - Q2C (China): kolom A, SS, O, B, SG(sigma), L
+ *  - Q2J (Japan): kolom A, SS, O, B, OP,       L   ← punya OP, tak punya sigma
+ * Lambda menyerap Gamma (1 kota, Surabaya) → kolom gamma di output CONV selalu 0.
+ * Kolom yang tak ada di sebuah sheet dikirim 0.
+ */
 export interface AbsenAlloc {
   alpha: number;
   ss: number;
@@ -20,17 +25,27 @@ export interface AbsenAlloc {
   beta: number;
   sigma: number;
   lambda: number;
+  /** Area perbaikan/OP. Hanya ada di Q2J; sejauh data, hanya melekat pada item Cont. */
+  op: number;
 }
 
 export type AbsenItemStatus = "pending" | "done" | "manual";
 
 export interface AbsenItem {
   itemId: string;
+  /** Kosong di Q2J (Japan) — sheet itu tak punya kolom Barcode. */
   barcode: string;
   name: string;
   cogs: number;
   readyPrice: number;
-  status: string; // status katalog dari sheet: "pre" | "ready" (menentukan CONV vs RES)
+  /**
+   * Status katalog dari sheet ("ready" | "pre" | "po" | …). JANGAN dipakai untuk
+   * memutuskan CONV vs RES — di Q2C ada item `ready` yang masuk CONV. Simpan saja
+   * sebagai info; klasifikasi pakai `action`.
+   */
+  status: string;
+  /** Kolom ACTION sheet: "Cont N" → RES, "Conv N" → CONV, "No Stock"/kosong → skip. */
+  action: string;
   qtyExpected: number;
   alloc: AbsenAlloc;
   sum: number;
@@ -103,6 +118,7 @@ function normalizeAlloc(raw: any): AbsenAlloc {
     beta: n(raw?.beta),
     sigma: n(raw?.sigma),
     lambda: n(raw?.lambda),
+    op: n(raw?.op),
   };
 }
 
@@ -110,6 +126,19 @@ function itemKey(it: { barcode?: string; itemId?: string }): string {
   const bc = (it.barcode || "").trim();
   if (bc) return `bc:${bc}`;
   return `id:${(it.itemId || "").trim()}`;
+}
+
+/**
+ * Cari item dalam batch lewat barcode atau itemId. Q2J tak punya kolom barcode,
+ * jadi item di sana dicari lewat itemId (di Machitan: ketik/cari nama).
+ * Barcode/itemId kosong TIDAK boleh cocok dengan key kosong (hindari salah item).
+ */
+function findItem(batch: AbsenBatch, key: string): AbsenItem | undefined {
+  const k = key.trim();
+  if (!k) return undefined;
+  return batch.items.find(
+    (it) => (it.barcode !== "" && it.barcode === k) || (it.itemId !== "" && it.itemId === k),
+  );
 }
 
 async function readBatchSafe(id: string): Promise<AbsenBatch | null> {
@@ -166,6 +195,7 @@ export interface IntakeItemInput {
   cogs?: number;
   readyPrice?: number;
   status?: string;
+  action?: string;
   qtyExpected?: number;
   alloc?: Partial<AbsenAlloc>;
   sum?: number;
@@ -201,6 +231,7 @@ export function upsertBatch(
         cogs: Number(raw.cogs ?? prev?.cogs ?? 0) || 0,
         readyPrice: Number(raw.readyPrice ?? prev?.readyPrice ?? 0) || 0,
         status: String(raw.status ?? prev?.status ?? "").trim().toLowerCase(),
+        action: String(raw.action ?? prev?.action ?? "").trim(),
         qtyExpected: Number(raw.qtyExpected ?? prev?.qtyExpected ?? 0) || 0,
         alloc: normalizeAlloc(raw.alloc ?? prev?.alloc),
         sum: Number(raw.sum ?? prev?.sum ?? 0) || 0,
@@ -265,10 +296,7 @@ export function submitItem(
   return withLock(async () => {
     const batch = await readBatchSafe(id);
     if (!batch) return null;
-    const k = key.trim();
-    const item = batch.items.find(
-      (it) => it.barcode === k || it.itemId === k,
-    );
+    const item = findItem(batch, key);
     if (!item) return null;
     item.qtyDatang = Number(input.qtyDatang || 0) || 0;
     item.selisih = item.qtyDatang - item.qtyExpected;
@@ -315,6 +343,8 @@ export function addManualItem(
       cogs: Number(input.cogs ?? 0) || 0,
       readyPrice: Number(input.readyPrice ?? 0) || 0,
       status: String(input.status ?? "").trim().toLowerCase(),
+      // Item manual tak punya ACTION dari sheet → tak masuk RES/CONV, hanya file MANUAL.
+      action: "",
       qtyExpected: 0,
       alloc: normalizeAlloc(input.alloc),
       sum: qty,
@@ -350,10 +380,7 @@ export function lockItem(
   return withLock(async () => {
     const batch = await readBatchSafe(id);
     if (!batch) return null;
-    const k = key.trim();
-    const item = batch.items.find(
-      (it) => it.barcode === k || it.itemId === k,
-    );
+    const item = findItem(batch, key);
     if (!item) return null;
     const now = new Date(nowIso).getTime();
 

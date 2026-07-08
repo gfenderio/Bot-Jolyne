@@ -162,7 +162,13 @@ export async function handleAbsenRequest(
       return sendJson(response, 200, {
         ok: true,
         message: "Export terkirim ke Discord.",
-        data: { resRows: result.resRows, convRows: result.convRows, manualRows: result.manualRows },
+        data: {
+          resRows: result.resRows,
+          convRows: result.convRows,
+          manualRows: result.manualRows,
+          skipped: result.skipped,
+          convWithOp: result.convWithOp,
+        },
       });
     }
 
@@ -195,8 +201,21 @@ async function sendAbsenExportToDiscord(client: Client<true>, batch: AbsenBatch)
     files.push(new AttachmentBuilder(exp.manualBuffer, { name: `MANUAL ${safe}.xlsx` }));
   }
 
+  // Apa pun yang tidak masuk RES/CONV WAJIB dilaporkan — jangan sampai
+  // export terlihat "lengkap" padahal ada item yang diam-diam tidak ikut.
+  const skippedText = exp.skipped.length
+    ? `\n⏭️ **Tidak diekspor (ACTION bukan Cont/Conv):** ${exp.skipped.length} item — ` +
+      exp.skipped.slice(0, 5).map((s) => `\`${s.itemId}\` (${s.action || "kosong"})`).join(", ") +
+      (exp.skipped.length > 5 ? `, +${exp.skipped.length - 5} lagi` : "")
+    : "";
+  const opWarn = exp.convWithOp.length
+    ? `\n🚨 **ANOMALI:** ${exp.convWithOp.length} item CONV punya alokasi OP ` +
+      `(${exp.convWithOp.slice(0, 5).map((s) => `\`${s.itemId}\`=${s.op}`).join(", ")}) — ` +
+      `template CONV tak punya kolom OP, qty OP-nya TIDAK ikut. Tangani manual.`
+    : "";
+
   const embed = new EmbedBuilder()
-    .setColor(0x0277bd)
+    .setColor(exp.convWithOp.length > 0 ? 0xd32f2f : 0x0277bd)
     .setTitle(`Absen Arrival — ${batch.batchName}`)
     .setDescription(
       `📦 **RES (restock):** ${exp.resRows} baris\n` +
@@ -204,7 +223,9 @@ async function sendAbsenExportToDiscord(client: Client<true>, batch: AbsenBatch)
         (exp.manualRows > 0
           ? `⚠️ **Manual (tak ada di data):** ${exp.manualRows} item — cek file MANUAL, tangani manual.\n`
           : "") +
-        `\n*File RES & CONV siap copy-paste ke jurnal.*`,
+        skippedText +
+        opWarn +
+        `\n\n*File RES & CONV siap copy-paste ke jurnal.*`,
     )
     .setFooter({ text: `Batch: ${batch.batchName} • ${safe}` })
     .setTimestamp();
@@ -215,5 +236,7 @@ async function sendAbsenExportToDiscord(client: Client<true>, batch: AbsenBatch)
     resRows: exp.resRows,
     convRows: exp.convRows,
     manualRows: exp.manualRows,
+    skipped: exp.skipped.length,
+    convWithOp: exp.convWithOp.length,
   };
 }
