@@ -115,8 +115,18 @@ function filePath(id: string): string {
   return path.join(STORE_DIR, `${id}.json`);
 }
 
+/**
+ * Angka CACAH (qty/alokasi) dibulatkan. Sel sheet kadang menghasilkan float dari
+ * formula, dan float di field yang klien harap Int bikin parse JSON-nya gagal
+ * total. Nilai UANG (cogs/readyPrice) TIDAK dibulatkan — presisinya dipertahankan.
+ */
+function count(v: any): number {
+  const n = Number(v || 0);
+  return Number.isFinite(n) ? Math.round(n) : 0;
+}
+
 function normalizeAlloc(raw: any): AbsenAlloc {
-  const n = (v: any) => Number(v || 0) || 0;
+  const n = (v: any) => count(v);
   return {
     alpha: n(raw?.alpha),
     ss: n(raw?.ss),
@@ -242,11 +252,11 @@ export function upsertBatch(
         status: String(raw.status ?? prev?.status ?? "").trim().toLowerCase(),
         action: String(raw.action ?? prev?.action ?? "").trim(),
         rawAction: String(raw.rawAction ?? prev?.rawAction ?? "").trim(),
-        ledQty: Number(raw.ledQty ?? prev?.ledQty ?? 0) || 0,
-        stock: Number(raw.stock ?? prev?.stock ?? 0) || 0,
-        qtyExpected: Number(raw.qtyExpected ?? prev?.qtyExpected ?? 0) || 0,
+        ledQty: count(raw.ledQty ?? prev?.ledQty),
+        stock: count(raw.stock ?? prev?.stock),
+        qtyExpected: count(raw.qtyExpected ?? prev?.qtyExpected),
         alloc: normalizeAlloc(raw.alloc ?? prev?.alloc),
-        sum: Number(raw.sum ?? prev?.sum ?? 0) || 0,
+        sum: count(raw.sum ?? prev?.sum),
       };
       if (prev) {
         // pertahankan progres absen, refresh katalog
@@ -310,7 +320,7 @@ export function submitItem(
     if (!batch) return null;
     const item = findItem(batch, key);
     if (!item) return null;
-    item.qtyDatang = Number(input.qtyDatang || 0) || 0;
+    item.qtyDatang = count(input.qtyDatang);
     item.selisih = item.qtyDatang - item.qtyExpected;
     item.note = input.note ? String(input.note) : item.note;
     item.submittedBy = input.actor ? String(input.actor) : item.submittedBy;
@@ -347,7 +357,7 @@ export function addManualItem(
   return withLock(async () => {
     const batch = await readBatchSafe(id);
     if (!batch) return null;
-    const qty = Number(input.qtyDatang || 0) || 0;
+    const qty = count(input.qtyDatang);
     const item: AbsenItem = {
       itemId: String(input.itemId ?? "").trim(),
       barcode: String(input.barcode ?? "").trim(),
