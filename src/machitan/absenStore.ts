@@ -46,6 +46,12 @@ export interface AbsenItem {
   status: string;
   /** Kolom ACTION sheet: "Cont N" → RES, "Conv N" → CONV, "No Stock"/kosong → skip. */
   action: string;
+  /** ACTION mentah dari sheet (mis. "Led 7 | Conv 13") — `action` di atas hasil sintesis. */
+  rawAction: string;
+  /** Kolom "Led Qty": porsi yang masuk ledger/PO, BUKAN stok. Tak ikut RES/CONV. */
+  ledQty: number;
+  /** Kolom "Stock": porsi yang masuk stok (= total alokasi). */
+  stock: number;
   qtyExpected: number;
   alloc: AbsenAlloc;
   sum: number;
@@ -196,6 +202,9 @@ export interface IntakeItemInput {
   readyPrice?: number;
   status?: string;
   action?: string;
+  rawAction?: string;
+  ledQty?: number;
+  stock?: number;
   qtyExpected?: number;
   alloc?: Partial<AbsenAlloc>;
   sum?: number;
@@ -232,6 +241,9 @@ export function upsertBatch(
         readyPrice: Number(raw.readyPrice ?? prev?.readyPrice ?? 0) || 0,
         status: String(raw.status ?? prev?.status ?? "").trim().toLowerCase(),
         action: String(raw.action ?? prev?.action ?? "").trim(),
+        rawAction: String(raw.rawAction ?? prev?.rawAction ?? "").trim(),
+        ledQty: Number(raw.ledQty ?? prev?.ledQty ?? 0) || 0,
+        stock: Number(raw.stock ?? prev?.stock ?? 0) || 0,
         qtyExpected: Number(raw.qtyExpected ?? prev?.qtyExpected ?? 0) || 0,
         alloc: normalizeAlloc(raw.alloc ?? prev?.alloc),
         sum: Number(raw.sum ?? prev?.sum ?? 0) || 0,
@@ -345,6 +357,9 @@ export function addManualItem(
       status: String(input.status ?? "").trim().toLowerCase(),
       // Item manual tak punya ACTION dari sheet → tak masuk RES/CONV, hanya file MANUAL.
       action: "",
+      rawAction: "",
+      ledQty: 0,
+      stock: 0,
       qtyExpected: 0,
       alloc: normalizeAlloc(input.alloc),
       sum: qty,

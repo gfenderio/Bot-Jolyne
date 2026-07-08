@@ -53,9 +53,14 @@ export interface AbsenExportResult {
   resBuffer: Buffer;
   convBuffer: Buffer;
   manualBuffer: Buffer | null;
+  /** Item ber-`Led Qty` > 0. Porsi ledger/PO tak pernah masuk RES/CONV. */
+  ledgerBuffer: Buffer | null;
   resRows: number;
   convRows: number;
   manualRows: number;
+  ledgerRows: number;
+  /** Total pcs ledger di batch ini. */
+  ledgerQty: number;
   /** Item sudah diabsen tapi ACTION-nya bukan Cont/Conv (mis. "No Stock") — tidak diekspor. */
   skipped: { itemId: string; name: string; action: string }[];
   /** Anomali: item CONV yang punya alokasi OP. Template CONV tak punya kolom OP. */
@@ -164,13 +169,43 @@ export async function generateAbsenExport(batch: AbsenBatch): Promise<AbsenExpor
     manualBuffer = Buffer.from(await mWb.xlsx.writeBuffer());
   }
 
+  // ── LEDGER workbook ──────────────────────────────────────────────────────
+  // Porsi ledger/PO tak pernah masuk RES/CONV (kolom ACTION cuma meringkasnya
+  // sebagai teks "Led 7 | Conv 13"). Tanpa file ini angkanya hilang sama sekali:
+  // item ledger-only cuma terhitung sebagai "skipped", dan pada item campuran
+  // porsi ledger-nya tak tercatat di mana pun.
+  const ledgerItems = listedItems.filter((it) => it.ledQty > 0);
+  const ledgerQty = ledgerItems.reduce((sum, it) => sum + it.ledQty, 0);
+  let ledgerBuffer: Buffer | null = null;
+  if (ledgerItems.length > 0) {
+    const lWb = new ExcelJS.Workbook();
+    lWb.creator = "Bot Jolyne";
+    const lSheet = lWb.addWorksheet("Ledger");
+    lSheet.addRow(["item_id", "barcode", "name", "led_qty", "stock", "action", "notes"]);
+    for (const it of ledgerItems) {
+      lSheet.addRow([
+        numOrStr(it.itemId),
+        /^\d+$/.test((it.barcode || "").trim()) ? numOrStr(it.barcode) : "",
+        it.name,
+        it.ledQty,
+        it.stock,
+        it.rawAction || it.action,
+        notes,
+      ]);
+    }
+    ledgerBuffer = Buffer.from(await lWb.xlsx.writeBuffer());
+  }
+
   return {
     resBuffer,
     convBuffer,
     manualBuffer,
+    ledgerBuffer,
     resRows,
     convRows,
     manualRows: manualItems.length,
+    ledgerRows: ledgerItems.length,
+    ledgerQty,
     skipped,
     convWithOp,
   };

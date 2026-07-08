@@ -166,6 +166,8 @@ export async function handleAbsenRequest(
           resRows: result.resRows,
           convRows: result.convRows,
           manualRows: result.manualRows,
+          ledgerRows: result.ledgerRows,
+          ledgerQty: result.ledgerQty,
           skipped: result.skipped,
           convWithOp: result.convWithOp,
         },
@@ -200,6 +202,9 @@ async function sendAbsenExportToDiscord(client: Client<true>, batch: AbsenBatch)
   if (exp.manualBuffer) {
     files.push(new AttachmentBuilder(exp.manualBuffer, { name: `MANUAL ${safe}.xlsx` }));
   }
+  if (exp.ledgerBuffer) {
+    files.push(new AttachmentBuilder(exp.ledgerBuffer, { name: `LEDGER ${safe}.xlsx` }));
+  }
 
   // Apa pun yang tidak masuk RES/CONV WAJIB dilaporkan — jangan sampai
   // export terlihat "lengkap" padahal ada item yang diam-diam tidak ikut.
@@ -207,6 +212,9 @@ async function sendAbsenExportToDiscord(client: Client<true>, batch: AbsenBatch)
     ? `\n⏭️ **Tidak diekspor (ACTION bukan Cont/Conv):** ${exp.skipped.length} item — ` +
       exp.skipped.slice(0, 5).map((s) => `\`${s.itemId}\` (${s.action || "kosong"})`).join(", ") +
       (exp.skipped.length > 5 ? `, +${exp.skipped.length - 5} lagi` : "")
+    : "";
+  const ledgerText = exp.ledgerRows
+    ? `\n📒 **Ledger:** ${exp.ledgerRows} item (${exp.ledgerQty} pcs) — porsi ledger/PO, tak masuk RES/CONV. Lihat file LEDGER.`
     : "";
   const opWarn = exp.convWithOp.length
     ? `\n🚨 **ANOMALI:** ${exp.convWithOp.length} item CONV punya alokasi OP ` +
@@ -223,6 +231,7 @@ async function sendAbsenExportToDiscord(client: Client<true>, batch: AbsenBatch)
         (exp.manualRows > 0
           ? `⚠️ **Manual (tak ada di data):** ${exp.manualRows} item — cek file MANUAL, tangani manual.\n`
           : "") +
+        ledgerText +
         skippedText +
         opWarn +
         `\n\n*File RES & CONV siap copy-paste ke jurnal.*`,
@@ -236,6 +245,8 @@ async function sendAbsenExportToDiscord(client: Client<true>, batch: AbsenBatch)
     resRows: exp.resRows,
     convRows: exp.convRows,
     manualRows: exp.manualRows,
+    ledgerRows: exp.ledgerRows,
+    ledgerQty: exp.ledgerQty,
     skipped: exp.skipped.length,
     convWithOp: exp.convWithOp.length,
   };
