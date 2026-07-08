@@ -3,6 +3,7 @@ import type { Client } from "discord.js";
 import { env } from "../config/env.js";
 import { handleMachitanPickProof } from "./pickProofIntake.js";
 import { handleWsInboxIntake } from "./wsInboxIntake.js";
+import { handleAbsenRequest } from "./absenIntake.js";
 
 function sendJson(response: ServerResponse, statusCode: number, payload: unknown) {
   const body = JSON.stringify(payload);
@@ -46,6 +47,16 @@ export function startMachitanHttpServer(client: Client<true>) {
         console.error("Gagal memproses Machitan WS inbox", error);
         if (!response.headersSent) {
           sendJson(response, 500, { ok: false, error: "Internal server error handling WS Inbox request" });
+        }
+      });
+      return;
+    }
+
+    if (pathname.startsWith("/machitan/absen")) {
+      handleAbsenRequest(request, response, client).catch((error) => {
+        console.error("Gagal memproses Machitan Absen Arrival", error);
+        if (!response.headersSent) {
+          sendJson(response, 500, { ok: false, error: "Internal server error handling Absen Arrival request" });
         }
       });
       return;
