@@ -168,6 +168,7 @@ export async function handleAbsenRequest(
           manualRows: result.manualRows,
           ledgerRows: result.ledgerRows,
           ledgerQty: result.ledgerQty,
+          absenRows: result.absenRows,
           skipped: result.skipped,
           convWithOp: result.convWithOp,
         },
@@ -205,6 +206,9 @@ async function sendAbsenExportToDiscord(client: Client<true>, batch: AbsenBatch)
   if (exp.ledgerBuffer) {
     files.push(new AttachmentBuilder(exp.ledgerBuffer, { name: `LEDGER ${safe}.xlsx` }));
   }
+  if (exp.absenBuffer) {
+    files.push(new AttachmentBuilder(exp.absenBuffer, { name: `ABSEN ${safe}.xlsx` }));
+  }
 
   // Apa pun yang tidak masuk RES/CONV WAJIB dilaporkan — jangan sampai
   // export terlihat "lengkap" padahal ada item yang diam-diam tidak ikut.
@@ -215,6 +219,10 @@ async function sendAbsenExportToDiscord(client: Client<true>, batch: AbsenBatch)
     : "";
   const ledgerText = exp.ledgerRows
     ? `\n📒 **Ledger:** ${exp.ledgerRows} item (${exp.ledgerQty} pcs) — porsi ledger/PO, tak masuk RES/CONV. Lihat file LEDGER.`
+    : "";
+  const absenText = exp.absenRows
+    ? `
+📝 **Absen:** ${exp.absenRows} item diabsen — seharusnya vs datang, selisih & keterangan ada di file ABSEN.`
     : "";
   const opWarn = exp.convWithOp.length
     ? `\n🚨 **ANOMALI:** ${exp.convWithOp.length} item CONV punya alokasi OP ` +
@@ -232,6 +240,7 @@ async function sendAbsenExportToDiscord(client: Client<true>, batch: AbsenBatch)
           ? `⚠️ **Manual (tak ada di data):** ${exp.manualRows} item — cek file MANUAL, tangani manual.\n`
           : "") +
         ledgerText +
+        absenText +
         skippedText +
         opWarn +
         `\n\n*File RES & CONV siap copy-paste ke jurnal.*`,
@@ -247,6 +256,7 @@ async function sendAbsenExportToDiscord(client: Client<true>, batch: AbsenBatch)
     manualRows: exp.manualRows,
     ledgerRows: exp.ledgerRows,
     ledgerQty: exp.ledgerQty,
+    absenRows: exp.absenRows,
     skipped: exp.skipped.length,
     convWithOp: exp.convWithOp.length,
   };

@@ -55,6 +55,14 @@ export interface AbsenExportResult {
   manualBuffer: Buffer | null;
   /** Item ber-`Led Qty` > 0. Porsi ledger/PO tak pernah masuk RES/CONV. */
   ledgerBuffer: Buffer | null;
+  /**
+   * Hasil absen per item: seharusnya vs datang, selisih, dan KETERANGAN staff.
+   * Kolom `notes` di RES/CONV wajib tetap berisi label batch ("<tab> - <tgl>")
+   * supaya output tetap identik dengan jurnal manual — jadi keterangan per-item
+   * tak bisa menumpang di sana dan butuh file sendiri.
+   */
+  absenBuffer: Buffer | null;
+  absenRows: number;
   resRows: number;
   convRows: number;
   manualRows: number;
@@ -196,11 +204,43 @@ export async function generateAbsenExport(batch: AbsenBatch): Promise<AbsenExpor
     ledgerBuffer = Buffer.from(await lWb.xlsx.writeBuffer());
   }
 
+  // ── ABSEN workbook (hasil absen per item + keterangan) ───────────────────
+  let absenBuffer: Buffer | null = null;
+  if (worked.length > 0) {
+    const aWb = new ExcelJS.Workbook();
+    aWb.creator = "Bot Jolyne";
+    const aSheet = aWb.addWorksheet("Absen");
+    aSheet.addRow([
+      "item_id", "barcode", "name", "action",
+      "qty_seharusnya", "qty_datang", "selisih",
+      "keterangan", "oleh", "waktu", "notes",
+    ]);
+    for (const it of worked) {
+      const datang = it.qtyDatang ?? 0;
+      aSheet.addRow([
+        it.itemId ? numOrStr(it.itemId) : "",
+        /^\d+$/.test((it.barcode || "").trim()) ? numOrStr(it.barcode) : "",
+        it.name,
+        it.absenStatus === "manual" ? "MANUAL" : (it.rawAction || it.action),
+        it.qtyExpected,
+        datang,
+        it.selisih ?? datang - it.qtyExpected,
+        it.note ?? "",
+        it.submittedBy ?? "",
+        it.submittedAt ?? "",
+        notes,
+      ]);
+    }
+    absenBuffer = Buffer.from(await aWb.xlsx.writeBuffer());
+  }
+
   return {
     resBuffer,
     convBuffer,
     manualBuffer,
     ledgerBuffer,
+    absenBuffer,
+    absenRows: worked.length,
     resRows,
     convRows,
     manualRows: manualItems.length,
