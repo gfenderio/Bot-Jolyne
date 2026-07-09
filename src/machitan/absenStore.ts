@@ -52,6 +52,8 @@ export interface AbsenItem {
   ledQty: number;
   /** Kolom "Stock": porsi yang masuk stok (= total alokasi). */
   stock: number;
+  /** Image Link dari M69 (kyoucdn.id, publik). Kosong kalau tak ada di master. */
+  imageUrl: string;
   qtyExpected: number;
   alloc: AbsenAlloc;
   sum: number;
@@ -215,6 +217,7 @@ export interface IntakeItemInput {
   rawAction?: string;
   ledQty?: number;
   stock?: number;
+  imageUrl?: string;
   qtyExpected?: number;
   alloc?: Partial<AbsenAlloc>;
   sum?: number;
@@ -254,6 +257,7 @@ export function upsertBatch(
         rawAction: String(raw.rawAction ?? prev?.rawAction ?? "").trim(),
         ledQty: count(raw.ledQty ?? prev?.ledQty),
         stock: count(raw.stock ?? prev?.stock),
+        imageUrl: String(raw.imageUrl ?? prev?.imageUrl ?? "").trim(),
         qtyExpected: count(raw.qtyExpected ?? prev?.qtyExpected),
         alloc: normalizeAlloc(raw.alloc ?? prev?.alloc),
         sum: count(raw.sum ?? prev?.sum),
@@ -370,6 +374,7 @@ export function addManualItem(
       rawAction: "",
       ledQty: 0,
       stock: 0,
+      imageUrl: "",
       qtyExpected: 0,
       alloc: normalizeAlloc(input.alloc),
       sum: qty,
