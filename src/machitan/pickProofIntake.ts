@@ -4,6 +4,7 @@ import { env } from "../config/env.js";
 import { addMachitanProof } from "./proofStore.js";
 import { isAuthorizedMachitanIntake } from "./intakeAuth.js";
 import { fitImageToLimit } from "./imageFit.js";
+import { fetchOrderNotes, joinOrderNotes } from "./orderNotes.js";
 
 const ECOM_PICK_PROOF_CHANNEL_ID = "1390221553333043200";
 const SHOPEE_MENTION = "<@804685637252939788>";
@@ -112,14 +113,28 @@ export async function handleMachitanPickProof(
     const orderFieldStr = orderIdsStr.length > 1000
       ? `${orderCount} order:\n${orderIdsStr.slice(0, 980)}…`
       : orderIdsStr;
-    const userNotesRaw = body.userNotes ?? body.user_notes ?? body.notes;
+    // Catatan diambil ulang dari kyou.id supaya yang tampil selalu terbaru. PDA cuma
+    // dipakai sebagai cadangan: PDA lama (<= v1.4.0) tidak mengirim catatan sama sekali,
+    // dan order e-commerce tidak ada di tabel orders. body.notes SENGAJA tidak dipakai
+    // sebagai cadangan — itu catatan yang diketik packer, bukan catatan pembeli.
+    const notesLookup = await fetchOrderNotes(cleanOrderIdsArr);
+    const userNotesRaw = notesLookup.authoritative
+      ? joinOrderNotes(cleanOrderIdsArr, (n) => n.userNotes, notesLookup)
+      : body.userNotes ?? body.user_notes;
     const userNotes = userNotesRaw ? String(userNotesRaw) : "-";
-    const adminNotesRaw = body.adminNotes ?? body.admin_notes;
+    const adminNotesRaw = notesLookup.authoritative
+      ? joinOrderNotes(cleanOrderIdsArr, (n) => n.adminNotes, notesLookup)
+      : body.adminNotes ?? body.admin_notes;
     const adminNotes = adminNotesRaw ? String(adminNotesRaw) : "-";
+    // Catatan yang diketik packer/picker di PDA. Dulu bocor ke kolom "User Notes"
+    // lewat fallback, sekarang punya kolom sendiri supaya tidak hilang.
+    const pdaNotesRaw = body.notes;
+    const pdaNotes = pdaNotesRaw && String(pdaNotesRaw).trim() ? String(pdaNotesRaw).trim() : null;
 
     const combinedNotesForStore = [
       userNotes !== "-" ? `User: ${userNotes}` : "",
-      adminNotes !== "-" ? `Admin: ${adminNotes}` : ""
+      adminNotes !== "-" ? `Admin: ${adminNotes}` : "",
+      pdaNotes ? `PDA: ${pdaNotes}` : ""
     ].filter(Boolean).join(" | ") || "-";
     const proofType = String(body.proofType ?? body.type ?? "pick_proof").toLowerCase();
     const isPackProof = proofType.includes("pack");
@@ -245,6 +260,7 @@ export async function handleMachitanPickProof(
             ...(description ? [{ name: "Deskripsi", value: description.slice(0, 1024), inline: true }] : []),
             { name: "User Notes", value: userNotes.slice(0, 1024), inline: !isPackProof },
             ...(adminNotes !== "-" ? [{ name: "Admin Notes", value: adminNotes.slice(0, 1024), inline: !isPackProof }] : []),
+            ...(pdaNotes ? [{ name: `Catatan ${actorLabel}`, value: pdaNotes.slice(0, 1024), inline: false }] : []),
             ...(isPackProof ? [{ name: "Status", value: "Diproses ke RESI Fulfillment", inline: true }] : []),
             { name: "Items", value: `Item: #${itemId} | Qty: ${qty} | Source: ${source}`, inline: false }
           )
@@ -328,6 +344,7 @@ export async function handleMachitanPickProof(
         ...(orderDescriptions.length ? [{ name: "Deskripsi", value: orderDescriptions.join(", ").slice(0, 1024), inline: true }] : []),
         { name: "User Notes", value: userNotes.slice(0, 1024), inline: !isPackProof },
         ...(adminNotes !== "-" ? [{ name: "Admin Notes", value: adminNotes.slice(0, 1024), inline: !isPackProof }] : []),
+        ...(pdaNotes ? [{ name: `Catatan ${actorLabel}`, value: pdaNotes.slice(0, 1024), inline: false }] : []),
         ...(isPackProof ? [{ name: "Status", value: "Diproses ke RESI Fulfillment", inline: true }] : []),
         { name: "Items", value: itemDetails, inline: false }
       )
