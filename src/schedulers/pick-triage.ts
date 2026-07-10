@@ -57,29 +57,12 @@ function metabaseConfig(): MetabaseConfig | null {
   };
 }
 
-// Format datetime SQL yang diterima untuk cutoff absolut: "YYYY-MM-DD HH:MM:SS"
-// (atau tanpa detik). Divalidasi supaya tidak jadi celah injection dari env.
-const SINCE_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/;
-
-function normalizeSince(raw: string | undefined): string | null {
-  const value = (raw ?? "").trim();
-  if (!value) return null;
-  if (!SINCE_RE.test(value)) {
-    console.warn(`[pick-triage] PICK_TRIAGE_SINCE format tidak valid ("${value}"), diabaikan. Pakai "YYYY-MM-DD HH:MM:SS".`);
-    return null;
-  }
-  return value;
-}
-
-function buildQuery(minHours: number, maxHours: number, since: string | null): string {
-  // Dua mode:
-  // - `since` diisi (mode CONTOH): ambil semua barang yang updated_at-nya sudah
-  //   <= waktu itu (nyangkut sejak jam segitu ke belakang), tanpa batas atas.
-  // - normal (harian): band [minHours, maxHours] jam — hanya barang yang BARU
-  //   lewat 24 jam ("24 jam terakhir"), supaya batch harian tidak menumpuk.
-  const window = since
-    ? `AND o.updated_at <= '${since}'`
-    : `AND TIMESTAMPDIFF(HOUR, o.updated_at, NOW()) BETWEEN ${minHours} AND ${maxHours}`;
+function buildQuery(minHours: number, maxHours: number): string {
+  // HANYA band [minHours, maxHours] jam — barang yang BARU lewat 24 jam.
+  // Yang nyangkut lebih lama dari maxHours SENGAJA tidak dikirim: itu ranah
+  // digest fulfillment-stale (3-30 hari), bukan triase harian ini. Jangan
+  // tambahkan mode cutoff absolut lagi — pernah bikin barang 1378 jam ikut
+  // terkirim dan membanjiri channel.
 
   // Tanpa LIMIT — fetchNativeQueryWithPagination yang menambah LIMIT/OFFSET.
   return `
@@ -101,7 +84,7 @@ function buildQuery(minHours: number, maxHours: number, since: string | null): s
         WHERE al.order_id = o.order_id
           AND al.action IN ('print_order_address', 'print_order_address_manual')
       )
-      ${window}
+      AND TIMESTAMPDIFF(HOUR, o.updated_at, NOW()) BETWEEN ${minHours} AND ${maxHours}
     ORDER BY hours_stuck DESC
   `.trim();
 }
@@ -110,17 +93,13 @@ function truncate(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }
 
-export async function fetchStalePickItems(
-  minHours: number,
-  maxHours: number,
-  since: string | null = null
-): Promise<StalePickItem[]> {
+export async function fetchStalePickItems(minHours: number, maxHours: number): Promise<StalePickItem[]> {
   const config = metabaseConfig();
   if (!config) {
     throw new Error("Metabase belum dikonfigurasi (METABASE_URL/EMAIL/PASSWORD).");
   }
 
-  const { columns, rows } = await fetchNativeQueryWithPagination(config, buildQuery(minHours, maxHours, since));
+  const { columns, rows } = await fetchNativeQueryWithPagination(config, buildQuery(minHours, maxHours));
   const idx = (name: string) => columns.indexOf(name);
   const iItem = idx("item_id");
   const iOrder = idx("order_id");
@@ -190,14 +169,10 @@ export async function sendPickTriageDigest(client: Client): Promise<void> {
 
   const minHours = env.PICK_TRIAGE_MIN_HOURS;
   const maxHours = env.PICK_TRIAGE_MAX_HOURS;
-  const since = normalizeSince(env.PICK_TRIAGE_SINCE);
-  if (since) {
-    console.log(`[pick-triage] pakai cutoff absolut updated_at <= '${since}' (mode contoh).`);
-  }
 
   let items: StalePickItem[];
   try {
-    items = await fetchStalePickItems(minHours, maxHours, since);
+    items = await fetchStalePickItems(minHours, maxHours);
   } catch (error) {
     console.error("[pick-triage] gagal ambil data dari Metabase:", error);
     return;
@@ -216,7 +191,7 @@ export async function sendPickTriageDigest(client: Client): Promise<void> {
   // Bersihkan dulu pesan run sebelumnya (kirim ulang bersih tiap run).
   await deletePreviousMessages(client);
 
-  const windowLabel = since ? `sejak ${since}` : `${minHours}-${maxHours} jam terakhir`;
+  const windowLabel = `${minHours}-${maxHours} jam terakhir`;
   const sentIds: string[] = [];
 
   if (pending.length === 0) {

@@ -169,14 +169,11 @@ const envSchema = z.object({
   // Kirim sekali langsung saat bot start (selain jadwal harian 09:00 WIB).
   PICK_TRIAGE_RUN_ON_START: optionalBoolean,
   PICK_TRIAGE_CHANNEL_ID: optionalString.default("1524977369641652227"),
-  // Batas bawah/atas usia nyangkut (jam) untuk run harian normal. Band 24-48
-  // jam = hanya barang yang BARU lewat 24 jam ("24 jam terakhir"), supaya batch
-  // harian tidak menumpuk.
+  // Batas bawah/atas usia nyangkut (jam). Band 24-48 jam = HANYA barang yang
+  // baru lewat 24 jam ("24 jam terakhir"). Yang nyangkut lebih lama sengaja
+  // tidak dikirim — itu ranah digest fulfillment-stale (3-30 hari).
   PICK_TRIAGE_MIN_HOURS: pollIntervalSeconds.default(24),
   PICK_TRIAGE_MAX_HOURS: pollIntervalSeconds.default(48),
-  // Cutoff absolut mode CONTOH (format "YYYY-MM-DD HH:MM:SS"). Kalau diisi,
-  // ambil SEMUA barang yang updated_at-nya <= waktu ini (abaikan MIN/MAX_HOURS).
-  PICK_TRIAGE_SINCE: optionalString,
   // Maksimal barang yang diposting sekali jalan (sisanya diringkas).
   PICK_TRIAGE_MAX_ITEMS: pollIntervalSeconds.default(25),
   PICK_TRIAGE_STORE_PATH: optionalString.default("data/pick-triage.json")
