@@ -8,11 +8,17 @@ import {
 } from "discord.js";
 import { env } from "../config/env.js";
 import { fetchNativeQueryWithPagination, type MetabaseConfig } from "../services/metabase.js";
-import { markPosted, isResolved, type PostedItem } from "../services/pickTriageStore.js";
+import {
+  markPosted,
+  isResolved,
+  getSentMessages,
+  setSentMessages,
+  type PostedItem
+} from "../services/pickTriageStore.js";
 import { buildTriageSelect } from "../handlers/pickTriage.js";
 
 /**
- * Triase interaktif "PICK nyangkut >= N jam" (default 24 jam).
+ * Triase interaktif "PICK nyangkut >= N jam" (default band 24-48 jam).
  *
  * Beda dengan fulfillment-stale.ts (digest read-only, level order, 3-30 hari):
  * ini LEVEL BARANG (order_items), khusus stage PICK, dan interaktif — tiap
@@ -23,12 +29,11 @@ import { buildTriageSelect } from "../handlers/pickTriage.js";
  * kyou.id & fulfillment-stale.ts: order sudah di-print (masuk PICK), belum
  * di-pack, dan barang (order_items) belum di-pick.
  *
- * Discord membatasi 5 action row / pesan, jadi satu dropdown = satu action row
- * → maksimal 5 barang per pesan. Digest = 1 embed pembuka + beberapa pesan
- * lanjutan berisi <=5 dropdown.
+ * Format: SATU pesan per barang (1 embed + 1 dropdown), biar rapi & jelas siapa
+ * jawab apa. Tiap run, pesan run sebelumnya dihapus dulu supaya channel tidak
+ * numpuk. Kalau tidak ada barang nyangkut → kirim satu pesan "tidak ada".
  */
 
-const SELECTS_PER_MESSAGE = 5;
 const EMBED_COLOR = 0xd9534f;
 
 type StalePickItem = {
@@ -134,31 +139,46 @@ export async function fetchStalePickItems(
   }));
 }
 
+const CHOICE_HINT = "🕒 Masih antri pick · 💔 Barang rusak · 🔍 Belum ketemu";
+
 function buildLeadEmbed(shownCount: number, overflow: number, windowLabel: string): EmbedBuilder {
   const jakartaNow = new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });
-  const embed = new EmbedBuilder()
-    .setTitle(`🔴 PICK nyangkut ${windowLabel} — ${shownCount} barang belum dipick`)
+  return new EmbedBuilder()
+    .setTitle(`🔴 ${shownCount} barang nyangkut di PICK (${windowLabel})`)
     .setDescription(
-      "Barang-barang ini sudah lewat batas tapi belum di-pick. Tolong pilih statusnya di dropdown tiap barang, lalu isi deskripsi:\n" +
+      "Belum di-pick padahal sudah lewat batas. Tiap barang di bawah ini ada dropdown-nya — pilih status lalu isi deskripsi:\n" +
         `${CHOICE_HINT}` +
         (overflow > 0 ? `\n\n*Menampilkan ${shownCount} terlama; **${overflow} barang lagi** tidak ditampilkan.*` : "")
     )
     .setColor(EMBED_COLOR)
     .setFooter({ text: `Sumber: Metabase (DB ${env.METABASE_DATABASE_ID}) · ${jakartaNow} WIB` });
-  return embed;
 }
 
-const CHOICE_HINT = "🕒 Masih antri pick · 💔 Barang rusak · 🔍 Belum ketemu";
-
-function batchEmbed(items: StalePickItem[], batchNo: number, totalBatch: number): EmbedBuilder {
-  const lines = items.map((item, i) => {
-    const n = i + 1;
-    return `**${n}.** \`#${item.orderId}\` ${truncate(item.itemName, 60)} — **${item.hours} jam** · ${item.user} · ${item.shipping}`;
-  });
+/** Embed satu barang (dipasang bareng satu dropdown). */
+function itemEmbed(item: StalePickItem): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(EMBED_COLOR)
-    .setDescription(lines.join("\n"))
-    .setFooter({ text: `Bagian ${batchNo}/${totalBatch} — dropdown urut sesuai nomor di atas` });
+    .setTitle(`🔴 #${item.orderId} — nyangkut di PICK ${item.hours} jam`)
+    .addFields(
+      { name: "Barang", value: truncate(item.itemName, 240), inline: false },
+      { name: "Customer", value: item.user, inline: true },
+      { name: "Kurir", value: item.shipping, inline: true }
+    )
+    .setFooter({ text: "Pilih status di dropdown bawah, lalu isi deskripsi" });
+}
+
+/** Hapus pesan-pesan run sebelumnya supaya channel tidak numpuk. */
+async function deletePreviousMessages(client: Client): Promise<void> {
+  const prev = getSentMessages();
+  if (!prev || prev.messageIds.length === 0) return;
+
+  const channel = await client.channels.fetch(prev.channelId).catch(() => null);
+  if (!channel || !channel.isTextBased() || !("messages" in channel)) return;
+
+  for (const id of prev.messageIds) {
+    await (channel as TextChannel).messages.delete(id).catch(() => {});
+  }
+  console.log(`[pick-triage] hapus ${prev.messageIds.length} pesan run sebelumnya.`);
 }
 
 export async function sendPickTriageDigest(client: Client): Promise<void> {
@@ -193,54 +213,54 @@ export async function sendPickTriageDigest(client: Client): Promise<void> {
   }
   const textChannel = channel as TextChannel;
 
+  // Bersihkan dulu pesan run sebelumnya (kirim ulang bersih tiap run).
+  await deletePreviousMessages(client);
+
+  const windowLabel = since ? `sejak ${since}` : `${minHours}-${maxHours} jam terakhir`;
+  const sentIds: string[] = [];
+
   if (pending.length === 0) {
-    await textChannel.send({
+    const msg = await textChannel.send({
       embeds: [
         new EmbedBuilder()
-          .setTitle(`✅ Tidak ada barang PICK nyangkut ≥ ${minHours} jam`)
+          .setTitle(`✅ Tidak ada barang nyangkut di PICK (${windowLabel})`)
           .setDescription("Semua barang yang sudah di-print sudah dipick dalam batas waktu, atau sisanya sudah ditriase.")
           .setColor(0x2f8f5b)
       ]
     });
-    console.log("[pick-triage] tidak ada barang nyangkut — digest kosong terkirim.");
+    setSentMessages(channelId, [msg.id]);
+    console.log("[pick-triage] tidak ada barang nyangkut — pesan kosong terkirim.");
     return;
   }
 
   const shown = pending.slice(0, env.PICK_TRIAGE_MAX_ITEMS);
   const overflow = pending.length - shown.length;
 
-  const windowLabel = since ? `sejak ${since}` : `≥ ${minHours} jam`;
-  await textChannel.send({ embeds: [buildLeadEmbed(shown.length, overflow, windowLabel)] });
+  const lead = await textChannel.send({ embeds: [buildLeadEmbed(shown.length, overflow, windowLabel)] });
+  sentIds.push(lead.id);
 
-  const totalBatch = Math.ceil(shown.length / SELECTS_PER_MESSAGE);
-  for (let b = 0; b < totalBatch; b++) {
-    const batch = shown.slice(b * SELECTS_PER_MESSAGE, (b + 1) * SELECTS_PER_MESSAGE);
-    const rows = batch.map((item) => {
-      const posted: PostedItem = {
-        itemId: item.itemId,
-        orderId: item.orderId,
-        itemName: item.itemName,
-        user: item.user,
-        shipping: item.shipping,
-        hours: item.hours,
-        channelId,
-        messageId: "" // diisi setelah pesan terkirim
-      };
-      return { posted, row: new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(buildTriageSelect(posted)) };
-    });
-
+  // Satu pesan per barang: 1 embed + 1 dropdown.
+  for (const item of shown) {
+    const posted: PostedItem = {
+      itemId: item.itemId,
+      orderId: item.orderId,
+      itemName: item.itemName,
+      user: item.user,
+      shipping: item.shipping,
+      hours: item.hours,
+      channelId,
+      messageId: "" // diisi setelah pesan terkirim
+    };
     const message = await textChannel.send({
-      embeds: [batchEmbed(batch, b + 1, totalBatch)],
-      components: rows.map((r) => r.row)
+      embeds: [itemEmbed(item)],
+      components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(buildTriageSelect(posted))]
     });
-
-    // Sekarang messageId diketahui — simpan metadata tiap barang di batch ini.
-    for (const { posted } of rows) {
-      markPosted({ ...posted, messageId: message.id });
-    }
+    markPosted({ ...posted, messageId: message.id });
+    sentIds.push(message.id);
   }
 
-  console.log(`[pick-triage] digest terkirim — ${shown.length} barang (${totalBatch} pesan dropdown), ${overflow} overflow.`);
+  setSentMessages(channelId, sentIds);
+  console.log(`[pick-triage] terkirim — ${shown.length} barang (1 pesan/barang), ${overflow} overflow.`);
 }
 
 export function startPickTriageScheduler(client: Client): void {
