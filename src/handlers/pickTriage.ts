@@ -1,5 +1,6 @@
 import {
   ActionRowBuilder,
+  AttachmentBuilder,
   EmbedBuilder,
   ModalBuilder,
   StringSelectMenuBuilder,
@@ -9,6 +10,7 @@ import {
   type StringSelectMenuInteraction,
   type ModalSubmitInteraction
 } from "discord.js";
+import { env } from "../config/env.js";
 import {
   getPosted,
   getResolved,
@@ -156,6 +158,95 @@ function recoverItemFromMessage(
   };
 }
 
+const PHOTO_MAX_BYTES = 8 * 1024 * 1024; // batas upload Discord tanpa boost
+
+/**
+ * Untuk "Barang rusak": minta pelapor mengunggah foto di channel, lalu tempel
+ * ke embed hasil.
+ *
+ * Modal Discord tidak bisa menerima file, jadi fotonya harus lewat pesan biasa
+ * — butuh intent MessageContent (privileged). Kalau intent itu mati, collector
+ * tidak akan pernah menerima apa pun; makanya seluruh alur ini dijaga flag
+ * PICK_TRIAGE_PHOTO_ENABLED yang juga mengatur intent di index.ts.
+ *
+ * Fotonya di-UNGGAH ULANG sebagai lampiran embed, bukan disimpan URL-nya: URL
+ * CDN Discord bertanda tangan dan kedaluwarsa (~24 jam), jadi embed yang cuma
+ * menunjuk URL asli akan kehilangan gambar. Setelah tertempel, pesan unggahan
+ * mentahnya dihapus supaya channel bersih.
+ */
+async function collectDamagePhoto(
+  interaction: ModalSubmitInteraction,
+  embed: EmbedBuilder
+): Promise<void> {
+  if (!env.PICK_TRIAGE_PHOTO_ENABLED) return;
+
+  const channel = interaction.channel;
+  if (!channel || !channel.isTextBased() || !("createMessageCollector" in channel)) return;
+
+  const waitMs = env.PICK_TRIAGE_PHOTO_WAIT_SECONDS * 1000;
+  const prompt = await interaction.followUp({
+    content:
+      `📷 Upload **foto barang rusak** di channel ini dalam ${env.PICK_TRIAGE_PHOTO_WAIT_SECONDS} detik.\n` +
+      "Ketik `skip` kalau tidak ada foto.",
+    flags: ["Ephemeral"]
+  }).catch(() => null);
+
+  const collector = channel.createMessageCollector({
+    filter: (m) =>
+      m.author.id === interaction.user.id &&
+      (m.attachments.size > 0 || m.content.trim().toLowerCase() === "skip"),
+    max: 1,
+    time: waitMs
+  });
+
+  collector.on("collect", async (message) => {
+    const cleanup = async () => {
+      await message.delete().catch(() => {});
+      if (prompt) await interaction.deleteReply(prompt.id).catch(() => {});
+    };
+
+    if (message.content.trim().toLowerCase() === "skip" && message.attachments.size === 0) {
+      await cleanup();
+      return;
+    }
+
+    const photo = message.attachments.find((a) => a.contentType?.startsWith("image/") ?? false);
+    if (!photo) {
+      await interaction.followUp({ content: "❌ Itu bukan file gambar. Foto tidak ditempel.", flags: ["Ephemeral"] }).catch(() => {});
+      await cleanup();
+      return;
+    }
+    if (photo.size > PHOTO_MAX_BYTES) {
+      await interaction.followUp({ content: "❌ Foto terlalu besar (maks 8 MB). Foto tidak ditempel.", flags: ["Ephemeral"] }).catch(() => {});
+      await cleanup();
+      return;
+    }
+
+    try {
+      const res = await fetch(photo.url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const buffer = Buffer.from(await res.arrayBuffer());
+
+      const name = `rusak-${Date.now()}.${photo.name.split(".").pop() ?? "png"}`;
+      const file = new AttachmentBuilder(buffer, { name });
+      embed.setImage(`attachment://${name}`);
+
+      await interaction.editReply({ embeds: [embed], files: [file] });
+      await cleanup();
+    } catch (err) {
+      console.error("[pick-triage] gagal menempel foto:", err);
+      await interaction.followUp({ content: "❌ Gagal menempel foto. Coba upload ulang di thread ini.", flags: ["Ephemeral"] }).catch(() => {});
+    }
+  });
+
+  collector.on("end", (collected) => {
+    // Waktu habis tanpa foto: buang prompt-nya, embed hasil tetap ada (tanpa foto).
+    if (collected.size === 0 && prompt) {
+      void interaction.deleteReply(prompt.id).catch(() => {});
+    }
+  });
+}
+
 /** Modal submit → simpan + kirim embed hasil. */
 export async function handlePickTriageModal(interaction: ModalSubmitInteraction) {
   // customId = picktriage:mdl:<itemId>:<choice>
@@ -219,6 +310,11 @@ export async function handlePickTriageModal(interaction: ModalSubmitInteraction)
     .setTimestamp();
 
   await interaction.reply({ embeds: [embed] });
+
+  // Barang rusak: minta foto, lalu tempel ke embed hasil.
+  if (choice === "rusak") {
+    void collectDamagePhoto(interaction, embed);
+  }
 
   if (item) {
     await disableAnsweredSelect(interaction, item);

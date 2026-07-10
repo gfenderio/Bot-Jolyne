@@ -177,7 +177,15 @@ const envSchema = z.object({
   PICK_TRIAGE_MAX_HOURS: pollIntervalSeconds.default(30),
   // Maksimal barang yang diposting sekali jalan (sisanya diringkas).
   PICK_TRIAGE_MAX_ITEMS: pollIntervalSeconds.default(25),
-  PICK_TRIAGE_STORE_PATH: optionalString.default("data/pick-triage.json")
+  PICK_TRIAGE_STORE_PATH: optionalString.default("data/pick-triage.json"),
+  // Minta foto saat opsi "Barang rusak" dipilih.
+  //
+  // BAHAYA: menyalakan ini menambah intent MessageContent (privileged) di
+  // index.ts. Kalau intent itu belum diizinkan di Discord Developer Portal,
+  // Discord MENOLAK LOGIN dan SELURUH BOT MATI — bukan cuma fitur foto.
+  // Nyalakan intent di portal DULU, baru set env ini true.
+  PICK_TRIAGE_PHOTO_ENABLED: optionalBoolean,
+  PICK_TRIAGE_PHOTO_WAIT_SECONDS: pollIntervalSeconds.default(120)
 });
 
 // Override dari kode agar mengabaikan setting environment server Coolify

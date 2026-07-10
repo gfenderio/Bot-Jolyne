@@ -16,9 +16,17 @@ import { startPickTriageScheduler } from "./schedulers/pick-triage.js";
 if (!env.DISCORD_TOKEN) {
   console.warn("DISCORD_TOKEN belum diisi. Discord bot client dilewati.");
 } else {
-  const client = new Client({
-    intents: [GatewayIntentBits.Guilds]
-  });
+  // MessageContent + GuildMessages hanya diminta kalau fitur foto "barang rusak"
+  // dinyalakan: keduanya perlu buat membaca lampiran yang di-upload pelapor.
+  // MessageContent itu privileged — kalau belum diizinkan di Developer Portal,
+  // Discord menolak login dan seluruh bot mati. Karena itu opt-in lewat env.
+  const intents = [GatewayIntentBits.Guilds];
+  if (env.PICK_TRIAGE_PHOTO_ENABLED) {
+    intents.push(GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent);
+    console.log("[pick-triage] fitur foto aktif — meminta intent GuildMessages + MessageContent.");
+  }
+
+  const client = new Client({ intents });
 
   client.once(Events.ClientReady, (readyClient) => {
     handleReady(readyClient);
