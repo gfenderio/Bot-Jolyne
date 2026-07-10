@@ -37,9 +37,6 @@ export interface ResolvedItem {
 interface TriageStore {
   posted: Record<string, PostedItem>;
   resolved: Record<string, ResolvedItem>;
-  // Pesan yang diposting run terakhir (lead + tiap barang + empty-state), supaya
-  // run berikutnya bisa hapus dulu sebelum kirim ulang — biar channel tidak numpuk.
-  sent?: { channelId: string; messageIds: string[] };
 }
 
 function storePath(): string {
@@ -62,8 +59,7 @@ function readStore(): TriageStore {
     const parsed = JSON.parse(fs.readFileSync(storePath(), "utf-8"));
     return {
       posted: parsed.posted ?? {},
-      resolved: parsed.resolved ?? {},
-      sent: parsed.sent
+      resolved: parsed.resolved ?? {}
     };
   } catch {
     return { posted: {}, resolved: {} };
@@ -87,15 +83,9 @@ export function getPosted(itemId: string): PostedItem | undefined {
   return readStore().posted[itemId];
 }
 
-/** ID pesan yang diposting run terakhir (buat dihapus sebelum kirim ulang). */
-export function getSentMessages(): { channelId: string; messageIds: string[] } | undefined {
-  return readStore().sent;
-}
-
-export function setSentMessages(channelId: string, messageIds: string[]) {
-  const store = readStore();
-  store.sent = { channelId, messageIds };
-  writeStore(store);
+/** Sudah pernah diposting? Dipakai poller supaya barang tidak dikirim dua kali. */
+export function isPosted(itemId: string): boolean {
+  return Boolean(readStore().posted[itemId]);
 }
 
 /** Simpan/replace metadata barang yang baru diposting. */

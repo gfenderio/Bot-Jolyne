@@ -1,4 +1,3 @@
-import cron from "node-cron";
 import {
   ActionRowBuilder,
   EmbedBuilder,
@@ -8,13 +7,7 @@ import {
 } from "discord.js";
 import { env } from "../config/env.js";
 import { fetchNativeQueryWithPagination, type MetabaseConfig } from "../services/metabase.js";
-import {
-  markPosted,
-  isResolved,
-  getSentMessages,
-  setSentMessages,
-  type PostedItem
-} from "../services/pickTriageStore.js";
+import { markPosted, isPosted, isResolved, type PostedItem } from "../services/pickTriageStore.js";
 import { buildTriageSelect } from "../handlers/pickTriage.js";
 
 /**
@@ -29,9 +22,17 @@ import { buildTriageSelect } from "../handlers/pickTriage.js";
  * kyou.id & fulfillment-stale.ts: order sudah di-print (masuk PICK), belum
  * di-pack, dan barang (order_items) belum di-pick.
  *
+ * Bukan cron harian: bot POLL tiap PICK_TRIAGE_POLL_MINUTES menit dan mengirim
+ * barang begitu dia melewati 24 jam. Dedupe lewat store (`posted`), jadi tiap
+ * barang muncul tepat sekali. Kalau tidak ada yang baru → diam, tidak ada pesan
+ * "tidak ada" (kalau tidak, channel kebanjiran tiap putaran).
+ *
  * Format: SATU pesan per barang (1 embed + 1 dropdown), biar rapi & jelas siapa
- * jawab apa. Tiap run, pesan run sebelumnya dihapus dulu supaya channel tidak
- * numpuk. Kalau tidak ada barang nyangkut → kirim satu pesan "tidak ada".
+ * jawab apa.
+ *
+ * Batas atas MAX_HOURS tetap dipakai sebagai pengaman: kalau store hilang (mis.
+ * redeploy tanpa volume di data/), tanpa batas atas bot akan memblast ULANG
+ * seluruh backlog (pernah ada barang nyangkut 1378 jam).
  */
 
 const EMBED_COLOR = 0xd9534f;
@@ -118,21 +119,6 @@ export async function fetchStalePickItems(minHours: number, maxHours: number): P
   }));
 }
 
-const CHOICE_HINT = "🕒 Masih antri pick · 💔 Barang rusak · 🔍 Belum ketemu";
-
-function buildLeadEmbed(shownCount: number, overflow: number, windowLabel: string): EmbedBuilder {
-  const jakartaNow = new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });
-  return new EmbedBuilder()
-    .setTitle(`🔴 ${shownCount} barang nyangkut di PICK (${windowLabel})`)
-    .setDescription(
-      "Belum di-pick padahal sudah lewat batas. Tiap barang di bawah ini ada dropdown-nya — pilih status lalu isi deskripsi:\n" +
-        `${CHOICE_HINT}` +
-        (overflow > 0 ? `\n\n*Menampilkan ${shownCount} terlama; **${overflow} barang lagi** tidak ditampilkan.*` : "")
-    )
-    .setColor(EMBED_COLOR)
-    .setFooter({ text: `Sumber: Metabase (DB ${env.METABASE_DATABASE_ID}) · ${jakartaNow} WIB` });
-}
-
 /** Embed satu barang (dipasang bareng satu dropdown). */
 function itemEmbed(item: StalePickItem): EmbedBuilder {
   return new EmbedBuilder()
@@ -146,25 +132,19 @@ function itemEmbed(item: StalePickItem): EmbedBuilder {
     .setFooter({ text: "Pilih status di dropdown bawah, lalu isi deskripsi" });
 }
 
-/** Hapus pesan-pesan run sebelumnya supaya channel tidak numpuk. */
-async function deletePreviousMessages(client: Client): Promise<void> {
-  const prev = getSentMessages();
-  if (!prev || prev.messageIds.length === 0) return;
-
-  const channel = await client.channels.fetch(prev.channelId).catch(() => null);
-  if (!channel || !channel.isTextBased() || !("messages" in channel)) return;
-
-  for (const id of prev.messageIds) {
-    await (channel as TextChannel).messages.delete(id).catch(() => {});
-  }
-  console.log(`[pick-triage] hapus ${prev.messageIds.length} pesan run sebelumnya.`);
-}
-
-export async function sendPickTriageDigest(client: Client): Promise<void> {
+/**
+ * Satu putaran cek. Kirim HANYA barang yang belum pernah diposting & belum
+ * dijawab — jadi tiap barang muncul sekali, tepat setelah dia lewat 24 jam.
+ * Kalau tidak ada yang baru: diam (tidak ada pesan "tidak ada"), supaya poller
+ * tidak menyampah tiap 15 menit.
+ *
+ * Return jumlah barang yang dikirim (dipakai tes/log).
+ */
+export async function runPickTriageCheck(client: Client): Promise<number> {
   const channelId = env.PICK_TRIAGE_CHANNEL_ID;
   if (!channelId) {
     console.warn("[pick-triage] PICK_TRIAGE_CHANNEL_ID kosong — skip.");
-    return;
+    return 0;
   }
 
   const minHours = env.PICK_TRIAGE_MIN_HOURS;
@@ -175,46 +155,27 @@ export async function sendPickTriageDigest(client: Client): Promise<void> {
     items = await fetchStalePickItems(minHours, maxHours);
   } catch (error) {
     console.error("[pick-triage] gagal ambil data dari Metabase:", error);
-    return;
+    return 0;
   }
 
-  // Buang yang sudah pernah dijawab + yang tanpa itemId valid.
-  const pending = items.filter((it) => it.itemId && !isResolved(it.itemId));
+  // Yang baru: itemId valid, belum pernah diposting, belum dijawab.
+  const fresh = items.filter((it) => it.itemId && !isPosted(it.itemId) && !isResolved(it.itemId));
+  if (fresh.length === 0) return 0;
 
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel || !channel.isTextBased() || !("send" in channel)) {
     console.error("[pick-triage] channel tidak ditemukan / bukan text:", channelId);
-    return;
+    return 0;
   }
   const textChannel = channel as TextChannel;
 
-  // Bersihkan dulu pesan run sebelumnya (kirim ulang bersih tiap run).
-  await deletePreviousMessages(client);
-
-  const windowLabel = `${minHours}-${maxHours} jam terakhir`;
-  const sentIds: string[] = [];
-
-  if (pending.length === 0) {
-    const msg = await textChannel.send({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle(`✅ Tidak ada barang nyangkut di PICK (${windowLabel})`)
-          .setDescription("Semua barang yang sudah di-print sudah dipick dalam batas waktu, atau sisanya sudah ditriase.")
-          .setColor(0x2f8f5b)
-      ]
-    });
-    setSentMessages(channelId, [msg.id]);
-    console.log("[pick-triage] tidak ada barang nyangkut — pesan kosong terkirim.");
-    return;
+  // Pengaman ledakan: kalau store hilang (mis. redeploy tanpa volume), band
+  // 24-30 jam sudah membatasi, tapi cap ini menjaga kalau tetap banyak.
+  const shown = fresh.slice(0, env.PICK_TRIAGE_MAX_ITEMS);
+  if (fresh.length > shown.length) {
+    console.warn(`[pick-triage] ${fresh.length - shown.length} barang tidak dikirim (cap MAX_ITEMS=${env.PICK_TRIAGE_MAX_ITEMS}).`);
   }
 
-  const shown = pending.slice(0, env.PICK_TRIAGE_MAX_ITEMS);
-  const overflow = pending.length - shown.length;
-
-  const lead = await textChannel.send({ embeds: [buildLeadEmbed(shown.length, overflow, windowLabel)] });
-  sentIds.push(lead.id);
-
-  // Satu pesan per barang: 1 embed + 1 dropdown.
   for (const item of shown) {
     const posted: PostedItem = {
       itemId: item.itemId,
@@ -231,35 +192,40 @@ export async function sendPickTriageDigest(client: Client): Promise<void> {
       components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(buildTriageSelect(posted))]
     });
     markPosted({ ...posted, messageId: message.id });
-    sentIds.push(message.id);
   }
 
-  setSentMessages(channelId, sentIds);
-  console.log(`[pick-triage] terkirim — ${shown.length} barang (1 pesan/barang), ${overflow} overflow.`);
+  console.log(`[pick-triage] ${shown.length} barang baru lewat ${minHours} jam — terkirim.`);
+  return shown.length;
 }
 
 export function startPickTriageScheduler(client: Client): void {
   if (!env.PICK_TRIAGE_ENABLED) {
-    console.log("[pick-triage] scheduler nonaktif (PICK_TRIAGE_ENABLED=false).");
+    console.log("[pick-triage] poller nonaktif (PICK_TRIAGE_ENABLED=false).");
     return;
   }
 
-  cron.schedule(
-    "0 9 * * *",
-    () => {
-      console.log("[pick-triage] menjalankan triase harian 09:00 WIB...");
-      sendPickTriageDigest(client).catch((err) =>
-        console.error("[pick-triage] gagal kirim digest:", err)
-      );
-    },
-    { timezone: "Asia/Jakarta" }
-  );
-  console.log("[pick-triage] scheduler aktif — harian 09:00 WIB.");
+  const intervalMs = env.PICK_TRIAGE_POLL_MINUTES * 60_000;
+  let running = false;
 
-  if (env.PICK_TRIAGE_RUN_ON_START) {
-    console.log("[pick-triage] RUN_ON_START aktif — kirim digest sekarang...");
-    sendPickTriageDigest(client).catch((err) =>
-      console.error("[pick-triage] gagal kirim digest (run-on-start):", err)
-    );
-  }
+  // Poll, bukan cron: begitu ada barang yang baru lewat 24 jam, langsung kirih
+  // saat itu juga — tidak perlu nunggu jam 09:00. Guard `running` supaya putaran
+  // yang lambat (Metabase lelet) tidak numpuk dengan putaran berikutnya.
+  const tick = async () => {
+    if (running) {
+      console.warn("[pick-triage] putaran sebelumnya belum selesai — lewati.");
+      return;
+    }
+    running = true;
+    try {
+      await runPickTriageCheck(client);
+    } catch (err) {
+      console.error("[pick-triage] gagal cek:", err);
+    } finally {
+      running = false;
+    }
+  };
+
+  setInterval(tick, intervalMs).unref?.();
+  void tick(); // cek sekali langsung saat start
+  console.log(`[pick-triage] poller aktif — cek tiap ${env.PICK_TRIAGE_POLL_MINUTES} menit, kirim begitu barang lewat ${env.PICK_TRIAGE_MIN_HOURS} jam.`);
 }

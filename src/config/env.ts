@@ -166,15 +166,13 @@ const envSchema = z.object({
   FULFILLMENT_STALE_MAX_DAYS: pollIntervalSeconds.default(30),
   // Triase interaktif "PICK nyangkut >= N jam" (item-level). MVP Discord-only.
   PICK_TRIAGE_ENABLED: optionalBoolean,
-  // Kirim sekali langsung saat bot start (selain jadwal harian 09:00 WIB).
-  PICK_TRIAGE_RUN_ON_START: optionalBoolean,
   PICK_TRIAGE_CHANNEL_ID: optionalString.default("1524977369641652227"),
-  // Batas bawah/atas usia nyangkut (jam). Band 24-30 jam: hanya barang yang
-  // baru saja lewat 24 jam. Yang nyangkut lebih lama sengaja TIDAK dikirim —
-  // itu ranah digest fulfillment-stale (3-30 hari).
-  // Catatan: job jalan sekali sehari (09:00), jadi barang yang saat itu sudah
-  // > 30 jam tidak akan pernah masuk triase. Kalau mau menutup celah itu,
-  // perbesar frekuensi cron-nya, bukan melebarkan band.
+  // Poller (bukan cron): tiap N menit cek, kirim barang begitu lewat MIN_HOURS.
+  PICK_TRIAGE_POLL_MINUTES: pollIntervalSeconds.default(15),
+  // Batas bawah usia nyangkut (jam) = ambang kirim. MAX_HOURS adalah PENGAMAN,
+  // bukan filter bisnis: kalau store hilang (redeploy tanpa volume di data/),
+  // tanpa batas atas bot akan memblast ulang seluruh backlog lama. Dengan poll
+  // tiap 15 menit, band 24-30 jam tidak akan membuat barang kelewat.
   PICK_TRIAGE_MIN_HOURS: pollIntervalSeconds.default(24),
   PICK_TRIAGE_MAX_HOURS: pollIntervalSeconds.default(30),
   // Maksimal barang yang diposting sekali jalan (sisanya diringkas).
