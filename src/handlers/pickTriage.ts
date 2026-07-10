@@ -11,7 +11,6 @@ import {
 } from "discord.js";
 import {
   getPosted,
-  getPostedByMessage,
   getResolved,
   isResolved,
   markResolved,
@@ -103,9 +102,9 @@ export async function handlePickTriageSelect(interaction: StringSelectMenuIntera
 }
 
 /**
- * Rebuild komponen pesan asal dari metadata store: tiap barang di pesan itu
- * dibuatkan dropdown lagi, yang sudah dijawab di-disable. Pakai store (bukan
- * introspeksi komponen live) supaya lepas dari union tipe komponen discord.js.
+ * Disable dropdown di pesan asal setelah barangnya dijawab. Satu pesan memuat
+ * tepat satu barang (satu dropdown), jadi cukup rebuild satu row dari `item` —
+ * tidak perlu baca store maupun introspeksi komponen live.
  */
 async function disableAnsweredSelect(
   interaction: ModalSubmitInteraction,
@@ -117,21 +116,44 @@ async function disableAnsweredSelect(
     const message = await channel.messages.fetch(item.messageId).catch(() => null);
     if (!message) return;
 
-    const siblings = getPostedByMessage(item.messageId);
-    if (siblings.length === 0) return;
-
-    const rows = siblings.map((sib) => {
-      const menu = buildTriageSelect(sib);
-      if (getResolved(sib.itemId)) {
-        menu.setDisabled(true).setPlaceholder("✅ Sudah ditriase");
-      }
-      return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu);
+    const menu = buildTriageSelect(item).setDisabled(true).setPlaceholder("✅ Sudah ditriase");
+    await message.edit({
+      components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)]
     });
-
-    await message.edit({ components: rows });
   } catch (err) {
     console.error("[pick-triage] gagal disable dropdown:", err);
   }
+}
+
+/**
+ * Cadangan kalau store tidak punya metadata barang: baca balik dari embed pesan
+ * yang memuat dropdown-nya. Judul embed berformat
+ * "... #<orderId> — nyangkut di PICK <n> jam", plus field Barang/Customer/Kurir.
+ */
+function recoverItemFromMessage(
+  interaction: ModalSubmitInteraction,
+  itemId: string
+): PostedItem | undefined {
+  const message = interaction.message;
+  const embed = message?.embeds?.[0];
+  if (!message || !embed) return undefined;
+
+  const title = embed.title ?? "";
+  const orderId = title.match(/#(\S+)/)?.[1] ?? "-";
+  const hours = Number(title.match(/(\d+)\s*jam/)?.[1] ?? 0);
+  const field = (name: string) =>
+    embed.fields?.find((f) => f.name.toLowerCase() === name)?.value?.trim() || "-";
+
+  return {
+    itemId,
+    orderId,
+    itemName: field("barang"),
+    user: field("customer"),
+    shipping: field("kurir"),
+    hours,
+    channelId: message.channelId,
+    messageId: message.id
+  };
 }
 
 /** Modal submit → simpan + kirim embed hasil. */
@@ -158,7 +180,10 @@ export async function handlePickTriageModal(interaction: ModalSubmitInteraction)
   }
 
   const note = (interaction.fields.getTextInputValue("note") || "").trim() || "-";
-  const item = getPosted(itemId);
+  // Store dulu; kalau kosong (proses yang memposting beda dgn yang menangani
+  // klik, mis. redeploy di antaranya + data/ ephemeral), pulihkan detail dari
+  // embed pesan asalnya supaya embed hasil tidak berisi "-" semua.
+  const item = getPosted(itemId) ?? recoverItemFromMessage(interaction, itemId);
 
   const saved = markResolved(itemId, {
     choice,

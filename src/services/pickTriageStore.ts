@@ -87,11 +87,6 @@ export function getPosted(itemId: string): PostedItem | undefined {
   return readStore().posted[itemId];
 }
 
-/** Semua barang yang diposting di satu pesan (urut sesuai urutan posting). */
-export function getPostedByMessage(messageId: string): PostedItem[] {
-  return Object.values(readStore().posted).filter((p) => p.messageId === messageId);
-}
-
 /** ID pesan yang diposting run terakhir (buat dihapus sebelum kirim ulang). */
 export function getSentMessages(): { channelId: string; messageIds: string[] } | undefined {
   return readStore().sent;
