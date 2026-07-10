@@ -13,9 +13,27 @@ import {
   handleOripaLiveRecapModal,
   ORIPA_LIVE_RECAP_MODAL_ID
 } from "../handlers/oripaLiveRecap.js";
+import {
+  handlePickTriageSelect,
+  handlePickTriageModal,
+  TRIAGE_SELECT_PREFIX,
+  TRIAGE_MODAL_PREFIX
+} from "../handlers/pickTriage.js";
 
 export async function handleInteractionCreate(interaction: Interaction) {
+  if (interaction.isStringSelectMenu()) {
+    if (interaction.customId.startsWith(TRIAGE_SELECT_PREFIX)) {
+      await handlePickTriageSelect(interaction);
+    }
+    return;
+  }
+
   if (interaction.isModalSubmit()) {
+    if (interaction.customId.startsWith(TRIAGE_MODAL_PREFIX)) {
+      await handlePickTriageModal(interaction);
+      return;
+    }
+
     if (interaction.customId === "baito_modal_in" || interaction.customId === "baito_modal_out") {
       await handleBaitoModal(interaction);
       return;

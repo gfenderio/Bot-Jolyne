@@ -159,11 +159,27 @@ const envSchema = z.object({
   // Berguna supaya hari pertama enable / setiap redeploy tidak ke-skip kalau
   // prosesnya baru hidup setelah lewat 09:00 WIB.
   FULFILLMENT_STALE_RUN_ON_START: optionalBoolean,
-  FULFILLMENT_STALE_CHANNEL_ID: optionalString.default("1501899831268868106"),
+  FULFILLMENT_STALE_CHANNEL_ID: optionalString.default("1524977369641652227"),
   FULFILLMENT_STALE_THRESHOLD_DAYS: pollIntervalSeconds.default(3),
   // Batas atas: order lebih lama = abandoned, tidak masuk digest (samakan
   // dgn App\Support\FulfillmentStale::MAX_DAYS di kyou.id).
-  FULFILLMENT_STALE_MAX_DAYS: pollIntervalSeconds.default(30)
+  FULFILLMENT_STALE_MAX_DAYS: pollIntervalSeconds.default(30),
+  // Triase interaktif "PICK nyangkut >= N jam" (item-level). MVP Discord-only.
+  PICK_TRIAGE_ENABLED: optionalBoolean,
+  // Kirim sekali langsung saat bot start (selain jadwal harian 09:00 WIB).
+  PICK_TRIAGE_RUN_ON_START: optionalBoolean,
+  PICK_TRIAGE_CHANNEL_ID: optionalString.default("1524977369641652227"),
+  // Batas bawah/atas usia nyangkut (jam) untuk run harian normal. Band 24-48
+  // jam = hanya barang yang BARU lewat 24 jam ("24 jam terakhir"), supaya batch
+  // harian tidak menumpuk.
+  PICK_TRIAGE_MIN_HOURS: pollIntervalSeconds.default(24),
+  PICK_TRIAGE_MAX_HOURS: pollIntervalSeconds.default(48),
+  // Cutoff absolut mode CONTOH (format "YYYY-MM-DD HH:MM:SS"). Kalau diisi,
+  // ambil SEMUA barang yang updated_at-nya <= waktu ini (abaikan MIN/MAX_HOURS).
+  PICK_TRIAGE_SINCE: optionalString,
+  // Maksimal barang yang diposting sekali jalan (sisanya diringkas).
+  PICK_TRIAGE_MAX_ITEMS: pollIntervalSeconds.default(25),
+  PICK_TRIAGE_STORE_PATH: optionalString.default("data/pick-triage.json")
 });
 
 // Override dari kode agar mengabaikan setting environment server Coolify

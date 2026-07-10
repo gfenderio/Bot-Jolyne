@@ -11,6 +11,7 @@ import { startMachitanHttpServer } from "./machitan/httpServer.js";
 import { startBaitoAttendanceScheduler } from "./schedulers/baito-attendance.js";
 import { startOripaLiveRecapScheduler } from "./schedulers/oripa-live-recap.js";
 import { startFulfillmentStaleScheduler } from "./schedulers/fulfillment-stale.js";
+import { startPickTriageScheduler } from "./schedulers/pick-triage.js";
 
 if (!env.DISCORD_TOKEN) {
   console.warn("DISCORD_TOKEN belum diisi. Discord bot client dilewati.");
@@ -28,6 +29,7 @@ if (!env.DISCORD_TOKEN) {
     startBaitoAttendanceScheduler(readyClient);
     startOripaLiveRecapScheduler(readyClient);
     startFulfillmentStaleScheduler(readyClient);
+    startPickTriageScheduler(readyClient);
   });
   client.on(Events.Error, (error) => {
     console.error("Discord client error", error);
