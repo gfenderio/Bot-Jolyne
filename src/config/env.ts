@@ -117,6 +117,9 @@ const envSchema = z.object({
   MACHITAN_ECOMMERCE_PICK_REQUEST_SEEN_STORE_PATH: optionalString.default("data/machitan-ecommerce-pick-requests-seen.json"),
   // Channel tujuan export Absen Arrival (RES/CONV xlsx). Default = channel machitan update.
   MACHITAN_ABSEN_CHANNEL_ID: optionalString.default("1501899831268868106"),
+  // Bukti foto paket pickup toko diterima. Default di kode (bukan env server) —
+  // pola sama seperti channel lain, supaya tak perlu utak-atik Coolify tiap deploy.
+  MACHITAN_PICKUP_PROOF_CHANNEL_ID: optionalString.default("1501899831268868106"),
   MACHITAN_KYOU_API_BASE_URL: optionalString.default("https://api.kyou.id/api"),
   MACHITAN_KYOU_API_TOKEN: optionalString,
   // Token yang diterima intake Machitan (pick-proof, shipping, ws-inbox).

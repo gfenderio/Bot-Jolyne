@@ -4,6 +4,7 @@ import { env } from "../config/env.js";
 import { handleMachitanPickProof } from "./pickProofIntake.js";
 import { handleWsInboxIntake } from "./wsInboxIntake.js";
 import { handleAbsenRequest } from "./absenIntake.js";
+import { handleMachitanPickupProof } from "./pickupProofIntake.js";
 
 function sendJson(response: ServerResponse, statusCode: number, payload: unknown) {
   const body = JSON.stringify(payload);
@@ -37,6 +38,16 @@ export function startMachitanHttpServer(client: Client<true>) {
         console.error("Gagal memproses Machitan pick-proof", error);
         if (!response.headersSent) {
           sendJson(response, 500, { ok: false, error: "Internal server error handling Machitan request" });
+        }
+      });
+      return;
+    }
+
+    if (pathname === "/machitan/pickup-proof") {
+      handleMachitanPickupProof(request, response, client).catch((error) => {
+        console.error("Gagal memproses Machitan pickup-proof", error);
+        if (!response.headersSent) {
+          sendJson(response, 500, { ok: false, error: "Internal server error handling pickup proof" });
         }
       });
       return;
