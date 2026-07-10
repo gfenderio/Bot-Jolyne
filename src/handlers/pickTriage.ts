@@ -25,9 +25,9 @@ export const TRIAGE_MODAL_PREFIX = "picktriage:mdl:"; // + itemId + ":" + choice
 const EMBED_COLOR_DONE = 0x2f8f5b;
 
 export const CHOICE_META: Record<TriageChoice, { emoji: string; label: string }> = {
-  antri: { emoji: "🕒", label: "Masih antri pick" },
-  rusak: { emoji: "💔", label: "Barang rusak" },
-  ketemu: { emoji: "🔍", label: "Belum ketemu" }
+  antri: { emoji: "⏳", label: "Masih antri pick" },
+  rusak: { emoji: "⚠️", label: "Barang rusak" },
+  ketemu: { emoji: "❓", label: "Belum ketemu" }
 };
 
 const CHOICE_ORDER: TriageChoice[] = ["antri", "rusak", "ketemu"];
@@ -78,7 +78,7 @@ export async function handlePickTriageSelect(interaction: StringSelectMenuIntera
   const existing = getResolved(itemId);
   if (existing) {
     await interaction.reply({
-      content: `Barang ini sudah ditriase oleh **${existing.byTag}** — ${choiceLabel(existing.choice)}.`,
+      content: `Barang ini sudah dilaporkan oleh **${existing.byTag}** — ${choiceLabel(existing.choice)}.`,
       flags: ["Ephemeral"]
     });
     return;
@@ -116,7 +116,7 @@ async function disableAnsweredSelect(
     const message = await channel.messages.fetch(item.messageId).catch(() => null);
     if (!message) return;
 
-    const menu = buildTriageSelect(item).setDisabled(true).setPlaceholder("✅ Sudah ditriase");
+    const menu = buildTriageSelect(item).setDisabled(true).setPlaceholder("✅ Sudah dilaporkan");
     await message.edit({
       components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)]
     });
@@ -173,7 +173,7 @@ export async function handlePickTriageModal(interaction: ModalSubmitInteraction)
   if (isResolved(itemId)) {
     const prev = getResolved(itemId);
     await interaction.reply({
-      content: `Barang ini sudah ditriase oleh **${prev?.byTag ?? "?"}**.`,
+      content: `Barang ini sudah dilaporkan oleh **${prev?.byTag ?? "?"}**.`,
       flags: ["Ephemeral"]
     });
     return;
@@ -195,7 +195,7 @@ export async function handlePickTriageModal(interaction: ModalSubmitInteraction)
 
   if (!saved) {
     await interaction.reply({
-      content: "Barang ini barusan sudah ditriase orang lain.",
+      content: "Barang ini barusan sudah dilaporkan orang lain.",
       flags: ["Ephemeral"]
     });
     return;
@@ -203,7 +203,7 @@ export async function handlePickTriageModal(interaction: ModalSubmitInteraction)
 
   const meta = CHOICE_META[choice];
   const embed = new EmbedBuilder()
-    .setTitle(`${meta.emoji} Triase PICK — ${meta.label}`)
+    .setTitle(`${meta.emoji} Laporan barang — ${meta.label}`)
     .setColor(EMBED_COLOR_DONE)
     .setAuthor({ name: interaction.user.tag, iconURL: interaction.user.displayAvatarURL() })
     .addFields(
@@ -215,7 +215,7 @@ export async function handlePickTriageModal(interaction: ModalSubmitInteraction)
       { name: "Status", value: choiceLabel(choice), inline: true },
       { name: "Deskripsi", value: truncate(note, 1000), inline: false }
     )
-    .setFooter({ text: `Ditriase oleh ${interaction.user.tag}` })
+    .setFooter({ text: `Dilaporkan oleh ${interaction.user.tag}` })
     .setTimestamp();
 
   await interaction.reply({ embeds: [embed] });
