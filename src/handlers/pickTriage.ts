@@ -201,12 +201,18 @@ const PHOTO_MAX_BYTES = 8 * 1024 * 1024; // batas upload Discord tanpa boost
 
 /**
  * Untuk "Barang rusak": minta pelapor mengunggah foto di channel, lalu tempel
- * ke embed hasil.
+ * ke embed hasil. Fotonya OPSIONAL — boleh `skip`, boleh dibiarkan sampai waktu
+ * habis; embed hasil tetap ada, cuma tanpa gambar.
  *
  * Modal Discord tidak bisa menerima file, jadi fotonya harus lewat pesan biasa
  * — butuh intent MessageContent (privileged). Kalau intent itu mati, collector
  * tidak akan pernah menerima apa pun; makanya seluruh alur ini dijaga flag
  * PICK_TRIAGE_PHOTO_ENABLED yang juga mengatur intent di index.ts.
+ *
+ * Prompt-nya PESAN BIASA (bukan ephemeral) yang me-mention pelapor: pesan
+ * ephemeral gampang kelewat/ketutup, dan user melaporkan promptnya "tidak ada"
+ * padahal fiturnya jalan. Pesan biasa dihapus lagi setelah selesai, jadi channel
+ * tetap bersih.
  *
  * Fotonya di-UNGGAH ULANG sebagai lampiran embed, bukan disimpan URL-nya: URL
  * CDN Discord bertanda tangan dan kedaluwarsa (~24 jam), jadi embed yang cuma
@@ -217,34 +223,56 @@ async function collectDamagePhoto(
   interaction: ModalSubmitInteraction,
   embed: EmbedBuilder
 ): Promise<void> {
-  if (!env.PICK_TRIAGE_PHOTO_ENABLED) return;
+  if (!env.PICK_TRIAGE_PHOTO_ENABLED) {
+    console.warn("[pick-triage] foto dilewati — PICK_TRIAGE_PHOTO_ENABLED=false.");
+    return;
+  }
 
   const channel = interaction.channel;
-  if (!channel || !channel.isTextBased() || !("createMessageCollector" in channel)) return;
+  if (!channel || !channel.isTextBased() || !("createMessageCollector" in channel)) {
+    console.warn("[pick-triage] foto dilewati — channel tidak bisa dipasangi collector.");
+    return;
+  }
 
-  const waitMs = env.PICK_TRIAGE_PHOTO_WAIT_SECONDS * 1000;
-  const prompt = await interaction.followUp({
-    content:
-      `📷 Upload **foto barang rusak** di channel ini dalam ${env.PICK_TRIAGE_PHOTO_WAIT_SECONDS} detik.\n` +
-      "Ketik `skip` kalau tidak ada foto.",
-    flags: ["Ephemeral"]
-  }).catch(() => null);
+  const seconds = env.PICK_TRIAGE_PHOTO_WAIT_SECONDS;
+  const prompt = await channel
+    .send({
+      content:
+        `📷 <@${interaction.user.id}> — upload **foto barang rusak** di channel ini dalam ${seconds} detik.\n` +
+        "Fotonya **opsional**: ketik `skip` atau diamkan saja kalau tidak ada."
+    })
+    .catch((err) => {
+      console.error("[pick-triage] gagal kirim ajakan upload foto:", err);
+      return null;
+    });
 
   const collector = channel.createMessageCollector({
     filter: (m) =>
       m.author.id === interaction.user.id &&
       (m.attachments.size > 0 || m.content.trim().toLowerCase() === "skip"),
     max: 1,
-    time: waitMs
+    time: seconds * 1000
   });
+  console.log(`[pick-triage] menunggu foto barang rusak dari ${interaction.user.tag} (${seconds}s).`);
+
+  const dropPrompt = async () => {
+    if (prompt) await prompt.delete().catch(() => {});
+  };
 
   collector.on("collect", async (message) => {
     const cleanup = async () => {
-      await message.delete().catch(() => {});
-      if (prompt) await interaction.deleteReply(prompt.id).catch(() => {});
+      // Menghapus pesan ORANG LAIN butuh izin Manage Messages — bot tidak
+      // punya itu di #pending-shipment (dicek 2026-07-11: bulk-delete ditolak
+      // 403). Jadi pesan unggahan mentahnya kemungkinan tetap tertinggal;
+      // fotonya sudah tersalin ke embed, jadi ini kosmetik saja.
+      await message.delete().catch(() => {
+        console.warn("[pick-triage] tidak bisa hapus pesan unggahan pelapor (butuh izin Manage Messages).");
+      });
+      await dropPrompt();
     };
 
-    if (message.content.trim().toLowerCase() === "skip" && message.attachments.size === 0) {
+    if (message.attachments.size === 0) {
+      console.log("[pick-triage] pelapor memilih skip — embed hasil tanpa foto.");
       await cleanup();
       return;
     }
@@ -272,16 +300,18 @@ async function collectDamagePhoto(
 
       await interaction.editReply({ embeds: [embed], files: [file] });
       await cleanup();
+      console.log("[pick-triage] foto barang rusak tertempel ke embed hasil.");
     } catch (err) {
       console.error("[pick-triage] gagal menempel foto:", err);
-      await interaction.followUp({ content: "❌ Gagal menempel foto. Coba upload ulang di thread ini.", flags: ["Ephemeral"] }).catch(() => {});
+      await interaction.followUp({ content: "❌ Gagal menempel foto. Coba upload ulang di channel ini.", flags: ["Ephemeral"] }).catch(() => {});
     }
   });
 
   collector.on("end", (collected) => {
-    // Waktu habis tanpa foto: buang prompt-nya, embed hasil tetap ada (tanpa foto).
-    if (collected.size === 0 && prompt) {
-      void interaction.deleteReply(prompt.id).catch(() => {});
+    // Waktu habis tanpa foto: buang ajakannya, embed hasil tetap ada (tanpa foto).
+    if (collected.size === 0) {
+      console.log("[pick-triage] waktu upload foto habis — tidak ada foto.");
+      void dropPrompt();
     }
   });
 }
