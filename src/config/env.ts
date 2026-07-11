@@ -170,6 +170,11 @@ const envSchema = z.object({
   // Triase interaktif "PICK nyangkut >= N jam" (item-level). MVP Discord-only.
   PICK_TRIAGE_ENABLED: optionalBoolean,
   PICK_TRIAGE_CHANNEL_ID: optionalString.default("1524977369641652227"),
+  // Channel HASIL (#☑️┃b2c-pending-shipment-confirmation): embed laporan dikirim
+  // ke sini, terpisah dari channel pertanyaan di atas. Tim B2C cukup melihat
+  // hasilnya, tidak perlu ikut melihat pertanyaan yang belum dijawab.
+  // Kosongkan → hasil dikirim balik ke channel pertanyaan (perilaku lama).
+  PICK_TRIAGE_RESULT_CHANNEL_ID: optionalString.default("1525411338191376464"),
   // Poller (bukan cron): tiap N menit cek, kirim barang begitu lewat MIN_HOURS.
   PICK_TRIAGE_POLL_MINUTES: pollIntervalSeconds.default(15),
   // Batas bawah usia nyangkut (jam) = ambang kirim. MAX_HOURS adalah PENGAMAN,
@@ -201,6 +206,7 @@ process.env.BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID = "1500736344182358066";
 // memindahkannya ke #pending-shipment.
 process.env.FULFILLMENT_STALE_CHANNEL_ID = "1524977369641652227";
 process.env.PICK_TRIAGE_CHANNEL_ID = "1524977369641652227";
+process.env.PICK_TRIAGE_RESULT_CHANNEL_ID = "1525411338191376464";
 process.env.PICK_TRIAGE_ENABLED = "true";
 process.env.PICK_TRIAGE_PHOTO_ENABLED = "true";
 // Env mati yang mungkin masih tersisa di server; dibersihkan biar tidak

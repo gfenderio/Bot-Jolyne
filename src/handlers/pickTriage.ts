@@ -379,23 +379,59 @@ export async function handlePickTriageModal(interaction: ModalSubmitInteraction)
     .setFooter({ text: `Dilaporkan oleh ${interaction.user.tag}` })
     .setTimestamp();
 
-  // Foto (kalau ada) ikut dikirim bareng embed hasil — bukan ditambal belakangan.
-  // Mengunduh + mengecilkan foto bisa makan waktu, jadi interaksinya di-defer
-  // dulu supaya tidak lewat batas 3 detik Discord.
-  const photo = choice === "rusak" ? await withDefer(interaction, () => damagePhotoAttachment(interaction)) : null;
+  // Defer duluan: mengunduh + mengecilkan foto, lalu mengirim ke channel lain,
+  // gampang lewat batas 3 detik Discord. Ephemeral — pelapor cukup dapat tanda
+  // terima, embed hasilnya sendiri tayang di channel hasil.
+  await interaction.deferReply({ flags: ["Ephemeral"] });
+
+  const photo = choice === "rusak" ? await damagePhotoAttachment(interaction) : null;
   if (photo) embed.setImage(`attachment://${photo.name}`);
 
-  const payload = { embeds: [embed], ...(photo ? { files: [photo] } : {}) };
-  if (interaction.deferred) await interaction.editReply(payload);
-  else await interaction.reply(payload);
+  const posted = await sendResult(interaction, {
+    embeds: [embed],
+    ...(photo ? { files: [photo] } : {})
+  });
+
+  await interaction.editReply({
+    content: posted
+      ? `✅ Laporan terkirim ke <#${posted.channelId}> — ${posted.url}`
+      : "⚠️ Laporan tersimpan, tapi embednya gagal dikirim ke channel hasil. Cek log server."
+  });
 
   if (order) {
     await removeAnsweredMessage(interaction, order);
   }
 }
 
-/** Defer dulu (pekerjaannya bisa > 3 detik), baru jalankan. */
-async function withDefer<T>(interaction: ModalSubmitInteraction, run: () => Promise<T>): Promise<T> {
-  await interaction.deferReply();
-  return run();
+/**
+ * Kirim embed hasil ke channel HASIL (#b2c-pending-shipment-confirmation), bukan
+ * ke channel pertanyaan: tim B2C cuma perlu melihat kesimpulannya, tidak perlu
+ * ikut melihat order yang belum dijawab.
+ *
+ * Kalau channel hasil tidak diset / tidak bisa dikirimi (izin dicabut, channel
+ * dihapus), hasilnya JATUH BALIK ke channel pertanyaan — laporan staf tidak
+ * boleh hilang cuma karena salah setelan.
+ */
+async function sendResult(
+  interaction: ModalSubmitInteraction,
+  payload: { embeds: EmbedBuilder[]; files?: AttachmentBuilder[] }
+): Promise<{ channelId: string; url: string } | null> {
+  const targets = [env.PICK_TRIAGE_RESULT_CHANNEL_ID, interaction.channelId].filter(
+    (id): id is string => Boolean(id)
+  );
+
+  for (const channelId of targets) {
+    const channel = await interaction.client.channels.fetch(channelId).catch(() => null);
+    if (!channel?.isTextBased() || !("send" in channel)) continue;
+
+    try {
+      const message = await channel.send(payload);
+      return { channelId, url: message.url };
+    } catch (err) {
+      console.error(`[pick-triage] gagal kirim hasil ke channel ${channelId}:`, err);
+    }
+  }
+
+  console.error("[pick-triage] hasil tidak terkirim ke channel mana pun.");
+  return null;
 }
