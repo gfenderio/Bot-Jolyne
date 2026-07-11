@@ -5,6 +5,7 @@ import { addMachitanProof } from "./proofStore.js";
 import { isAuthorizedMachitanIntake } from "./intakeAuth.js";
 import { fitImageToLimit } from "./imageFit.js";
 import { fetchOrderNotes, joinOrderNotes } from "./orderNotes.js";
+import { orderLink } from "../services/kyouLinks.js";
 
 const ECOM_PICK_PROOF_CHANNEL_ID = "1390221553333043200";
 const SHOPEE_MENTION = "<@804685637252939788>";
@@ -255,7 +256,7 @@ export async function handleMachitanPickProof(
           .setColor(0x00c853)
           .setTitle(productName.slice(0, 256))
           .addFields(
-            { name: "Order ID", value: orderId, inline: true },
+            { name: "Order ID", value: orderLink(orderId), inline: true },
             { name: actorLabel, value: picker, inline: true },
             ...(description ? [{ name: "Deskripsi", value: description.slice(0, 1024), inline: true }] : []),
             { name: "User Notes", value: userNotes.slice(0, 1024), inline: !isPackProof },
@@ -339,7 +340,9 @@ export async function handleMachitanPickProof(
       .setColor(0x00ff00)
       .setTitle(`${titlePrefix}: Order #${orderTitleStr}${photoLabel}`)
       .addFields(
-        { name: "Order ID", value: orderFieldStr, inline: true },
+        // orderFieldStr bisa berisi lebih dari satu order (batch) — orderLink()
+        // otomatis jatuh ke teks biasa kalau isinya bukan satu id angka.
+        { name: "Order ID", value: orderLink(orderFieldStr), inline: true },
         { name: actorLabel, value: picker, inline: true },
         ...(orderDescriptions.length ? [{ name: "Deskripsi", value: orderDescriptions.join(", ").slice(0, 1024), inline: true }] : []),
         { name: "User Notes", value: userNotes.slice(0, 1024), inline: !isPackProof },

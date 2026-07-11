@@ -2,6 +2,7 @@ import cron from "node-cron";
 import { Client, EmbedBuilder, TextChannel } from "discord.js";
 import { env } from "../config/env.js";
 import { fetchNativeQueryWithPagination, type MetabaseConfig } from "../services/metabase.js";
+import { orderLink } from "../services/kyouLinks.js";
 
 /**
  * Digest harian "order belum diproses > N hari" di fulfillment kyou.id.
@@ -130,7 +131,8 @@ export async function fetchStaleOrders(
 }
 
 function formatLine(order: StaleOrder): string {
-  return `\`#${order.orderId}\` ${truncate(order.items, 60)} — **${order.days} hari** · ${order.user} · ${order.shipping}`;
+  // Nomor order jadi link ke halaman admin-nya — sekali klik, tanpa copy nomor.
+  return `${orderLink(order.orderId)} ${truncate(order.items, 60)} — **${order.days} hari** · ${order.user} · ${order.shipping}`;
 }
 
 /** Pecah baris jadi beberapa field <= MAX_FIELD_CHARS (limit value Discord 1024). */

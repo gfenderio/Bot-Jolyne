@@ -11,6 +11,7 @@ import {
   type ModalSubmitInteraction
 } from "discord.js";
 import { env } from "../config/env.js";
+import { adminOrderUrl, orderLink } from "../services/kyouLinks.js";
 import {
   getPosted,
   getResolved,
@@ -384,8 +385,10 @@ export async function handlePickTriageModal(interaction: ModalSubmitInteraction)
 
   const meta = CHOICE_META[choice];
   const itemCount = order?.itemNames.length ?? 0;
+  const orderUrl = adminOrderUrl(order?.orderId ?? orderId);
   const embed = new EmbedBuilder()
     .setTitle(`${meta.emoji} Laporan order — ${meta.label}`)
+    .setURL(orderUrl ?? null)
     .setColor(EMBED_COLOR_DONE)
     .setAuthor({ name: interaction.user.tag, iconURL: interaction.user.displayAvatarURL() })
     .addFields(
@@ -394,7 +397,7 @@ export async function handlePickTriageModal(interaction: ModalSubmitInteraction)
         value: order ? itemListValue(order.itemNames, order.itemIds) : "-",
         inline: false
       },
-      { name: "Order", value: order ? `#${order.orderId}` : `#${orderId}`, inline: true },
+      { name: "Order", value: orderLink(order?.orderId ?? orderId), inline: true },
       { name: "Customer", value: order?.user ?? "-", inline: true },
       { name: "Nyangkut", value: order ? `${order.hours} jam` : "-", inline: true },
       { name: "Kurir", value: order?.shipping ?? "-", inline: true },

@@ -3,6 +3,7 @@ import { AttachmentBuilder, Client, EmbedBuilder } from "discord.js";
 import { env } from "../config/env.js";
 import { isAuthorizedMachitanIntake } from "./intakeAuth.js";
 import { DISCORD_BOT_ATTACHMENT_LIMIT_BYTES, fitImageToLimit } from "./imageFit.js";
+import { adminOrderUrl } from "../services/kyouLinks.js";
 
 /**
  * Bukti foto saat paket order pickup toko DITERIMA di toko.
@@ -42,9 +43,6 @@ function decodeBase64Image(raw: string): Buffer {
   return Buffer.from(cleaned, "base64");
 }
 
-function orderKyouUrl(orderId: string) {
-  return `https://old.kyou.id/admin/order/${encodeURIComponent(orderId)}`;
-}
 
 export async function handleMachitanPickupProof(
   request: IncomingMessage,
@@ -100,7 +98,7 @@ export async function handleMachitanPickupProof(
 
     const embed = new EmbedBuilder()
       .setTitle(`📦 Paket Pickup Diterima — Order ${orderId}`)
-      .setURL(orderKyouUrl(orderId))
+      .setURL(adminOrderUrl(orderId))
       .setColor(0x2e7d32)
       .addFields(
         { name: "Toko", value: store, inline: true },

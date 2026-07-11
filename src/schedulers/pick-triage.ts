@@ -8,6 +8,7 @@ import {
 import { env } from "../config/env.js";
 import { fetchNativeQueryWithPagination, type MetabaseConfig } from "../services/metabase.js";
 import { markPosted, isPosted, isResolved, hasLegacyItem, type PostedOrder } from "../services/pickTriageStore.js";
+import { adminOrderUrl } from "../services/kyouLinks.js";
 import { buildTriageSelect, itemListValue } from "../handlers/pickTriage.js";
 
 /**
@@ -161,10 +162,15 @@ export function groupByOrder(items: StalePickItem[]): StalePickOrder[] {
 /** Embed satu order (dipasang bareng satu dropdown). */
 export function orderEmbed(order: StalePickOrder): EmbedBuilder {
   const count = order.itemNames.length;
-  return new EmbedBuilder()
+  const embed = new EmbedBuilder()
     .setColor(EMBED_COLOR)
-    .setTitle(`🔴 #${order.orderId} — nyangkut di PICK ${order.hours} jam · ${count} barang`)
-    .addFields(
+    .setTitle(`🔴 #${order.orderId} — nyangkut di PICK ${order.hours} jam · ${count} barang`);
+
+  // Judul jadi link ke halaman ordernya di admin — satu klik, tanpa copy nomor.
+  const url = adminOrderUrl(order.orderId);
+  if (url) embed.setURL(url);
+
+  return embed.addFields(
       { name: "Barang", value: itemListValue(order.itemNames, order.itemIds), inline: false },
       { name: "Customer", value: order.user, inline: true },
       { name: "Kurir", value: order.shipping, inline: true }
