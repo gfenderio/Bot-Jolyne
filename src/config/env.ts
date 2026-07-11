@@ -181,13 +181,10 @@ const envSchema = z.object({
   // Maksimal barang yang diposting sekali jalan (sisanya diringkas).
   PICK_TRIAGE_MAX_ITEMS: pollIntervalSeconds.default(25),
   PICK_TRIAGE_STORE_PATH: optionalString.default("data/pick-triage.json"),
-  // Minta foto saat opsi "Barang rusak" dipilih. Dipaksa "true" di bawah.
-  //
-  // Menyalakan ini menambah intent MessageContent (privileged) di index.ts.
-  // Intent tsb sudah diizinkan di Developer Portal; kalau dimatikan di sana,
-  // Discord menolak login dan SELURUH BOT MATI — bukan cuma fitur foto.
-  PICK_TRIAGE_PHOTO_ENABLED: optionalBoolean,
-  PICK_TRIAGE_PHOTO_WAIT_SECONDS: pollIntervalSeconds.default(120)
+  // Tampilkan kolom upload foto di modal saat opsi "Barang rusak" dipilih.
+  // Dipaksa "true" di bawah. Tidak lagi menuntut intent privileged apa pun:
+  // fotonya diunggah langsung di dalam modal, bukan lewat pesan di channel.
+  PICK_TRIAGE_PHOTO_ENABLED: optionalBoolean
 });
 
 // Override dari kode agar mengabaikan setting environment server Coolify
@@ -200,9 +197,6 @@ process.env.BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID = "1500736344182358066";
 process.env.FULFILLMENT_STALE_CHANNEL_ID = "1524977369641652227";
 process.env.PICK_TRIAGE_CHANNEL_ID = "1524977369641652227";
 process.env.PICK_TRIAGE_ENABLED = "true";
-// Aman: intent MessageContent sudah diizinkan di Developer Portal (dicek
-// 2026-07-10). Kalau suatu saat intent itu dimatikan di portal, Discord akan
-// menolak login dan SELURUH bot mati — set ini "false" untuk memulihkan.
 process.env.PICK_TRIAGE_PHOTO_ENABLED = "true";
 // Env mati yang mungkin masih tersisa di server; dibersihkan biar tidak
 // menyesatkan kalau ada yang membaca konfigurasi Coolify.

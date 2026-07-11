@@ -2,6 +2,8 @@ import {
   ActionRowBuilder,
   AttachmentBuilder,
   EmbedBuilder,
+  FileUploadBuilder,
+  LabelBuilder,
   ModalBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
@@ -11,6 +13,7 @@ import {
   type ModalSubmitInteraction
 } from "discord.js";
 import { env } from "../config/env.js";
+import { fitImageToLimit, DISCORD_BOT_ATTACHMENT_LIMIT_BYTES } from "../machitan/imageFit.js";
 import { adminOrderUrl, orderLink } from "../services/kyouLinks.js";
 import {
   getPosted,
@@ -25,11 +28,14 @@ import {
 export const TRIAGE_SELECT_PREFIX = "picktriage:sel:"; // + orderId
 export const TRIAGE_MODAL_PREFIX = "picktriage:mdl:"; // + orderId + ":" + choice
 
+const NOTE_FIELD = "note";
+const PHOTO_FIELD = "photo";
+
 const EMBED_COLOR_DONE = 0x2f8f5b;
 
 export const CHOICE_META: Record<TriageChoice, { emoji: string; label: string; hint: string }> = {
   antri: { emoji: "⏳", label: "Masih antri pick", hint: "Contoh: antrean panjang, belum sempat diambil." },
-  rusak: { emoji: "⚠️", label: "Barang rusak", hint: "Contoh: box penyok, segel sobek. Fotonya diminta setelah ini." },
+  rusak: { emoji: "⚠️", label: "Barang rusak", hint: "Contoh: box penyok, segel sobek." },
   ketemu: { emoji: "❓", label: "Belum ketemu", hint: "Contoh: sudah dicari di rak Omega, tidak ada." }
 };
 
@@ -128,17 +134,34 @@ export async function handlePickTriageSelect(interaction: StringSelectMenuIntera
     .setCustomId(`${TRIAGE_MODAL_PREFIX}${orderId}:${choice}`)
     .setTitle(truncate(`${meta.emoji} ${meta.label}`, 45));
 
-  const noteInput = new TextInputBuilder()
-    .setCustomId("note")
-    .setLabel("Deskripsi / keterangan")
-    .setStyle(TextInputStyle.Paragraph)
-    .setRequired(false)
-    .setMaxLength(1000)
-    // Placeholder Discord dibatasi 100 karakter — lewat sedikit saja, showModal
-    // melempar dan pengklik cuma melihat "This interaction failed".
-    .setPlaceholder(truncate(meta.hint, 100));
+  // Komponen modal gaya baru (Label membungkus input) — inilah yang memungkinkan
+  // kolom UPLOAD FILE di dalam modal. Dulu modal cuma bisa teks, makanya fotonya
+  // sempat diminta lewat pesan biasa + message collector (butuh intent
+  // MessageContent yang privileged). Itu semua sudah dibuang.
+  modal.addLabelComponents(
+    new LabelBuilder().setLabel("Deskripsi / keterangan").setTextInputComponent(
+      new TextInputBuilder()
+        .setCustomId(NOTE_FIELD)
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(false)
+        .setMaxLength(1000)
+        // Placeholder Discord dibatasi 100 karakter — lewat sedikit saja,
+        // showModal melempar dan pengklik cuma melihat "This interaction failed".
+        .setPlaceholder(truncate(meta.hint, 100))
+    )
+  );
 
-  modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(noteInput));
+  if (choice === "rusak" && env.PICK_TRIAGE_PHOTO_ENABLED) {
+    modal.addLabelComponents(
+      new LabelBuilder()
+        .setLabel("Foto barang rusak")
+        .setDescription("Opsional — boleh dikosongkan.")
+        .setFileUploadComponent(
+          new FileUploadBuilder().setCustomId(PHOTO_FIELD).setRequired(false).setMinValues(0).setMaxValues(1)
+        )
+    );
+  }
+
   await interaction.showModal(modal);
 }
 
@@ -221,130 +244,53 @@ function recoverOrderFromMessage(
   };
 }
 
-const PHOTO_MAX_BYTES = 8 * 1024 * 1024; // batas upload Discord tanpa boost
-
 /**
- * Untuk "Barang rusak": minta pelapor mengunggah foto di channel, lalu tempel
- * ke embed hasil. Fotonya OPSIONAL — boleh `skip`, boleh dibiarkan sampai waktu
- * habis; embed hasil tetap ada, cuma tanpa gambar.
+ * Ambil foto "barang rusak" dari kolom upload DI DALAM modal, siap ditempel ke
+ * embed hasil.
  *
- * Modal Discord tidak bisa menerima file, jadi fotonya harus lewat pesan biasa
- * — butuh intent MessageContent (privileged). Kalau intent itu mati, collector
- * tidak akan pernah menerima apa pun; makanya seluruh alur ini dijaga flag
- * PICK_TRIAGE_PHOTO_ENABLED yang juga mengatur intent di index.ts.
+ * Foto di-UNGGAH ULANG sebagai lampiran embed, bukan disimpan URL-nya: URL CDN
+ * Discord bertanda tangan dan kedaluwarsa (~24 jam), jadi embed yang cuma
+ * menunjuk URL asli akan kehilangan gambarnya.
  *
- * Prompt-nya PESAN BIASA (bukan ephemeral) yang me-mention pelapor: pesan
- * ephemeral gampang kelewat/ketutup, dan user melaporkan promptnya "tidak ada"
- * padahal fiturnya jalan. Pesan biasa dihapus lagi setelah selesai, jadi channel
- * tetap bersih.
- *
- * Fotonya di-UNGGAH ULANG sebagai lampiran embed, bukan disimpan URL-nya: URL
- * CDN Discord bertanda tangan dan kedaluwarsa (~24 jam), jadi embed yang cuma
- * menunjuk URL asli akan kehilangan gambar. Setelah tertempel, pesan unggahan
- * mentahnya dihapus supaya channel bersih.
+ * Return null kalau pelapor tidak melampirkan apa-apa (fotonya opsional) atau
+ * kalau fotonya gagal diambil — embed hasil tetap dikirim, cuma tanpa gambar.
  */
-async function collectDamagePhoto(
-  interaction: ModalSubmitInteraction,
-  embed: EmbedBuilder
-): Promise<void> {
-  if (!env.PICK_TRIAGE_PHOTO_ENABLED) {
-    console.warn("[pick-triage] foto dilewati — PICK_TRIAGE_PHOTO_ENABLED=false.");
-    return;
+async function damagePhotoAttachment(
+  interaction: ModalSubmitInteraction
+): Promise<AttachmentBuilder | null> {
+  if (!env.PICK_TRIAGE_PHOTO_ENABLED) return null;
+
+  // getUploadedFiles() melempar kalau komponennya tidak ada di modal — mis. pesan
+  // lama yang modalnya dibangun sebelum kolom foto ada.
+  let uploaded;
+  try {
+    uploaded = interaction.fields.getUploadedFiles(PHOTO_FIELD)?.first();
+  } catch {
+    return null;
   }
 
-  // interaction.channel bisa null kalau channelnya belum ter-cache — ambil ulang
-  // lewat REST, jangan diam-diam menyerah (dulu: prompt foto tak pernah muncul
-  // dan tak ada satu baris pun di log yang menjelaskan kenapa).
-  const channelId = interaction.channelId;
-  const channel =
-    interaction.channel ??
-    (channelId ? await interaction.client.channels.fetch(channelId).catch(() => null) : null);
-
-  if (!channel || !channel.isTextBased() || !("createMessageCollector" in channel)) {
-    console.warn(`[pick-triage] foto dilewati — channel ${channelId ?? "?"} tidak bisa dipasangi collector.`);
-    return;
+  if (!uploaded) {
+    console.log("[pick-triage] barang rusak dilaporkan tanpa foto.");
+    return null;
   }
 
-  const seconds = env.PICK_TRIAGE_PHOTO_WAIT_SECONDS;
-  const prompt = await channel
-    .send({
-      content:
-        `📷 <@${interaction.user.id}> — upload **foto barang rusak** di channel ini dalam ${seconds} detik.\n` +
-        "Fotonya **opsional**: ketik `skip` atau diamkan saja kalau tidak ada."
-    })
-    .catch((err) => {
-      console.error("[pick-triage] gagal kirim ajakan upload foto:", err);
-      return null;
-    });
+  try {
+    const res = await fetch(uploaded.url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-  const collector = channel.createMessageCollector({
-    filter: (m) =>
-      m.author.id === interaction.user.id &&
-      (m.attachments.size > 0 || m.content.trim().toLowerCase() === "skip"),
-    max: 1,
-    time: seconds * 1000
-  });
-  console.log(`[pick-triage] menunggu foto barang rusak dari ${interaction.user.tag} (${seconds}s).`);
+    // Foto dari HP gampang lewat 8 MB; kecilkan seperlunya, bukan ditolak.
+    const buffer = await fitImageToLimit(
+      Buffer.from(await res.arrayBuffer()),
+      DISCORD_BOT_ATTACHMENT_LIMIT_BYTES
+    );
 
-  const dropPrompt = async () => {
-    if (prompt) await prompt.delete().catch(() => {});
-  };
-
-  collector.on("collect", async (message) => {
-    const cleanup = async () => {
-      // Menghapus pesan ORANG LAIN butuh izin Manage Messages — bot tidak
-      // punya itu di #pending-shipment (dicek 2026-07-11: bulk-delete ditolak
-      // 403). Jadi pesan unggahan mentahnya kemungkinan tetap tertinggal;
-      // fotonya sudah tersalin ke embed, jadi ini kosmetik saja.
-      await message.delete().catch(() => {
-        console.warn("[pick-triage] tidak bisa hapus pesan unggahan pelapor (butuh izin Manage Messages).");
-      });
-      await dropPrompt();
-    };
-
-    if (message.attachments.size === 0) {
-      console.log("[pick-triage] pelapor memilih skip — embed hasil tanpa foto.");
-      await cleanup();
-      return;
-    }
-
-    const photo = message.attachments.find((a) => a.contentType?.startsWith("image/") ?? false);
-    if (!photo) {
-      await interaction.followUp({ content: "❌ Itu bukan file gambar. Foto tidak ditempel.", flags: ["Ephemeral"] }).catch(() => {});
-      await cleanup();
-      return;
-    }
-    if (photo.size > PHOTO_MAX_BYTES) {
-      await interaction.followUp({ content: "❌ Foto terlalu besar (maks 8 MB). Foto tidak ditempel.", flags: ["Ephemeral"] }).catch(() => {});
-      await cleanup();
-      return;
-    }
-
-    try {
-      const res = await fetch(photo.url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const buffer = Buffer.from(await res.arrayBuffer());
-
-      const name = `rusak-${Date.now()}.${photo.name.split(".").pop() ?? "png"}`;
-      const file = new AttachmentBuilder(buffer, { name });
-      embed.setImage(`attachment://${name}`);
-
-      await interaction.editReply({ embeds: [embed], files: [file] });
-      await cleanup();
-      console.log("[pick-triage] foto barang rusak tertempel ke embed hasil.");
-    } catch (err) {
-      console.error("[pick-triage] gagal menempel foto:", err);
-      await interaction.followUp({ content: "❌ Gagal menempel foto. Coba upload ulang di channel ini.", flags: ["Ephemeral"] }).catch(() => {});
-    }
-  });
-
-  collector.on("end", (collected) => {
-    // Waktu habis tanpa foto: buang ajakannya, embed hasil tetap ada (tanpa foto).
-    if (collected.size === 0) {
-      console.log("[pick-triage] waktu upload foto habis — tidak ada foto.");
-      void dropPrompt();
-    }
-  });
+    const ext = uploaded.name?.split(".").pop() ?? "jpg";
+    console.log(`[pick-triage] foto barang rusak diterima (${Math.round(buffer.length / 1024)} KB).`);
+    return new AttachmentBuilder(buffer, { name: `rusak-${interaction.id}.${ext}` });
+  } catch (err) {
+    console.error("[pick-triage] gagal mengambil foto barang rusak:", err);
+    return null;
+  }
 }
 
 /** Modal submit → simpan + kirim embed hasil. */
@@ -370,7 +316,7 @@ export async function handlePickTriageModal(interaction: ModalSubmitInteraction)
     return;
   }
 
-  const note = (interaction.fields.getTextInputValue("note") || "").trim() || "-";
+  const note = (interaction.fields.getTextInputValue(NOTE_FIELD) || "").trim() || "-";
   // Store dulu; kalau kosong (proses yang memposting beda dgn yang menangani
   // klik, mis. redeploy di antaranya + data/ ephemeral), pulihkan detail dari
   // embed pesan asalnya supaya embed hasil tidak berisi "-" semua.
@@ -416,18 +362,23 @@ export async function handlePickTriageModal(interaction: ModalSubmitInteraction)
     .setFooter({ text: `Dilaporkan oleh ${interaction.user.tag}` })
     .setTimestamp();
 
-  await interaction.reply({ embeds: [embed] });
+  // Foto (kalau ada) ikut dikirim bareng embed hasil — bukan ditambal belakangan.
+  // Mengunduh + mengecilkan foto bisa makan waktu, jadi interaksinya di-defer
+  // dulu supaya tidak lewat batas 3 detik Discord.
+  const photo = choice === "rusak" ? await withDefer(interaction, () => damagePhotoAttachment(interaction)) : null;
+  if (photo) embed.setImage(`attachment://${photo.name}`);
 
-  // Barang rusak: minta foto, lalu tempel ke embed hasil. Sengaja tidak di-await
-  // (menunggu 120 detik akan menahan handler), tapi errornya WAJIB ditangkap —
-  // kalau tidak, kegagalannya jadi unhandled rejection yang tak terlihat.
-  if (choice === "rusak") {
-    void collectDamagePhoto(interaction, embed).catch((err) =>
-      console.error("[pick-triage] alur foto barang rusak gagal:", err)
-    );
-  }
+  const payload = { embeds: [embed], ...(photo ? { files: [photo] } : {}) };
+  if (interaction.deferred) await interaction.editReply(payload);
+  else await interaction.reply(payload);
 
   if (order) {
     await removeAnsweredMessage(interaction, order);
   }
+}
+
+/** Defer dulu (pekerjaannya bisa > 3 detik), baru jalankan. */
+async function withDefer<T>(interaction: ModalSubmitInteraction, run: () => Promise<T>): Promise<T> {
+  await interaction.deferReply();
+  return run();
 }
