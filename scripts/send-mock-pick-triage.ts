@@ -1,0 +1,71 @@
+import "dotenv/config";
+import { ActionRowBuilder, Client, GatewayIntentBits, StringSelectMenuBuilder, TextChannel } from "discord.js";
+import { env } from "../src/config/env.js";
+import { orderEmbed } from "../src/schedulers/pick-triage.js";
+import { buildTriageSelect } from "../src/handlers/pickTriage.js";
+
+/**
+ * Kirim 2 pesan triase PALSU ke channel, memakai embed & dropdown yang sama
+ * persis dengan poller — buat melihat format per-order tanpa menunggu barang
+ * sungguhan lewat 24 jam.
+ *
+ * Order id-nya sengaja #999xxx supaya jelas mock dan tidak bentrok dengan order
+ * asli di store.
+ *
+ * Jalankan: node --import tsx scripts/send-mock-pick-triage.ts
+ */
+
+const MOCKS = [
+  {
+    orderId: "999101",
+    itemIds: ["461835", "461836", "461840", "461841", "461842"],
+    itemNames: [
+      'Qinche / Sylus "Night Of Secrecy" Nightly Rendezvous Series Mini Card Set - Love and Deepspace (11,5x6,8cm)',
+      'Qinche / Sylus "Night Of Secrecy" Nightly Rendezvous Series Four Panel Mini Album - Love and Deepspace (18x23cm)',
+      'Qinche / Sylus "Approaching Dusk" Series Laser Ticket - Love and Deepspace (21x8cm)',
+      'Qinche / Sylus "Approaching Dusk" Series Art Print - Love and Deepspace (36,5x24,5cm)',
+      'Qinche / Sylus "Approaching Dusk" Series Acrylic Stand - Love and Deepspace (15cm)'
+    ],
+    hours: 26,
+    user: "Jessica Yuki (MOCK)",
+    shipping: "JNE REG"
+  },
+  {
+    orderId: "999102",
+    itemIds: ["534775"],
+    itemNames: ["Tokai Teio Chain Collection (4cm) - Uma Musume Pretty Derby"],
+    hours: 24,
+    user: "Hazel Hazza Niskala (MOCK)",
+    shipping: "JNE YES"
+  }
+];
+
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+client.once("clientReady", async (ready) => {
+  try {
+    const channel = await ready.channels.fetch(env.PICK_TRIAGE_CHANNEL_ID);
+    if (!channel?.isTextBased()) throw new Error("channel bukan text channel");
+
+    for (const mock of MOCKS) {
+      const message = await (channel as TextChannel).send({
+        embeds: [orderEmbed(mock)],
+        components: [
+          new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+            buildTriageSelect({ ...mock, channelId: channel.id, messageId: "" })
+          )
+        ]
+      });
+      console.log(`terkirim: #${mock.orderId} (${mock.itemNames.length} barang) → ${message.id}`);
+    }
+    console.log("\nCatatan: mock ini TIDAK ditulis ke store — dropdown-nya baru bisa dijawab");
+    console.log("setelah bot di server di-redeploy (detailnya dipulihkan dari embed).");
+  } catch (err) {
+    console.error("Gagal:", err);
+    process.exitCode = 1;
+  } finally {
+    await client.destroy();
+  }
+});
+
+client.login(process.env.DISCORD_TOKEN);

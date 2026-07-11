@@ -48,17 +48,26 @@ function choiceLabel(choice: TriageChoice): string {
 const MAX_ITEM_LIST_CHARS = 900;
 
 /**
- * Daftar barang satu order sebagai bullet. Kalau kepanjangan, dipotong dan
- * sisanya diringkas — order berisi belasan barang bisa melewati limit embed
- * Discord dan bikin pengiriman pesannya gagal total.
+ * Daftar barang satu order sebagai bullet, tiap baris diawali ITEM ID supaya
+ * staf bisa langsung mencocokkan dengan barang di rak/admin:
+ *
+ *     • `461835` — Nama barang (17cm)
+ *
+ * Format itu juga yang dibaca balik oleh recoverOrderFromMessage(), jadi kalau
+ * diubah, ubah regex di sana.
+ *
+ * Kalau kepanjangan, daftar dipotong dan sisanya diringkas — order berisi
+ * belasan barang bisa melewati limit field Discord (1024) dan membuat
+ * pengiriman pesannya gagal total.
  */
-export function itemListValue(names: string[]): string {
+export function itemListValue(names: string[], ids: string[] = []): string {
   if (names.length === 0) return "-";
 
   const lines: string[] = [];
   let chars = 0;
-  for (const name of names) {
-    const line = `• ${truncate(name, 120)}`;
+  for (const [i, name] of names.entries()) {
+    const id = ids[i];
+    const line = id ? `• \`${id}\` — ${truncate(name, 110)}` : `• ${truncate(name, 120)}`;
     if (chars + line.length + 1 > MAX_ITEM_LIST_CHARS) break;
     lines.push(line);
     chars += line.length + 1;
@@ -180,14 +189,26 @@ function recoverOrderFromMessage(
   const field = (name: string) =>
     embed.fields?.find((f) => f.name.toLowerCase() === name)?.value?.trim() || "-";
 
-  const itemNames = field("barang")
-    .split("\n")
-    .map((line) => line.replace(/^•\s*/, "").trim())
-    .filter((line) => line && line !== "-");
+  // Baris berformat "• `<itemId>` — <nama>" (lihat itemListValue). Baris ringkas
+  // "…dan N barang lainnya" dan bullet tanpa id (format lama) tetap ditoleransi.
+  const itemIds: string[] = [];
+  const itemNames: string[] = [];
+  for (const raw of field("barang").split("\n")) {
+    const line = raw.trim();
+    if (!line || line === "-" || line.startsWith("_")) continue;
+
+    const withId = line.match(/^•\s*`([^`]+)`\s*—\s*(.+)$/);
+    if (withId) {
+      itemIds.push(withId[1]);
+      itemNames.push(withId[2].trim());
+      continue;
+    }
+    itemNames.push(line.replace(/^•\s*/, ""));
+  }
 
   return {
     orderId: titleOrderId ?? orderId,
-    itemIds: [],
+    itemIds,
     itemNames,
     user: field("customer"),
     shipping: field("kurir"),
@@ -370,7 +391,7 @@ export async function handlePickTriageModal(interaction: ModalSubmitInteraction)
     .addFields(
       {
         name: itemCount > 1 ? `Barang (${itemCount})` : "Barang",
-        value: order ? itemListValue(order.itemNames) : "-",
+        value: order ? itemListValue(order.itemNames, order.itemIds) : "-",
         inline: false
       },
       { name: "Order", value: order ? `#${order.orderId}` : `#${orderId}`, inline: true },

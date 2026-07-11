@@ -159,13 +159,13 @@ export function groupByOrder(items: StalePickItem[]): StalePickOrder[] {
 }
 
 /** Embed satu order (dipasang bareng satu dropdown). */
-function orderEmbed(order: StalePickOrder): EmbedBuilder {
+export function orderEmbed(order: StalePickOrder): EmbedBuilder {
   const count = order.itemNames.length;
   return new EmbedBuilder()
     .setColor(EMBED_COLOR)
     .setTitle(`🔴 #${order.orderId} — nyangkut di PICK ${order.hours} jam · ${count} barang`)
     .addFields(
-      { name: "Barang", value: itemListValue(order.itemNames), inline: false },
+      { name: "Barang", value: itemListValue(order.itemNames, order.itemIds), inline: false },
       { name: "Customer", value: order.user, inline: true },
       { name: "Kurir", value: order.shipping, inline: true }
     )
