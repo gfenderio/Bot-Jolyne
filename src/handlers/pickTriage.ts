@@ -16,13 +16,13 @@ import {
   getResolved,
   isResolved,
   markResolved,
-  type PostedItem,
+  type PostedOrder,
   type TriageChoice
 } from "../services/pickTriageStore.js";
 
 // Prefix customId dipakai router di events/interaction-create.ts.
-export const TRIAGE_SELECT_PREFIX = "picktriage:sel:"; // + itemId
-export const TRIAGE_MODAL_PREFIX = "picktriage:mdl:"; // + itemId + ":" + choice
+export const TRIAGE_SELECT_PREFIX = "picktriage:sel:"; // + orderId
+export const TRIAGE_MODAL_PREFIX = "picktriage:mdl:"; // + orderId + ":" + choice
 
 const EMBED_COLOR_DONE = 0x2f8f5b;
 
@@ -43,11 +43,38 @@ function choiceLabel(choice: TriageChoice): string {
   return `${meta.emoji} ${meta.label}`;
 }
 
-/** Dropdown 3 opsi untuk satu barang. */
-export function buildTriageSelect(item: PostedItem): StringSelectMenuBuilder {
+// Field value Discord dibatasi 1024 karakter; sisakan ruang buat baris "dan N
+// lainnya".
+const MAX_ITEM_LIST_CHARS = 900;
+
+/**
+ * Daftar barang satu order sebagai bullet. Kalau kepanjangan, dipotong dan
+ * sisanya diringkas — order berisi belasan barang bisa melewati limit embed
+ * Discord dan bikin pengiriman pesannya gagal total.
+ */
+export function itemListValue(names: string[]): string {
+  if (names.length === 0) return "-";
+
+  const lines: string[] = [];
+  let chars = 0;
+  for (const name of names) {
+    const line = `• ${truncate(name, 120)}`;
+    if (chars + line.length + 1 > MAX_ITEM_LIST_CHARS) break;
+    lines.push(line);
+    chars += line.length + 1;
+  }
+
+  const rest = names.length - lines.length;
+  if (rest > 0) lines.push(`_…dan ${rest} barang lainnya_`);
+  return lines.join("\n");
+}
+
+/** Dropdown 3 opsi untuk satu order (berlaku buat semua barangnya). */
+export function buildTriageSelect(order: PostedOrder): StringSelectMenuBuilder {
+  const count = order.itemNames.length;
   const menu = new StringSelectMenuBuilder()
-    .setCustomId(`${TRIAGE_SELECT_PREFIX}${item.itemId}`)
-    .setPlaceholder(truncate(`#${item.orderId} · ${item.itemName}`, 100))
+    .setCustomId(`${TRIAGE_SELECT_PREFIX}${order.orderId}`)
+    .setPlaceholder(truncate(`#${order.orderId} · ${count} barang — pilih status`, 100))
     .setMinValues(1)
     .setMaxValues(1);
 
@@ -69,7 +96,7 @@ function isTriageChoice(value: string): value is TriageChoice {
 
 /** User memilih salah satu opsi → tampilkan modal deskripsi. */
 export async function handlePickTriageSelect(interaction: StringSelectMenuInteraction) {
-  const itemId = interaction.customId.slice(TRIAGE_SELECT_PREFIX.length);
+  const orderId = interaction.customId.slice(TRIAGE_SELECT_PREFIX.length);
   const choice = interaction.values[0];
 
   if (!isTriageChoice(choice)) {
@@ -77,10 +104,10 @@ export async function handlePickTriageSelect(interaction: StringSelectMenuIntera
     return;
   }
 
-  const existing = getResolved(itemId);
+  const existing = getResolved(orderId);
   if (existing) {
     await interaction.reply({
-      content: `Barang ini sudah dilaporkan oleh **${existing.byTag}** — ${choiceLabel(existing.choice)}.`,
+      content: `Order ini sudah dilaporkan oleh **${existing.byTag}** — ${choiceLabel(existing.choice)}.`,
       flags: ["Ephemeral"]
     });
     return;
@@ -88,7 +115,7 @@ export async function handlePickTriageSelect(interaction: StringSelectMenuIntera
 
   const meta = CHOICE_META[choice];
   const modal = new ModalBuilder()
-    .setCustomId(`${TRIAGE_MODAL_PREFIX}${itemId}:${choice}`)
+    .setCustomId(`${TRIAGE_MODAL_PREFIX}${orderId}:${choice}`)
     .setTitle(truncate(`${meta.emoji} ${meta.label}`, 45));
 
   const noteInput = new TextInputBuilder()
@@ -97,59 +124,67 @@ export async function handlePickTriageSelect(interaction: StringSelectMenuIntera
     .setStyle(TextInputStyle.Paragraph)
     .setRequired(false)
     .setMaxLength(1000)
-    .setPlaceholder("Contoh: sudah dicari di rak Omega, belum ketemu. Kosongkan kalau tidak perlu.");
+    .setPlaceholder("Kalau tiap barang beda kasusnya, sebutkan di sini. Contoh: Laser Ticket belum ketemu, Art Print rusak.");
 
   modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(noteInput));
   await interaction.showModal(modal);
 }
 
 /**
- * Disable dropdown di pesan asal setelah barangnya dijawab. Satu pesan memuat
- * tepat satu barang (satu dropdown), jadi cukup rebuild satu row dari `item` —
- * tidak perlu baca store maupun introspeksi komponen live.
+ * Hapus pesan pertanyaan setelah order-nya dijawab — embed hasil sudah memuat
+ * semua isinya (order, daftar barang, customer, kurir, lama nyangkut), jadi
+ * membiarkan pesan asal cuma bikin channel panjang. Kalau gagal hapus (mis. bot
+ * kehilangan izin Manage Messages), jatuh balik ke men-disable dropdown supaya
+ * pesannya tidak bisa dijawab dua kali.
  */
-async function disableAnsweredSelect(
+async function removeAnsweredMessage(
   interaction: ModalSubmitInteraction,
-  item: PostedItem
+  order: PostedOrder
 ): Promise<void> {
-  try {
-    const channel = await interaction.client.channels.fetch(item.channelId).catch(() => null);
-    if (!channel || !channel.isTextBased()) return;
-    const message = await channel.messages.fetch(item.messageId).catch(() => null);
-    if (!message) return;
+  const channel = await interaction.client.channels.fetch(order.channelId).catch(() => null);
+  if (!channel || !channel.isTextBased()) return;
+  const message = await channel.messages.fetch(order.messageId).catch(() => null);
+  if (!message) return;
 
-    const menu = buildTriageSelect(item).setDisabled(true).setPlaceholder("✅ Sudah dilaporkan");
-    await message.edit({
-      components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)]
-    });
+  try {
+    await message.delete();
   } catch (err) {
-    console.error("[pick-triage] gagal disable dropdown:", err);
+    console.error("[pick-triage] gagal hapus pesan pertanyaan, disable dropdown saja:", err);
+    const menu = buildTriageSelect(order).setDisabled(true).setPlaceholder("✅ Sudah dilaporkan");
+    await message
+      .edit({ components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)] })
+      .catch(() => {});
   }
 }
 
 /**
- * Cadangan kalau store tidak punya metadata barang: baca balik dari embed pesan
+ * Cadangan kalau store tidak punya metadata order: baca balik dari embed pesan
  * yang memuat dropdown-nya. Judul embed berformat
- * "... #<orderId> — nyangkut di PICK <n> jam", plus field Barang/Customer/Kurir.
+ * "🔴 #<orderId> — nyangkut di PICK <n> jam · <k> barang", plus field
+ * Barang (daftar bullet) / Customer / Kurir.
  */
-function recoverItemFromMessage(
+function recoverOrderFromMessage(
   interaction: ModalSubmitInteraction,
-  itemId: string
-): PostedItem | undefined {
+  orderId: string
+): PostedOrder | undefined {
   const message = interaction.message;
   const embed = message?.embeds?.[0];
   if (!message || !embed) return undefined;
 
   const title = embed.title ?? "";
-  const orderId = title.match(/#(\S+)/)?.[1] ?? "-";
   const hours = Number(title.match(/(\d+)\s*jam/)?.[1] ?? 0);
   const field = (name: string) =>
     embed.fields?.find((f) => f.name.toLowerCase() === name)?.value?.trim() || "-";
 
+  const itemNames = field("barang")
+    .split("\n")
+    .map((line) => line.replace(/^•\s*/, "").trim())
+    .filter((line) => line && line !== "-");
+
   return {
-    itemId,
     orderId,
-    itemName: field("barang"),
+    itemIds: [],
+    itemNames,
     user: field("customer"),
     shipping: field("kurir"),
     hours,
@@ -249,10 +284,10 @@ async function collectDamagePhoto(
 
 /** Modal submit → simpan + kirim embed hasil. */
 export async function handlePickTriageModal(interaction: ModalSubmitInteraction) {
-  // customId = picktriage:mdl:<itemId>:<choice>
+  // customId = picktriage:mdl:<orderId>:<choice>
   const rest = interaction.customId.slice(TRIAGE_MODAL_PREFIX.length);
   const sep = rest.lastIndexOf(":");
-  const itemId = rest.slice(0, sep);
+  const orderId = rest.slice(0, sep);
   const choiceRaw = rest.slice(sep + 1);
 
   if (!isTriageChoice(choiceRaw)) {
@@ -261,10 +296,10 @@ export async function handlePickTriageModal(interaction: ModalSubmitInteraction)
   }
   const choice = choiceRaw;
 
-  if (isResolved(itemId)) {
-    const prev = getResolved(itemId);
+  if (isResolved(orderId)) {
+    const prev = getResolved(orderId);
     await interaction.reply({
-      content: `Barang ini sudah dilaporkan oleh **${prev?.byTag ?? "?"}**.`,
+      content: `Order ini sudah dilaporkan oleh **${prev?.byTag ?? "?"}**.`,
       flags: ["Ephemeral"]
     });
     return;
@@ -274,9 +309,9 @@ export async function handlePickTriageModal(interaction: ModalSubmitInteraction)
   // Store dulu; kalau kosong (proses yang memposting beda dgn yang menangani
   // klik, mis. redeploy di antaranya + data/ ephemeral), pulihkan detail dari
   // embed pesan asalnya supaya embed hasil tidak berisi "-" semua.
-  const item = getPosted(itemId) ?? recoverItemFromMessage(interaction, itemId);
+  const order = getPosted(orderId) ?? recoverOrderFromMessage(interaction, orderId);
 
-  const saved = markResolved(itemId, {
+  const saved = markResolved(orderId, {
     choice,
     note,
     byId: interaction.user.id,
@@ -286,23 +321,28 @@ export async function handlePickTriageModal(interaction: ModalSubmitInteraction)
 
   if (!saved) {
     await interaction.reply({
-      content: "Barang ini barusan sudah dilaporkan orang lain.",
+      content: "Order ini barusan sudah dilaporkan orang lain.",
       flags: ["Ephemeral"]
     });
     return;
   }
 
   const meta = CHOICE_META[choice];
+  const itemCount = order?.itemNames.length ?? 0;
   const embed = new EmbedBuilder()
-    .setTitle(`${meta.emoji} Laporan barang — ${meta.label}`)
+    .setTitle(`${meta.emoji} Laporan order — ${meta.label}`)
     .setColor(EMBED_COLOR_DONE)
     .setAuthor({ name: interaction.user.tag, iconURL: interaction.user.displayAvatarURL() })
     .addFields(
-      { name: "Barang", value: item ? truncate(item.itemName, 200) : "-", inline: false },
-      { name: "Order", value: item ? `#${item.orderId}` : "-", inline: true },
-      { name: "Customer", value: item?.user ?? "-", inline: true },
-      { name: "Nyangkut", value: item ? `${item.hours} jam` : "-", inline: true },
-      { name: "Kurir", value: item?.shipping ?? "-", inline: true },
+      {
+        name: itemCount > 1 ? `Barang (${itemCount})` : "Barang",
+        value: order ? itemListValue(order.itemNames) : "-",
+        inline: false
+      },
+      { name: "Order", value: order ? `#${order.orderId}` : `#${orderId}`, inline: true },
+      { name: "Customer", value: order?.user ?? "-", inline: true },
+      { name: "Nyangkut", value: order ? `${order.hours} jam` : "-", inline: true },
+      { name: "Kurir", value: order?.shipping ?? "-", inline: true },
       { name: "Status", value: choiceLabel(choice), inline: true },
       { name: "Deskripsi", value: truncate(note, 1000), inline: false }
     )
@@ -316,7 +356,7 @@ export async function handlePickTriageModal(interaction: ModalSubmitInteraction)
     void collectDamagePhoto(interaction, embed);
   }
 
-  if (item) {
-    await disableAnsweredSelect(interaction, item);
+  if (order) {
+    await removeAnsweredMessage(interaction, order);
   }
 }

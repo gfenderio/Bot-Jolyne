@@ -7,28 +7,31 @@ import {
 } from "discord.js";
 import { env } from "../config/env.js";
 import { fetchNativeQueryWithPagination, type MetabaseConfig } from "../services/metabase.js";
-import { markPosted, isPosted, isResolved, type PostedItem } from "../services/pickTriageStore.js";
-import { buildTriageSelect } from "../handlers/pickTriage.js";
+import { markPosted, isPosted, isResolved, hasLegacyItem, type PostedOrder } from "../services/pickTriageStore.js";
+import { buildTriageSelect, itemListValue } from "../handlers/pickTriage.js";
 
 /**
- * Triase interaktif "PICK nyangkut >= N jam" (default band 24-48 jam).
+ * Triase interaktif "PICK nyangkut >= N jam" (default band 24-30 jam).
  *
- * Beda dengan fulfillment-stale.ts (digest read-only, level order, 3-30 hari):
- * ini LEVEL BARANG (order_items), khusus stage PICK, dan interaktif — tiap
- * barang punya dropdown 3 opsi (masih antri / rusak / belum ketemu) yang saat
- * dipilih membuka modal deskripsi lalu menghasilkan embed balasan.
+ * Beda dengan fulfillment-stale.ts (digest read-only, 3-30 hari, semua stage):
+ * ini khusus stage PICK dan interaktif — tiap order punya dropdown 3 opsi
+ * (masih antri / rusak / belum ketemu) yang saat dipilih membuka modal
+ * deskripsi lalu menghasilkan embed balasan.
+ *
+ * Data diambil per BARANG (order_items) tapi dikirim per ORDER: satu pesan
+ * memuat semua barang order itu yang nyangkut, dengan SATU dropdown. Dulu satu
+ * pesan per barang, dan order berisi 5 barang membanjiri channel dengan 5 pesan
+ * yang isinya nyaris identik. Kalau kasus tiap barang beda (satu rusak, satu
+ * belum ketemu), itu dijelaskan di deskripsi modal.
  *
  * Logika stage PICK dijaga konsisten dengan App\Support\FulfillmentStale di
  * kyou.id & fulfillment-stale.ts: order sudah di-print (masuk PICK), belum
  * di-pack, dan barang (order_items) belum di-pick.
  *
  * Bukan cron harian: bot POLL tiap PICK_TRIAGE_POLL_MINUTES menit dan mengirim
- * barang begitu dia melewati 24 jam. Dedupe lewat store (`posted`), jadi tiap
- * barang muncul tepat sekali. Kalau tidak ada yang baru → diam, tidak ada pesan
- * "tidak ada" (kalau tidak, channel kebanjiran tiap putaran).
- *
- * Format: SATU pesan per barang (1 embed + 1 dropdown), biar rapi & jelas siapa
- * jawab apa.
+ * order begitu barangnya melewati 24 jam. Dedupe lewat store (`posted`), jadi
+ * tiap order muncul tepat sekali. Kalau tidak ada yang baru → diam, tidak ada
+ * pesan "tidak ada" (kalau tidak, channel kebanjiran tiap putaran).
  *
  * Batas atas MAX_HOURS tetap dipakai sebagai pengaman: kalau store hilang (mis.
  * redeploy tanpa volume di data/), tanpa batas atas bot akan memblast ULANG
@@ -42,6 +45,16 @@ type StalePickItem = {
   orderId: string;
   itemName: string;
   hours: number;
+  user: string;
+  shipping: string;
+};
+
+/** Semua barang nyangkut milik satu order, digabung jadi satu pesan. */
+type StalePickOrder = {
+  orderId: string;
+  itemIds: string[];
+  itemNames: string[];
+  hours: number; // yang paling lama di antara barangnya
   user: string;
   shipping: string;
 };
@@ -90,10 +103,6 @@ function buildQuery(minHours: number, maxHours: number): string {
   `.trim();
 }
 
-function truncate(value: string, max: number): string {
-  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
-}
-
 export async function fetchStalePickItems(minHours: number, maxHours: number): Promise<StalePickItem[]> {
   const config = metabaseConfig();
   if (!config) {
@@ -119,26 +128,57 @@ export async function fetchStalePickItems(minHours: number, maxHours: number): P
   }));
 }
 
-/** Embed satu barang (dipasang bareng satu dropdown). */
-function itemEmbed(item: StalePickItem): EmbedBuilder {
+/**
+ * Gabungkan baris per-barang jadi satu entri per order. Usia yang dipakai =
+ * yang paling lama; customer & kurir sama untuk semua barang dalam satu order.
+ */
+export function groupByOrder(items: StalePickItem[]): StalePickOrder[] {
+  const byOrder = new Map<string, StalePickOrder>();
+
+  for (const item of items) {
+    if (!item.itemId || !item.orderId || item.orderId === "-") continue;
+
+    const existing = byOrder.get(item.orderId);
+    if (!existing) {
+      byOrder.set(item.orderId, {
+        orderId: item.orderId,
+        itemIds: [item.itemId],
+        itemNames: [item.itemName],
+        hours: item.hours,
+        user: item.user,
+        shipping: item.shipping
+      });
+      continue;
+    }
+    existing.itemIds.push(item.itemId);
+    existing.itemNames.push(item.itemName);
+    existing.hours = Math.max(existing.hours, item.hours);
+  }
+
+  return [...byOrder.values()].sort((a, b) => b.hours - a.hours);
+}
+
+/** Embed satu order (dipasang bareng satu dropdown). */
+function orderEmbed(order: StalePickOrder): EmbedBuilder {
+  const count = order.itemNames.length;
   return new EmbedBuilder()
     .setColor(EMBED_COLOR)
-    .setTitle(`🔴 #${item.orderId} — nyangkut di PICK ${item.hours} jam`)
+    .setTitle(`🔴 #${order.orderId} — nyangkut di PICK ${order.hours} jam · ${count} barang`)
     .addFields(
-      { name: "Barang", value: truncate(item.itemName, 240), inline: false },
-      { name: "Customer", value: item.user, inline: true },
-      { name: "Kurir", value: item.shipping, inline: true }
+      { name: "Barang", value: itemListValue(order.itemNames), inline: false },
+      { name: "Customer", value: order.user, inline: true },
+      { name: "Kurir", value: order.shipping, inline: true }
     )
     .setFooter({ text: "Pilih status di dropdown bawah, lalu isi deskripsi" });
 }
 
 /**
- * Satu putaran cek. Kirim HANYA barang yang belum pernah diposting & belum
- * dijawab — jadi tiap barang muncul sekali, tepat setelah dia lewat 24 jam.
- * Kalau tidak ada yang baru: diam (tidak ada pesan "tidak ada"), supaya poller
- * tidak menyampah tiap 15 menit.
+ * Satu putaran cek. Kirim HANYA order yang belum pernah diposting & belum
+ * dijawab — jadi tiap order muncul sekali, tepat setelah barangnya lewat 24
+ * jam. Kalau tidak ada yang baru: diam (tidak ada pesan "tidak ada"), supaya
+ * poller tidak menyampah tiap 15 menit.
  *
- * Return jumlah barang yang dikirim (dipakai tes/log).
+ * Return jumlah ORDER yang dikirim (dipakai tes/log).
  */
 export async function runPickTriageCheck(client: Client): Promise<number> {
   const channelId = env.PICK_TRIAGE_CHANNEL_ID;
@@ -158,8 +198,13 @@ export async function runPickTriageCheck(client: Client): Promise<number> {
     return 0;
   }
 
-  // Yang baru: itemId valid, belum pernah diposting, belum dijawab.
-  const fresh = items.filter((it) => it.itemId && !isPosted(it.itemId) && !isResolved(it.itemId));
+  // Yang baru: belum pernah diposting, belum dijawab, DAN barangnya belum
+  // pernah dikirim satu-satu oleh versi lama (store lama ber-key item) —
+  // tanpa cek terakhir, deploy ini akan mengirim ulang order yang barangnya
+  // sudah nangkring di channel.
+  const fresh = groupByOrder(items).filter(
+    (o) => !isPosted(o.orderId) && !isResolved(o.orderId) && !o.itemIds.some(hasLegacyItem)
+  );
   if (fresh.length === 0) return 0;
 
   const channel = await client.channels.fetch(channelId).catch(() => null);
@@ -173,28 +218,29 @@ export async function runPickTriageCheck(client: Client): Promise<number> {
   // 24-30 jam sudah membatasi, tapi cap ini menjaga kalau tetap banyak.
   const shown = fresh.slice(0, env.PICK_TRIAGE_MAX_ITEMS);
   if (fresh.length > shown.length) {
-    console.warn(`[pick-triage] ${fresh.length - shown.length} barang tidak dikirim (cap MAX_ITEMS=${env.PICK_TRIAGE_MAX_ITEMS}).`);
+    console.warn(`[pick-triage] ${fresh.length - shown.length} order tidak dikirim (cap MAX_ITEMS=${env.PICK_TRIAGE_MAX_ITEMS}).`);
   }
 
-  for (const item of shown) {
-    const posted: PostedItem = {
-      itemId: item.itemId,
-      orderId: item.orderId,
-      itemName: item.itemName,
-      user: item.user,
-      shipping: item.shipping,
-      hours: item.hours,
+  for (const order of shown) {
+    const posted: PostedOrder = {
+      orderId: order.orderId,
+      itemIds: order.itemIds,
+      itemNames: order.itemNames,
+      user: order.user,
+      shipping: order.shipping,
+      hours: order.hours,
       channelId,
       messageId: "" // diisi setelah pesan terkirim
     };
     const message = await textChannel.send({
-      embeds: [itemEmbed(item)],
+      embeds: [orderEmbed(order)],
       components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(buildTriageSelect(posted))]
     });
     markPosted({ ...posted, messageId: message.id });
   }
 
-  console.log(`[pick-triage] ${shown.length} barang baru lewat ${minHours} jam — terkirim.`);
+  const itemCount = shown.reduce((sum, o) => sum + o.itemIds.length, 0);
+  console.log(`[pick-triage] ${shown.length} order (${itemCount} barang) baru lewat ${minHours} jam — terkirim.`);
   return shown.length;
 }
 
