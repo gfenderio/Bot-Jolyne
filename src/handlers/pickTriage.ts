@@ -134,7 +134,9 @@ export async function handlePickTriageSelect(interaction: StringSelectMenuIntera
     .setStyle(TextInputStyle.Paragraph)
     .setRequired(false)
     .setMaxLength(1000)
-    .setPlaceholder("Kalau tiap barang beda kasusnya, sebutkan di sini. Contoh: Laser Ticket belum ketemu, Art Print rusak.");
+    // Placeholder Discord dibatasi 100 karakter — lewat sedikit saja, showModal
+    // melempar dan pengklik cuma melihat "This interaction failed".
+    .setPlaceholder(truncate("Kalau tiap barang beda kasusnya, sebutkan di sini. Contoh: Laser Ticket belum ketemu.", 100));
 
   modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(noteInput));
   await interaction.showModal(modal);
