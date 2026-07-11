@@ -173,6 +173,10 @@ function recoverOrderFromMessage(
 
   const title = embed.title ?? "";
   const hours = Number(title.match(/(\d+)\s*jam/)?.[1] ?? 0);
+  // Nomor order dibaca dari judul, bukan dari customId: pesan versi lama yang
+  // masih nangkring di channel ber-customId ITEM id, dan kalau dipakai apa
+  // adanya kolom "Order" di embed hasil akan menampilkan item id.
+  const titleOrderId = title.match(/#(\S+)/)?.[1];
   const field = (name: string) =>
     embed.fields?.find((f) => f.name.toLowerCase() === name)?.value?.trim() || "-";
 
@@ -182,7 +186,7 @@ function recoverOrderFromMessage(
     .filter((line) => line && line !== "-");
 
   return {
-    orderId,
+    orderId: titleOrderId ?? orderId,
     itemIds: [],
     itemNames,
     user: field("customer"),
