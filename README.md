@@ -1,10 +1,46 @@
 # Bot Jolyne
 
-Bot Discord berbasis Node.js + TypeScript untuk operasional Kyou. Fokus aktif repo ini:
+> Stand-nya Jolyne Cujoh, **Stone Free**, mengurai tubuhnya sendiri jadi benang — lalu memakai benang itu untuk mengikat apa pun yang terpisah jadi satu.
+>
+> Bot ini kurang lebih begitu: satu proses Node yang mengulur benang ke mana-mana — kyou.id, PDA machitan, Google Sheet, Metabase, Notion — lalu menariknya semua ke **Discord**, tempat tim gudang & admin sebenarnya bekerja. Tidak ada satu pun fitur di sini yang "punya"-nya sendiri; semuanya menyambungkan sistem yang sudah ada.
 
-- Birthday reminder dari Metabase.
-- Kyou Item Scanner Extension.
-- Kyou Deliveree Partner Extension untuk membaca status halaman Deliveree, mengirim notifikasi Discord, dan Auto Retry driver dari Chrome user yang sedang login.
+Node.js + TypeScript + discord.js. Deploy manual lewat Coolify (**tidak ada CI/CD** — push tidak otomatis rilis).
+
+## Fitur
+
+### Fulfillment — barang & order nyangkut
+- **Triase PICK 24 jam** (`schedulers/pick-triage.ts`) — poller tiap 15 menit ke Metabase. Order yang sudah di-print tapi barangnya belum di-pick selama 24 jam dikirim ke Discord: **satu pesan per order** (embed berisi daftar barangnya) + dropdown 3 opsi — ⏳ masih antri pick · ⚠️ barang rusak · ❓ belum ketemu. Pilih → modal deskripsi → bot balas embed hasil (siapa lapor, status, keterangan), lalu pesan pertanyaannya dihapus. Opsi "barang rusak" bisa dilampiri foto (opsional). Band 24–30 jam; yang lebih lama itu ranah digest di bawah.
+- **Digest order nyangkut 3–30 hari** (`schedulers/fulfillment-stale.ts`) — rekap harian 09:00 WIB, level order, dikelompokkan per tahap (PRINT → PICK → PACK → RESI). Read-only, tanpa tombol. Logika tahapnya sengaja identik dengan `App\Support\FulfillmentStale` di kyou.id — **kalau salah satu diubah, samakan yang lain.**
+
+### Gudang — jembatan dari PDA machitan
+Server HTTP kecil (`machitan/httpServer.ts`) yang menerima kiriman dari PDA/aplikasi lain, semua dipagari Bearer token:
+- `POST /machitan/pick-proof` — foto bukti barang di-pick.
+- `POST /machitan/pickup-proof` — foto bukti paket pickup diterima di toko.
+- `POST /machitan/ws-inbox` — item WS masuk; ada laporan harian + rekap opname.
+- `/machitan/absen/*` — **Absen Arrival**: batch barang datang dikirim dari Sheet jurnal, dicocokkan di gudang, hasilnya diekspor jadi file Excel (RES/CONV/Ledger/Absen) ke Discord.
+- `GET /health` — cek hidup.
+
+### Deliveree
+Chrome extension yang berjalan di browser staf yang sudah login `webapp.deliveree.com`: membaca order & status driver dari halaman, mengirim notifikasi ke Discord, dan **Auto Retry** menekan "Coba Pesan Kembali" saat driver tidak ditemukan. Kirim notifikasi tiap retry (attempt, delay, durasi) dan saat driver akhirnya dapat.
+
+### Lain-lain
+- **Birthday admin** — pengingat harian dari Metabase.
+- **Oripa Live** — `/live start`/`/live end` (selfie proof + foto insight) dan `/live-recap`.
+- **Absen baito** — tombol clock-in/out untuk staf paruh waktu.
+- **Standup Notion** — laporan harian di-upsert ke Work Journal.
+- **Kyou Item Scanner** — extension buat scanner keyboard-wedge: scan barcode → tab langsung buka halaman item di kyou.id.
+
+## Slash Commands
+
+| Command | Fungsi |
+| --- | --- |
+| `/ping`, `/server`, `/whoami` | Utilitas (latency, info server, Discord user ID) |
+| `/birthday`, `/birthdaynow` | Ulang tahun admin |
+| `/baito` | Absen masuk/pulang staf paruh waktu |
+| `/opname` | Rekap opname WS |
+| `/live start`, `/live end`, `/live-recap` | Sesi live Oripa |
+| `/task` | Bikin task Notion |
+| `/deliveree-status`, `/deliveree-cases`, `/deliveree-case`, `/deliveree-extension-health` | Deliveree |
 
 ## Setup
 
@@ -15,21 +51,11 @@ npm run build
 npm start
 ```
 
-Untuk development:
+Development: `npm run dev` · Daftarkan slash command: `npm run commands:deploy`
 
-```bash
-npm run dev
-```
+## Konfigurasi
 
-Deploy slash command:
-
-```bash
-npm run commands:deploy
-```
-
-## Environment Penting
-
-Isi env ini di Coolify untuk bot + Deliveree remote intake:
+Env inti (selebihnya lihat `.env.example`):
 
 ```bash
 DISCORD_TOKEN=
@@ -39,111 +65,43 @@ METABASE_URL=
 METABASE_EMAIL=
 METABASE_PASSWORD=
 METABASE_DATABASE_ID=2
-BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID=
-
-DELIVEREE_EXTENSION_ENABLED=true
-DELIVEREE_EXTENSION_HOST=0.0.0.0
-DELIVEREE_EXTENSION_PORT=3001
-DELIVEREE_EXTENSION_TOKEN=
-DELIVEREE_EXTENSION_ALLOWED_DEVICE_IDS=yugi-browser,cindy-browser,rendy-browser
-DELIVEREE_INTAKE_DISCORD_ENABLED=true
-DELIVEREE_ALERT_CHANNEL_ID=1501899831268868106
-DELIVEREE_ALLOWED_CHANNEL_IDS=1501899831268868106
-MACHITAN_PICK_PROOF_CHANNEL_ID=1418827227264450663
-DELIVEREE_ALLOWED_GUILD_ID=728199543249829909
-DELIVEREE_CASE_STORE_PATH=data/deliveree-cases.json
 ```
 
-Endpoint remote extension saat ini:
+> **Setelan fulfillment (triase PICK + digest) TIDAK diambil dari env server.** Channel & flag-nya dipaksa dari kode di `src/config/env.ts` (pola sama `BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID`), supaya ganti setelan tidak perlu utak-atik env Coolify. Mau ubah → edit file itu lalu redeploy.
+
+Dua hal yang gampang menjatuhkan bot, catat baik-baik:
+
+- **Intent `MessageContent` (privileged)** dipakai fitur foto barang rusak. Kalau intent itu dimatikan di Developer Portal, Discord **menolak login dan seluruh bot mati** — bukan cuma fitur fotonya. Pemulihan: set `PICK_TRIAGE_PHOTO_ENABLED` jadi `"false"` di `src/config/env.ts`.
+- **`data/` tidak dipasangi volume.** Store (`pick-triage.json`, `deliveree-cases.json`, dll) hilang tiap redeploy. Itu keputusan sadar — konsekuensinya barang di band 24–30 jam bisa terkirim ulang setelah redeploy.
+
+## Pasang Chrome Extension
+
+```bash
+npm run deliveree:extension:pack      # → dist/deliveree-capture-extension
+npm run kyou:scanner-extension:pack   # → dist/kyou-item-scanner-extension
+```
+
+Di komputer staf: `chrome://extensions` → aktifkan **Developer mode** → **Load unpacked** → pilih folder hasil pack. Khusus Deliveree, buka popup-nya lalu isi **Intake URL** (endpoint remote di bawah), **Device ID** (`yugi-browser` / `cindy-browser` / `rendy-browser`), dan **Token** sesuai `DELIVEREE_EXTENSION_TOKEN` di server → `Simpan` → `Test Intake` → cek dengan `/deliveree-status`.
 
 ```text
 http://w9a2iwiolpi9wvw2fx6wlboo.43.134.34.13.sslip.io
 ```
 
-## Slash Commands
-
-- `/ping`: cek latency bot.
-- `/server`: tampilkan info server Discord.
-- `/birthday`: ambil daftar birthday admin dari Metabase.
-- `/birthdaynow`: tampilkan admin yang birthday hari ini.
-- `/whoami`: tampilkan Discord user ID untuk konfigurasi.
-- `/deliveree-status`: cek status Deliveree terakhir dari extension.
-- `/deliveree-extension-health`: cek device extension yang aktif dan recovery case.
-- `/deliveree-cases`: lihat daftar case Deliveree terbaru.
-- `/deliveree-case`: lihat detail satu case Deliveree.
-
-## Kyou Deliveree Partner Extension
-
-Extension berjalan di Chrome staff yang sudah login `https://webapp.deliveree.com`. Data dikirim ke remote intake, lalu bot mengirim embed ke Discord.
-
-Fitur aktif:
-
-- Membaca order aktif dari halaman detail booking dan top navigation/homepage Deliveree.
-- Mengirim notifikasi saat order baru terbaca.
-- Mengirim notifikasi saat status mencari driver/gagal driver terbaca.
-- Auto Retry menekan tombol `Coba Pesan Kembali` jika fitur di popup aktif.
-- Mengirim notifikasi setiap retry, termasuk attempt, delay, dan durasi.
-- Mengirim notifikasi saat driver ditemukan, termasuk driver/plat jika terbaca.
-- Menyimpan riwayat aktivitas lokal di popup untuk troubleshooting.
-
-Data yang dikirim dibatasi untuk kebutuhan operasional: event, booking ID, status, URL halaman, jenis layanan, jarak, jumlah tujuan, No. Job, driver, plat, ETA/keterlambatan jika terlihat. Extension tidak mengirim cookie, password, OTP, foto, signature, atau data pembayaran.
-
-### Pack Extension
-
-```bash
-npm run deliveree:extension:pack
-```
-
-Folder hasil pack:
-
-```text
-dist/deliveree-capture-extension
-```
-
-Cara pasang di komputer user:
-
-1. Buka `chrome://extensions`.
-2. Aktifkan `Developer mode`.
-3. Klik `Load unpacked`.
-4. Pilih `dist/deliveree-capture-extension`.
-5. Buka popup extension.
-6. Pastikan `Intake URL` berisi endpoint remote.
-7. Isi `Device ID` salah satu: `yugi-browser`, `cindy-browser`, atau `rendy-browser`.
-8. Isi `Token` sesuai `DELIVEREE_EXTENSION_TOKEN` di server.
-9. Klik `Simpan`, lalu `Test > Test Intake`.
-10. Cek Discord dengan `/deliveree-status` atau `/deliveree-extension-health`.
-
-## Kyou Item Scanner Extension
-
-Extension `Kyou Item Scanner Opener` dipakai untuk scanner keyboard-wedge. Saat scanner membaca kode angka lalu mengirim `Enter`, tab aktif redirect ke halaman item Kyou.
-
-Default:
-
-- Kode contoh: `219402`
-- URL tujuan: `https://kyou.id/items/219402`
-- Host aktif: `https://kyou.id/*` dan `https://old.kyou.id/*`
-- Mode default: redirect tab aktif.
-
-Pack:
-
-```bash
-npm run kyou:scanner-extension:pack
-```
+Data yang dikirim extension dibatasi ke kebutuhan operasional (event, booking ID, status, URL, layanan, jarak, No. Job, driver, plat, ETA). **Tidak** mengirim cookie, password, OTP, foto, tanda tangan, atau data pembayaran.
 
 ## Struktur
 
 ```text
 src/
-  commands/      Slash commands Discord
-  config/        Validasi environment
-  deliveree/     Intake, parser, case store, Discord notifier
-  events/        Event Discord
-  services/      Integrasi eksternal dan registrasi slash command
-  types/         Shared TypeScript types
-extensions/
-  deliveree-capture/          Chrome extension Deliveree remote intake
-  kyou-item-scanner-opener/   Chrome extension scanner Kyou
-scripts/
-  pack-deliveree-extension.js
-  pack-kyou-scanner-extension.js
+  commands/     Slash commands
+  config/       Validasi env (+ setelan yang dipaksa dari kode)
+  events/       Router interaksi Discord (dropdown, modal, tombol)
+  handlers/     Alur interaktif (triase PICK, absen baito, oripa live)
+  schedulers/   Cron & poller (triase PICK, digest fulfillment, birthday, dll)
+  machitan/     Server HTTP intake dari PDA (proof, WS inbox, absen)
+  services/     Metabase, Notion, store JSON
+extensions/     Chrome extension (Deliveree, item scanner)
+scripts/        Pack extension, pembersih channel triase, dll
 ```
+
+Detail per file: lihat [`CODE_STRUCTURE.md`](CODE_STRUCTURE.md).
