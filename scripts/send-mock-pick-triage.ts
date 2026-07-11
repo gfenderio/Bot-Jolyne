@@ -56,11 +56,10 @@ client.once("clientReady", async (ready) => {
     if (!channel?.isTextBased()) throw new Error("channel bukan text channel");
 
     for (const mock of MOCKS) {
-      // Mention persis seperti poller: hanya order biasa (24 jam), tidak untuk early.
-      const mention =
-        !mock.isEarly && env.PICK_TRIAGE_MENTION_USER_ID
-          ? `<@${env.PICK_TRIAGE_MENTION_USER_ID}>`
-          : undefined;
+      // Mention persis seperti poller: semua pesan triase, early maupun bukan.
+      const mention = env.PICK_TRIAGE_MENTION_USER_ID
+        ? `<@${env.PICK_TRIAGE_MENTION_USER_ID}>`
+        : undefined;
 
       const message = await (channel as TextChannel).send({
         ...(mention ? { content: mention } : {}),

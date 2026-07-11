@@ -188,9 +188,8 @@ const envSchema = z.object({
   // datang, ordernya di-print duluan supaya barangnya disiapkan. Jadi ambangnya
   // 4 hari, bukan 24 jam — barangnya sendiri mungkin memang belum sampai.
   PICK_TRIAGE_EARLY_MIN_HOURS: pollIntervalSeconds.default(96),
-  // Orang yang di-mention tiap ada pesan triase baru. SENGAJA hanya untuk order
-  // biasa (24 jam) — order yang ditagih early memang wajar lambat, jadi tidak
-  // perlu diburu. Kosongkan → tidak ada mention sama sekali.
+  // Orang yang di-mention tiap ada pesan triase baru — order biasa (24 jam)
+  // maupun yang ditagih early (4 hari). Kosongkan → tidak ada mention sama sekali.
   PICK_TRIAGE_MENTION_USER_ID: optionalString.default("1337888111471886456"),
   // Maksimal barang yang diposting sekali jalan (sisanya diringkas).
   PICK_TRIAGE_MAX_ITEMS: pollIntervalSeconds.default(25),
