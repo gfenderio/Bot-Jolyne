@@ -31,6 +31,10 @@ export interface PostedOrder {
   user: string;
   shipping: string;
   hours: number;
+  /** Pelunasan ditagih lewat tombol "Early" — barangnya boleh jadi belum datang. */
+  isEarly?: boolean;
+  /** Perkiraan barang datang (orders.eta), mis. "July-August 2026". */
+  eta?: string;
   channelId: string;
   messageId: string;
 }

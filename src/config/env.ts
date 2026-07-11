@@ -178,6 +178,11 @@ const envSchema = z.object({
   // tiap 15 menit, band 24-30 jam tidak akan membuat barang kelewat.
   PICK_TRIAGE_MIN_HOURS: pollIntervalSeconds.default(24),
   PICK_TRIAGE_MAX_HOURS: pollIntervalSeconds.default(30),
+  // Order yang pelunasannya ditagih lewat tombol "Early" di panel PO kyou.id
+  // (admin_logs.action='early_order'): pembeli ditagih lunas SEBELUM barangnya
+  // datang, ordernya di-print duluan supaya barangnya disiapkan. Jadi ambangnya
+  // 4 hari, bukan 24 jam — barangnya sendiri mungkin memang belum sampai.
+  PICK_TRIAGE_EARLY_MIN_HOURS: pollIntervalSeconds.default(96),
   // Maksimal barang yang diposting sekali jalan (sisanya diringkas).
   PICK_TRIAGE_MAX_ITEMS: pollIntervalSeconds.default(25),
   PICK_TRIAGE_STORE_PATH: optionalString.default("data/pick-triage.json"),

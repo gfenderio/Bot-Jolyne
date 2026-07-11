@@ -232,6 +232,10 @@ function recoverOrderFromMessage(
     itemNames.push(line.replace(/^•\s*/, ""));
   }
 
+  // Penanda early ada di judul ("— ditagih early ·"), ETA-nya di deskripsi.
+  const isEarly = /ditagih early/i.test(title);
+  const eta = embed.description?.match(/barang datang:\s*\*\*(.+?)\*\*/i)?.[1]?.trim() ?? "";
+
   return {
     orderId: titleOrderId ?? orderId,
     itemIds,
@@ -239,6 +243,8 @@ function recoverOrderFromMessage(
     user: field("customer"),
     shipping: field("kurir"),
     hours,
+    isEarly,
+    eta,
     channelId: message.channelId,
     messageId: message.id
   };
@@ -357,6 +363,17 @@ export async function handlePickTriageModal(interaction: ModalSubmitInteraction)
       { name: "Nyangkut", value: order ? `${order.hours} jam` : "-", inline: true },
       { name: "Kurir", value: order?.shipping ?? "-", inline: true },
       { name: "Status", value: choiceLabel(choice), inline: true },
+      // Konteks penagihan cuma ditampilkan kalau relevan — order biasa tidak
+      // perlu baris kosong "-".
+      ...(order?.isEarly
+        ? [
+            {
+              name: "Penagihan",
+              value: `🟣 Ditagih early — pelunasan ditagih sebelum barang datang${order.eta ? ` · ETA **${order.eta}**` : ""}`,
+              inline: true
+            }
+          ]
+        : []),
       { name: "Deskripsi", value: truncate(note, 1000), inline: false }
     )
     .setFooter({ text: `Dilaporkan oleh ${interaction.user.tag}` })

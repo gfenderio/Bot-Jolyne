@@ -40,6 +40,25 @@ import { buildTriageSelect, itemListValue } from "../handlers/pickTriage.js";
  */
 
 const EMBED_COLOR = 0xd9534f;
+const EMBED_COLOR_EARLY = 0x9b59b6;
+
+/**
+ * Order yang pelunasannya ditagih lewat tombol **Early** di panel PO kyou.id.
+ *
+ * Tagih vs Early memanggil fungsi yang sama (`OrderHelper::createFullPayment`);
+ * bedanya cuma flag `$early`, yang (a) menambah kalimat "Pengiriman itemnya
+ * diestimasi mulai minggu depan yah" di WA ke pembeli, dan (b) mencatat
+ * `admin_logs.action = 'early_order'` alih-alih `'tagih_order'`.
+ *
+ * Artinya: pembeli sudah ditagih lunas SEBELUM barangnya sampai, dan ordernya
+ * di-print duluan supaya barangnya disiapkan. Menagih staf setelah 24 jam itu
+ * tidak adil — barangnya sendiri mungkin belum datang. Karena itu ambangnya
+ * dilonggarkan jadi 4 hari (PICK_TRIAGE_EARLY_MIN_HOURS).
+ */
+const EARLY_BILLED_SQL = `EXISTS (
+        SELECT 1 FROM admin_logs al2
+        WHERE al2.order_id = o.order_id AND al2.action = 'early_order'
+      )`;
 
 type StalePickItem = {
   itemId: string;
@@ -48,6 +67,8 @@ type StalePickItem = {
   hours: number;
   user: string;
   shipping: string;
+  isEarly: boolean;
+  eta: string;
 };
 
 /** Semua barang nyangkut milik satu order, digabung jadi satu pesan. */
@@ -58,6 +79,8 @@ type StalePickOrder = {
   hours: number; // yang paling lama di antara barangnya
   user: string;
   shipping: string;
+  isEarly: boolean;
+  eta: string; // perkiraan barang datang (orders.eta), mis. "July-August 2026"
 };
 
 function metabaseConfig(): MetabaseConfig | null {
@@ -72,12 +95,21 @@ function metabaseConfig(): MetabaseConfig | null {
   };
 }
 
-function buildQuery(minHours: number, maxHours: number): string {
-  // HANYA band [minHours, maxHours] jam — barang yang BARU lewat 24 jam.
-  // Yang nyangkut lebih lama dari maxHours SENGAJA tidak dikirim: itu ranah
-  // digest fulfillment-stale (3-30 hari), bukan triase harian ini. Jangan
-  // tambahkan mode cutoff absolut lagi — pernah bikin barang 1378 jam ikut
-  // terkirim dan membanjiri channel.
+/** Lebar band pengaman (jam) — sama untuk order biasa maupun yang ditagih early. */
+function bandWidth(): number {
+  return Math.max(1, env.PICK_TRIAGE_MAX_HOURS - env.PICK_TRIAGE_MIN_HOURS);
+}
+
+function buildQuery(minHours: number, maxHours: number, earlyMinHours: number): string {
+  // Dua ambang dalam SATU query: order yang ditagih early (barangnya boleh jadi
+  // belum datang) baru ditanyakan setelah earlyMinHours (default 96 jam = 4
+  // hari); sisanya tetap minHours (24 jam).
+  //
+  // Tetap pakai BAND, bukan cutoff absolut. Yang nyangkut lebih lama dari batas
+  // atas SENGAJA tidak dikirim: itu ranah digest fulfillment-stale (3-30 hari).
+  // Jangan tambahkan mode cutoff absolut lagi — pernah bikin barang 1378 jam
+  // ikut terkirim dan membanjiri channel.
+  const earlyMaxHours = earlyMinHours + bandWidth();
 
   // Tanpa LIMIT — fetchNativeQueryWithPagination yang menambah LIMIT/OFFSET.
   return `
@@ -87,7 +119,9 @@ function buildQuery(minHours: number, maxHours: number): string {
       oi.item_name AS item_name,
       ROUND(TIMESTAMPDIFF(HOUR, o.updated_at, NOW())) AS hours_stuck,
       u.name AS user_name,
-      o.shipping_type AS shipping_type
+      o.shipping_type AS shipping_type,
+      ${EARLY_BILLED_SQL} AS is_early,
+      COALESCE(o.eta, '') AS eta
     FROM orders o
     JOIN users u ON u.user_id = o.user_id
     JOIN order_items oi ON oi.order_id = o.order_id
@@ -99,18 +133,27 @@ function buildQuery(minHours: number, maxHours: number): string {
         WHERE al.order_id = o.order_id
           AND al.action IN ('print_order_address', 'print_order_address_manual')
       )
-      AND TIMESTAMPDIFF(HOUR, o.updated_at, NOW()) BETWEEN ${minHours} AND ${maxHours}
+      AND TIMESTAMPDIFF(HOUR, o.updated_at, NOW()) BETWEEN
+            (CASE WHEN ${EARLY_BILLED_SQL} THEN ${earlyMinHours} ELSE ${minHours} END)
+        AND (CASE WHEN ${EARLY_BILLED_SQL} THEN ${earlyMaxHours} ELSE ${maxHours} END)
     ORDER BY hours_stuck DESC
   `.trim();
 }
 
-export async function fetchStalePickItems(minHours: number, maxHours: number): Promise<StalePickItem[]> {
+export async function fetchStalePickItems(
+  minHours: number,
+  maxHours: number,
+  earlyMinHours: number
+): Promise<StalePickItem[]> {
   const config = metabaseConfig();
   if (!config) {
     throw new Error("Metabase belum dikonfigurasi (METABASE_URL/EMAIL/PASSWORD).");
   }
 
-  const { columns, rows } = await fetchNativeQueryWithPagination(config, buildQuery(minHours, maxHours));
+  const { columns, rows } = await fetchNativeQueryWithPagination(
+    config,
+    buildQuery(minHours, maxHours, earlyMinHours)
+  );
   const idx = (name: string) => columns.indexOf(name);
   const iItem = idx("item_id");
   const iOrder = idx("order_id");
@@ -118,6 +161,8 @@ export async function fetchStalePickItems(minHours: number, maxHours: number): P
   const iHours = idx("hours_stuck");
   const iUser = idx("user_name");
   const iShip = idx("shipping_type");
+  const iEarly = idx("is_early");
+  const iEta = idx("eta");
 
   return rows.map((row): StalePickItem => ({
     itemId: String(row[iItem] ?? "").trim(),
@@ -125,7 +170,11 @@ export async function fetchStalePickItems(minHours: number, maxHours: number): P
     itemName: String(row[iName] ?? "-").trim() || "-",
     hours: Number(row[iHours] ?? 0),
     user: String(row[iUser] ?? "-").trim() || "-",
-    shipping: String(row[iShip] ?? "-").trim() || "-"
+    shipping: String(row[iShip] ?? "-").trim() || "-",
+    // Metabase mengembalikan boolean MySQL sebagai true/false atau 1/0 —
+    // tergantung driver, jadi jangan bandingkan ke satu bentuk saja.
+    isEarly: ["true", "1"].includes(String(row[iEarly]).toLowerCase()),
+    eta: String(row[iEta] ?? "").trim()
   }));
 }
 
@@ -147,7 +196,9 @@ export function groupByOrder(items: StalePickItem[]): StalePickOrder[] {
         itemNames: [item.itemName],
         hours: item.hours,
         user: item.user,
-        shipping: item.shipping
+        shipping: item.shipping,
+        isEarly: item.isEarly,
+        eta: item.eta
       });
       continue;
     }
@@ -159,23 +210,53 @@ export function groupByOrder(items: StalePickItem[]): StalePickOrder[] {
   return [...byOrder.values()].sort((a, b) => b.hours - a.hours);
 }
 
+/** "26 jam" untuk order biasa; "4 hari" untuk yang ditagih early (angkanya besar). */
+function stuckLabel(hours: number): string {
+  if (hours < 48) return `${hours} jam`;
+  const days = Math.floor(hours / 24);
+  const rest = hours % 24;
+  return rest ? `${days} hari ${rest} jam` : `${days} hari`;
+}
+
 /** Embed satu order (dipasang bareng satu dropdown). */
 export function orderEmbed(order: StalePickOrder): EmbedBuilder {
   const count = order.itemNames.length;
+
   const embed = new EmbedBuilder()
-    .setColor(EMBED_COLOR)
-    .setTitle(`🔴 #${order.orderId} — nyangkut di PICK ${order.hours} jam · ${count} barang`);
+    .setColor(order.isEarly ? EMBED_COLOR_EARLY : EMBED_COLOR)
+    .setTitle(
+      order.isEarly
+        ? `🟣 #${order.orderId} — ditagih early · nyangkut ${stuckLabel(order.hours)} · ${count} barang`
+        : `🔴 #${order.orderId} — nyangkut di PICK ${stuckLabel(order.hours)} · ${count} barang`
+    );
 
   // Judul jadi link ke halaman ordernya di admin — satu klik, tanpa copy nomor.
   const url = adminOrderUrl(order.orderId);
   if (url) embed.setURL(url);
 
-  return embed.addFields(
+  if (order.isEarly) {
+    // Konteks yang menentukan jawaban staf: pembeli sudah dilunasi SEBELUM
+    // barangnya sampai, jadi "belum di-pick" bisa jadi memang karena barangnya
+    // belum datang — bukan kelalaian gudang.
+    embed.setDescription(
+      "Pelunasan ditagih **sebelum barangnya datang** (tombol Early di panel PO), " +
+        "lalu ordernya di-print supaya barangnya disiapkan. " +
+        "Kalau barangnya memang belum sampai, pilih **Masih antri pick** dan sebutkan di deskripsi." +
+        (order.eta ? `\nPerkiraan barang datang: **${order.eta}**` : "")
+    );
+  }
+
+  return embed
+    .addFields(
       { name: "Barang", value: itemListValue(order.itemNames, order.itemIds), inline: false },
       { name: "Customer", value: order.user, inline: true },
       { name: "Kurir", value: order.shipping, inline: true }
     )
-    .setFooter({ text: "Pilih status di dropdown bawah, lalu isi deskripsi" });
+    .setFooter({
+      text: order.isEarly
+        ? `Ditagih early — ambang ${Math.round(env.PICK_TRIAGE_EARLY_MIN_HOURS / 24)} hari, bukan 24 jam`
+        : "Pilih status di dropdown bawah, lalu isi deskripsi"
+    });
 }
 
 /**
@@ -195,10 +276,11 @@ export async function runPickTriageCheck(client: Client): Promise<number> {
 
   const minHours = env.PICK_TRIAGE_MIN_HOURS;
   const maxHours = env.PICK_TRIAGE_MAX_HOURS;
+  const earlyMinHours = env.PICK_TRIAGE_EARLY_MIN_HOURS;
 
   let items: StalePickItem[];
   try {
-    items = await fetchStalePickItems(minHours, maxHours);
+    items = await fetchStalePickItems(minHours, maxHours, earlyMinHours);
   } catch (error) {
     console.error("[pick-triage] gagal ambil data dari Metabase:", error);
     return 0;
@@ -235,6 +317,8 @@ export async function runPickTriageCheck(client: Client): Promise<number> {
       user: order.user,
       shipping: order.shipping,
       hours: order.hours,
+      isEarly: order.isEarly,
+      eta: order.eta,
       channelId,
       messageId: "" // diisi setelah pesan terkirim
     };
@@ -246,7 +330,11 @@ export async function runPickTriageCheck(client: Client): Promise<number> {
   }
 
   const itemCount = shown.reduce((sum, o) => sum + o.itemIds.length, 0);
-  console.log(`[pick-triage] ${shown.length} order (${itemCount} barang) baru lewat ${minHours} jam — terkirim.`);
+  const earlyCount = shown.filter((o) => o.isEarly).length;
+  console.log(
+    `[pick-triage] ${shown.length} order (${itemCount} barang) terkirim — ` +
+      `${shown.length - earlyCount} lewat ${minHours} jam, ${earlyCount} ditagih early lewat ${earlyMinHours} jam.`
+  );
   return shown.length;
 }
 
