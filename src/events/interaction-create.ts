@@ -1,5 +1,5 @@
 import { DiscordAPIError } from "discord.js";
-import type { Interaction } from "discord.js";
+import type { Interaction, ModalSubmitInteraction, StringSelectMenuInteraction } from "discord.js";
 import { commands } from "../commands/index.js";
 import { TASK_MODAL_ID } from "../commands/task.js";
 import { createTask } from "../services/notion.js";
@@ -20,17 +20,42 @@ import {
   TRIAGE_MODAL_PREFIX
 } from "../handlers/pickTriage.js";
 
+/**
+ * Handler triase dibungkus: kalau melempar, Discord tidak pernah dijawab dan
+ * user cuma melihat "This interaction failed" — tanpa jejak apa pun di log.
+ * Sekarang errornya dicatat DAN dilaporkan balik ke pengklik.
+ */
+async function runTriage(
+  interaction: StringSelectMenuInteraction | ModalSubmitInteraction,
+  run: () => Promise<void>
+): Promise<void> {
+  try {
+    await run();
+  } catch (err) {
+    console.error(`[pick-triage] handler gagal (customId=${interaction.customId}):`, err);
+    const notice = { content: "❌ Bot gagal memproses ini. Errornya sudah masuk log server.", flags: ["Ephemeral"] as const };
+    try {
+      if (interaction.replied || interaction.deferred) await interaction.followUp(notice);
+      else await interaction.reply(notice);
+    } catch {
+      // interaksi mungkin sudah kedaluwarsa (3 detik) — tidak ada yang bisa dilakukan.
+    }
+  }
+}
+
 export async function handleInteractionCreate(interaction: Interaction) {
   if (interaction.isStringSelectMenu()) {
     if (interaction.customId.startsWith(TRIAGE_SELECT_PREFIX)) {
-      await handlePickTriageSelect(interaction);
+      await runTriage(interaction, () => handlePickTriageSelect(interaction));
+    } else {
+      console.warn(`[interaction] dropdown tak dikenal: ${interaction.customId}`);
     }
     return;
   }
 
   if (interaction.isModalSubmit()) {
     if (interaction.customId.startsWith(TRIAGE_MODAL_PREFIX)) {
-      await handlePickTriageModal(interaction);
+      await runTriage(interaction, () => handlePickTriageModal(interaction));
       return;
     }
 
