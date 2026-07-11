@@ -28,15 +28,23 @@ const MOCKS = [
     ],
     hours: 26,
     user: "Jessica Yuki (MOCK)",
-    shipping: "JNE REG"
+    shipping: "JNE REG",
+    isEarly: false,
+    eta: ""
   },
   {
+    // Ditagih early: ambang 4 hari, embed ungu, dan SENGAJA tanpa mention.
     orderId: "999102",
-    itemIds: ["534775"],
-    itemNames: ["Tokai Teio Chain Collection (4cm) - Uma Musume Pretty Derby"],
-    hours: 24,
+    itemIds: ["534775", "534776"],
+    itemNames: [
+      "Tokai Teio Chain Collection (4cm) - Uma Musume Pretty Derby",
+      "Nendoroid Racing Miku - 2026 Ver. Hatsune Miku GT Project"
+    ],
+    hours: 100,
     user: "Hazel Hazza Niskala (MOCK)",
-    shipping: "JNE YES"
+    shipping: "JNE YES",
+    isEarly: true,
+    eta: "August-September 2026"
   }
 ];
 
@@ -48,15 +56,26 @@ client.once("clientReady", async (ready) => {
     if (!channel?.isTextBased()) throw new Error("channel bukan text channel");
 
     for (const mock of MOCKS) {
+      // Mention persis seperti poller: hanya order biasa (24 jam), tidak untuk early.
+      const mention =
+        !mock.isEarly && env.PICK_TRIAGE_MENTION_USER_ID
+          ? `<@${env.PICK_TRIAGE_MENTION_USER_ID}>`
+          : undefined;
+
       const message = await (channel as TextChannel).send({
+        ...(mention ? { content: mention } : {}),
         embeds: [orderEmbed(mock)],
         components: [
           new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
             buildTriageSelect({ ...mock, channelId: channel.id, messageId: "" })
           )
-        ]
+        ],
+        allowedMentions: { users: mention ? [env.PICK_TRIAGE_MENTION_USER_ID] : [] }
       });
-      console.log(`terkirim: #${mock.orderId} (${mock.itemNames.length} barang) → ${message.id}`);
+      console.log(
+        `terkirim: #${mock.orderId} (${mock.itemNames.length} barang, ${mock.isEarly ? "EARLY" : "biasa"}) ` +
+          `→ mention: ${mention ?? "tidak ada"} → ${message.id}`
+      );
     }
     console.log("\nCatatan: mock ini TIDAK ditulis ke store — dropdown-nya baru bisa dijawab");
     console.log("setelah bot di server di-redeploy (detailnya dipulihkan dari embed).");

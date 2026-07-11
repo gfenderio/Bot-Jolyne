@@ -188,6 +188,10 @@ const envSchema = z.object({
   // datang, ordernya di-print duluan supaya barangnya disiapkan. Jadi ambangnya
   // 4 hari, bukan 24 jam — barangnya sendiri mungkin memang belum sampai.
   PICK_TRIAGE_EARLY_MIN_HOURS: pollIntervalSeconds.default(96),
+  // Orang yang di-mention tiap ada pesan triase baru. SENGAJA hanya untuk order
+  // biasa (24 jam) — order yang ditagih early memang wajar lambat, jadi tidak
+  // perlu diburu. Kosongkan → tidak ada mention sama sekali.
+  PICK_TRIAGE_MENTION_USER_ID: optionalString.default("1337888111471886456"),
   // Maksimal barang yang diposting sekali jalan (sisanya diringkas).
   PICK_TRIAGE_MAX_ITEMS: pollIntervalSeconds.default(25),
   PICK_TRIAGE_STORE_PATH: optionalString.default("data/pick-triage.json"),
@@ -207,6 +211,7 @@ process.env.BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID = "1500736344182358066";
 process.env.FULFILLMENT_STALE_CHANNEL_ID = "1524977369641652227";
 process.env.PICK_TRIAGE_CHANNEL_ID = "1524977369641652227";
 process.env.PICK_TRIAGE_RESULT_CHANNEL_ID = "1525411338191376464";
+process.env.PICK_TRIAGE_MENTION_USER_ID = "1337888111471886456";
 process.env.PICK_TRIAGE_ENABLED = "true";
 process.env.PICK_TRIAGE_PHOTO_ENABLED = "true";
 // Env mati yang mungkin masih tersisa di server; dibersihkan biar tidak

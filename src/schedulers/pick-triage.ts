@@ -322,9 +322,21 @@ export async function runPickTriageCheck(client: Client): Promise<number> {
       channelId,
       messageId: "" // diisi setelah pesan terkirim
     };
+    // Mention HANYA untuk order biasa (24 jam). Order yang ditagih early memang
+    // wajar lambat — barangnya boleh jadi belum datang — jadi tidak perlu
+    // memburu siapa pun.
+    const mention =
+      !order.isEarly && env.PICK_TRIAGE_MENTION_USER_ID
+        ? `<@${env.PICK_TRIAGE_MENTION_USER_ID}>`
+        : undefined;
+
     const message = await textChannel.send({
+      ...(mention ? { content: mention } : {}),
       embeds: [orderEmbed(order)],
-      components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(buildTriageSelect(posted))]
+      components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(buildTriageSelect(posted))],
+      // Batasi siapa yang benar-benar kena ping: tanpa ini, teks lain di embed
+      // yang kebetulan berbentuk mention bisa ikut memberi notifikasi.
+      allowedMentions: { users: mention ? [env.PICK_TRIAGE_MENTION_USER_ID] : [] }
     });
     markPosted({ ...posted, messageId: message.id });
   }
