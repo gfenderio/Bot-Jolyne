@@ -27,10 +27,10 @@ export const TRIAGE_MODAL_PREFIX = "picktriage:mdl:"; // + orderId + ":" + choic
 
 const EMBED_COLOR_DONE = 0x2f8f5b;
 
-export const CHOICE_META: Record<TriageChoice, { emoji: string; label: string }> = {
-  antri: { emoji: "⏳", label: "Masih antri pick" },
-  rusak: { emoji: "⚠️", label: "Barang rusak" },
-  ketemu: { emoji: "❓", label: "Belum ketemu" }
+export const CHOICE_META: Record<TriageChoice, { emoji: string; label: string; hint: string }> = {
+  antri: { emoji: "⏳", label: "Masih antri pick", hint: "Contoh: antrean panjang, belum sempat diambil." },
+  rusak: { emoji: "⚠️", label: "Barang rusak", hint: "Contoh: box penyok, segel sobek. Fotonya diminta setelah ini." },
+  ketemu: { emoji: "❓", label: "Belum ketemu", hint: "Contoh: sudah dicari di rak Omega, tidak ada." }
 };
 
 const CHOICE_ORDER: TriageChoice[] = ["antri", "rusak", "ketemu"];
@@ -136,7 +136,7 @@ export async function handlePickTriageSelect(interaction: StringSelectMenuIntera
     .setMaxLength(1000)
     // Placeholder Discord dibatasi 100 karakter — lewat sedikit saja, showModal
     // melempar dan pengklik cuma melihat "This interaction failed".
-    .setPlaceholder(truncate("Kalau tiap barang beda kasusnya, sebutkan di sini. Contoh: Laser Ticket belum ketemu.", 100));
+    .setPlaceholder(truncate(meta.hint, 100));
 
   modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(noteInput));
   await interaction.showModal(modal);
@@ -252,9 +252,16 @@ async function collectDamagePhoto(
     return;
   }
 
-  const channel = interaction.channel;
+  // interaction.channel bisa null kalau channelnya belum ter-cache — ambil ulang
+  // lewat REST, jangan diam-diam menyerah (dulu: prompt foto tak pernah muncul
+  // dan tak ada satu baris pun di log yang menjelaskan kenapa).
+  const channelId = interaction.channelId;
+  const channel =
+    interaction.channel ??
+    (channelId ? await interaction.client.channels.fetch(channelId).catch(() => null) : null);
+
   if (!channel || !channel.isTextBased() || !("createMessageCollector" in channel)) {
-    console.warn("[pick-triage] foto dilewati — channel tidak bisa dipasangi collector.");
+    console.warn(`[pick-triage] foto dilewati — channel ${channelId ?? "?"} tidak bisa dipasangi collector.`);
     return;
   }
 
@@ -411,9 +418,13 @@ export async function handlePickTriageModal(interaction: ModalSubmitInteraction)
 
   await interaction.reply({ embeds: [embed] });
 
-  // Barang rusak: minta foto, lalu tempel ke embed hasil.
+  // Barang rusak: minta foto, lalu tempel ke embed hasil. Sengaja tidak di-await
+  // (menunggu 120 detik akan menahan handler), tapi errornya WAJIB ditangkap —
+  // kalau tidak, kegagalannya jadi unhandled rejection yang tak terlihat.
   if (choice === "rusak") {
-    void collectDamagePhoto(interaction, embed);
+    void collectDamagePhoto(interaction, embed).catch((err) =>
+      console.error("[pick-triage] alur foto barang rusak gagal:", err)
+    );
   }
 
   if (order) {
