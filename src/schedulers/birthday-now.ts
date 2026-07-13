@@ -11,6 +11,14 @@ import {
 const JAKARTA_TIME_ZONE = "Asia/Jakarta";
 const LAST_RUN_FILE = "data/birthday-last-run.json";
 
+/**
+ * Judul embed ucapan — dipakai untuk MENGENALI ucapan yang sudah terkirim di
+ * channel. Harus sama persis dengan default `buildBirthdayNowEmbed()`
+ * (src/commands/birthday-now.ts); kalau judulnya diubah di sana tanpa diubah di
+ * sini, pengaman anti-dobel ini diam-diam berhenti bekerja.
+ */
+const BIRTHDAY_EMBED_TITLE = "Birthday Hari Ini";
+
 type BirthdaySchedulerState = {
   lastAnnouncementDate?: string;
 };
@@ -61,6 +69,46 @@ async function writeSchedulerState(state: BirthdaySchedulerState) {
   await writeFile(LAST_RUN_FILE, `${JSON.stringify(state, null, 2)}\n`);
 }
 
+/**
+ * Ucapan hari ini SUDAH ada di channel?
+ *
+ * Penanda "sudah dikirim" disimpan di `data/birthday-last-run.json`, dan folder
+ * `data/` TIDAK punya volume persisten — jadi tiap redeploy penanda itu hilang,
+ * catch-up saat start mengira ucapan hari ini belum terkirim, dan mengirimnya
+ * LAGI. Itulah kenapa ucapan yang sama muncul berulang tiap kali bot di-deploy.
+ *
+ * Obatnya: jangan cuma percaya file yang bisa hilang — tanya Discord-nya
+ * langsung. Channel-nya sendiri yang jadi catatan permanen, dan itu tidak ikut
+ * terhapus saat redeploy. File-nya tetap dipakai sebagai jalan pintas (biar tak
+ * perlu menarik riwayat channel tiap tengah malam), tapi bukan lagi satu-satunya
+ * pegangan.
+ */
+async function announcementAlreadyPosted(
+  client: Client<true>,
+  channelId: string
+): Promise<boolean> {
+  try {
+    const channel = await client.channels.fetch(channelId);
+    if (!channel?.isTextBased() || !("messages" in channel)) return false;
+
+    const recent = await channel.messages.fetch({ limit: 30 });
+    const todayKey = getJakartaDateKey();
+
+    return recent.some(
+      (message) =>
+        message.author.id === client.user.id &&
+        message.embeds.some((embed) => embed.title === BIRTHDAY_EMBED_TITLE) &&
+        getJakartaDateKey(message.createdAt) === todayKey
+    );
+  } catch (error) {
+    // Gagal menarik riwayat (izin kurang / Discord ngambek): JANGAN menganggap
+    // "belum terkirim" lalu mengirim ulang — itu justru bug yang mau dibunuh.
+    // Lebih baik melewat satu hari daripada membanjiri channel tiap redeploy.
+    console.error("Birthday scheduler: gagal cek riwayat channel, kirim dilewati.", error);
+    return true;
+  }
+}
+
 async function sendBirthdayAnnouncement(client: Client<true>) {
   if (!hasMetabaseConfig()) {
     console.warn("Birthday scheduler skipped: konfigurasi Metabase belum lengkap.");
@@ -72,6 +120,11 @@ async function sendBirthdayAnnouncement(client: Client<true>) {
   if (birthdayRows.length === 0) {
     console.log("Birthday scheduler: tidak ada birthday hari ini.");
     return false;
+  }
+
+  if (await announcementAlreadyPosted(client, env.BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID)) {
+    console.log("Birthday scheduler: ucapan hari ini sudah ada di channel — tidak dikirim ulang.");
+    return true; // true = anggap beres, supaya penandanya ikut ditulis ulang
   }
 
   const channel = await client.channels.fetch(env.BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID);
