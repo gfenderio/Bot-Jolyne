@@ -197,7 +197,19 @@ const envSchema = z.object({
   // Tampilkan kolom upload foto di modal saat opsi "Barang rusak" dipilih.
   // Dipaksa "true" di bawah. Tidak lagi menuntut intent privileged apa pun:
   // fotonya diunggah langsung di dalam modal, bukan lewat pesan di channel.
-  PICK_TRIAGE_PHOTO_ENABLED: optionalBoolean
+  PICK_TRIAGE_PHOTO_ENABLED: optionalBoolean,
+
+  // "Kiriman terpisah — label gudang lain". Satu order bisa berisi barang dari
+  // beberapa gudang di kota berbeda; tiap gudang mengirim paketnya sendiri dan
+  // butuh label sendiri. Tapi kyou.id menandai "sudah dicetak" di level ORDER,
+  // jadi begitu Bekasi mencetak, gudang lain kehilangan kotak centangnya.
+  // Bot memantau catatan cetak di admin_logs lalu mengirim link cetak khusus
+  // untuk Tangerang/Surabaya. Bekasi tidak pernah dikirimi link — merekalah
+  // pemicunya.
+  SPLIT_PRINT_ENABLED: optionalBoolean,
+  SPLIT_PRINT_CHANNEL_ID: optionalString.default("1523576053581349006"),
+  SPLIT_PRINT_POLL_MINUTES: pollIntervalSeconds.default(15),
+  SPLIT_PRINT_STORE_PATH: optionalString.default("data/split-print.json")
 });
 
 // Override dari kode agar mengabaikan setting environment server Coolify
@@ -213,6 +225,12 @@ process.env.PICK_TRIAGE_RESULT_CHANNEL_ID = "1525411338191376464";
 process.env.PICK_TRIAGE_MENTION_USER_ID = "1337888111471886456";
 process.env.PICK_TRIAGE_ENABLED = "true";
 process.env.PICK_TRIAGE_PHOTO_ENABLED = "true";
+
+// Kiriman terpisah: channel BARU, khusus urusan cetak label gudang jauh —
+// sengaja tidak digabung ke #pending-shipment supaya tidak tenggelam di antara
+// laporan PICK (yang urusannya orang Bekasi).
+process.env.SPLIT_PRINT_CHANNEL_ID = "1523576053581349006";
+process.env.SPLIT_PRINT_ENABLED = "true";
 // Env mati yang mungkin masih tersisa di server; dibersihkan biar tidak
 // menyesatkan kalau ada yang membaca konfigurasi Coolify.
 delete process.env.PICK_TRIAGE_SINCE;

@@ -12,6 +12,7 @@ import { startBaitoAttendanceScheduler } from "./schedulers/baito-attendance.js"
 import { startOripaLiveRecapScheduler } from "./schedulers/oripa-live-recap.js";
 import { startFulfillmentStaleScheduler } from "./schedulers/fulfillment-stale.js";
 import { startPickTriageScheduler } from "./schedulers/pick-triage.js";
+import { startSplitPrintScheduler } from "./schedulers/split-print.js";
 
 if (!env.DISCORD_TOKEN) {
   console.warn("DISCORD_TOKEN belum diisi. Discord bot client dilewati.");
@@ -33,6 +34,7 @@ if (!env.DISCORD_TOKEN) {
     startOripaLiveRecapScheduler(readyClient);
     startFulfillmentStaleScheduler(readyClient);
     startPickTriageScheduler(readyClient);
+    startSplitPrintScheduler(readyClient);
   });
   client.on(Events.Error, (error) => {
     console.error("Discord client error", error);
