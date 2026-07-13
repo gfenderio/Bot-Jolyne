@@ -3,6 +3,7 @@ import { ActionRowBuilder, Client, GatewayIntentBits, StringSelectMenuBuilder, T
 import { env } from "../src/config/env.js";
 import { orderEmbed } from "../src/schedulers/pick-triage.js";
 import { buildTriageSelect } from "../src/handlers/pickTriage.js";
+import { buildItemPhotos } from "../src/services/itemPhotos.js";
 
 /**
  * Kirim 2 pesan triase PALSU ke channel, memakai embed & dropdown yang sama
@@ -26,6 +27,15 @@ const MOCKS = [
       'Qinche / Sylus "Approaching Dusk" Series Art Print - Love and Deepspace (36,5x24,5cm)',
       'Qinche / Sylus "Approaching Dusk" Series Acrylic Stand - Love and Deepspace (15cm)'
     ],
+    // Gambar asli dari master (kyoucdn.id), sejajar dgn itemIds — poller juga
+    // mengambilnya dari sana, jadi kolase mock = kolase sungguhan.
+    imageUrls: [
+      "https://kyoucdn.id/thumbnail/items/483754-kiana-kaslana-herrscher-of-finality-sitting-plush-honkai-impact-3rd-17cm.jpg",
+      "https://kyoucdn.id/thumbnail/items/490491-ulpianus-staring-into-the-abyss-character-acrylic-keychain-arknights-95cm.jpg",
+      "https://kyoucdn.id/thumbnail/items/547814-qiyu-rafayel-love-and-deepspace-x-wanda-film-collaboration-can-badge-85cm.jpg",
+      "https://kyoucdn.id/thumbnail/items/547815-qinche-sylus-love-and-deepspace-x-wanda-film-collaboration-can-badge-85cm.jpg",
+      "https://kyoucdn.id/thumbnail/items/481251-qinche-sylus-night-of-secrecy-nightly-rendezvous-series-mini-card-set-love-and-deepspace-115x68cm.jpg"
+    ],
     hours: 26,
     user: "Jessica Yuki (MOCK)",
     shipping: "JNE REG",
@@ -39,6 +49,10 @@ const MOCKS = [
     itemNames: [
       "Tokai Teio Chain Collection (4cm) - Uma Musume Pretty Derby",
       "Nendoroid Racing Miku - 2026 Ver. Hatsune Miku GT Project"
+    ],
+    imageUrls: [
+      "https://kyoucdn.id/thumbnail/items/99323-tokai-teio-chain-collection-4cm-uma-musume-pretty-derby.jpg",
+      "https://kyoucdn.id/thumbnail/items/chokodesu-figure-tokai-teio-uma-musume-pretty-derby-10cm-e9396770f45189ef2ffb97f08069a379bf3e162f0cc7a1305ae7fab9cdd4d8c5.jpg"
     ],
     hours: 100,
     user: "Hazel Hazza Niskala (MOCK)",
@@ -61,9 +75,13 @@ client.once("clientReady", async (ready) => {
         ? `<@${env.PICK_TRIAGE_MENTION_USER_ID}>`
         : undefined;
 
+      // Foto barang (satu barang satu foto) — sama seperti poller.
+      const photos = await buildItemPhotos(mock.imageUrls);
+
       const message = await (channel as TextChannel).send({
         ...(mention ? { content: mention } : {}),
-        embeds: [orderEmbed(mock)],
+        embeds: [orderEmbed(mock, photos[0]?.name)],
+        ...(photos.length ? { files: photos.map((p) => p.attachment) } : {}),
         components: [
           new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
             buildTriageSelect({ ...mock, channelId: channel.id, messageId: "" })

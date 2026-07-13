@@ -6,6 +6,7 @@ import {
   type TextChannel
 } from "discord.js";
 import { env } from "../config/env.js";
+import { buildItemPhotos, MAX_PHOTOS } from "../services/itemPhotos.js";
 import { fetchNativeQueryWithPagination, type MetabaseConfig } from "../services/metabase.js";
 import { markPosted, isPosted, isResolved, hasLegacyItem, type PostedOrder } from "../services/pickTriageStore.js";
 import { adminOrderUrl } from "../services/kyouLinks.js";
@@ -64,6 +65,7 @@ type StalePickItem = {
   itemId: string;
   orderId: string;
   itemName: string;
+  imageUrl?: string;
   hours: number;
   user: string;
   shipping: string;
@@ -76,12 +78,26 @@ type StalePickOrder = {
   orderId: string;
   itemIds: string[];
   itemNames: string[];
+  /** Sejajar dgn itemIds; undefined = barang itu tidak punya gambar di master. */
+  imageUrls: Array<string | undefined>;
   hours: number; // yang paling lama di antara barangnya
   user: string;
   shipping: string;
   isEarly: boolean;
   eta: string; // perkiraan barang datang (orders.eta), mis. "July-August 2026"
 };
+
+/**
+ * Path gambar di master (`images.path`) → URL CDN. Sama seperti
+ * ecommercePickRequestPoller: pakai varian /thumbnail/ — kotak kolase cuma
+ * 256px, tidak perlu gambar penuh.
+ */
+function itemImageUrl(raw: string): string | undefined {
+  const path = raw.trim();
+  if (!path) return undefined;
+  if (/^https?:\/\//i.test(path)) return path;
+  return `https://kyoucdn.id/thumbnail/${path.replace(/^\/+/, "")}`;
+}
 
 function metabaseConfig(): MetabaseConfig | null {
   if (!env.METABASE_URL || !env.METABASE_EMAIL || !env.METABASE_PASSWORD) {
@@ -117,6 +133,7 @@ function buildQuery(minHours: number, maxHours: number, earlyMinHours: number): 
       oi.id AS item_id,
       o.order_id AS order_id,
       oi.item_name AS item_name,
+      COALESCE(img.path, '') AS image_path,
       ROUND(TIMESTAMPDIFF(HOUR, o.updated_at, NOW())) AS hours_stuck,
       u.name AS user_name,
       o.shipping_type AS shipping_type,
@@ -125,6 +142,10 @@ function buildQuery(minHours: number, maxHours: number, earlyMinHours: number): 
     FROM orders o
     JOIN users u ON u.user_id = o.user_id
     JOIN order_items oi ON oi.order_id = o.order_id
+    -- Gambar barang buat kolase di embed. LEFT JOIN, bukan JOIN: barang tanpa
+    -- gambar di master tetap harus muncul di pesan triase.
+    LEFT JOIN items i ON i.item_id = oi.item_id
+    LEFT JOIN images img ON img.image_id = i.main_img
     WHERE o.status = 'paid'
       AND (oi.is_picked = 0 OR oi.is_picked IS NULL)
       AND o.pack_status = 0
@@ -158,6 +179,7 @@ export async function fetchStalePickItems(
   const iItem = idx("item_id");
   const iOrder = idx("order_id");
   const iName = idx("item_name");
+  const iImage = idx("image_path");
   const iHours = idx("hours_stuck");
   const iUser = idx("user_name");
   const iShip = idx("shipping_type");
@@ -168,6 +190,7 @@ export async function fetchStalePickItems(
     itemId: String(row[iItem] ?? "").trim(),
     orderId: String(row[iOrder] ?? "-").trim(),
     itemName: String(row[iName] ?? "-").trim() || "-",
+    imageUrl: itemImageUrl(String(row[iImage] ?? "")),
     hours: Number(row[iHours] ?? 0),
     user: String(row[iUser] ?? "-").trim() || "-",
     shipping: String(row[iShip] ?? "-").trim() || "-",
@@ -194,6 +217,7 @@ export function groupByOrder(items: StalePickItem[]): StalePickOrder[] {
         orderId: item.orderId,
         itemIds: [item.itemId],
         itemNames: [item.itemName],
+        imageUrls: [item.imageUrl],
         hours: item.hours,
         user: item.user,
         shipping: item.shipping,
@@ -204,6 +228,9 @@ export function groupByOrder(items: StalePickItem[]): StalePickOrder[] {
     }
     existing.itemIds.push(item.itemId);
     existing.itemNames.push(item.itemName);
+    // Wajib di-push walau undefined: imageUrls harus tetap sejajar dgn itemIds,
+    // kalau tidak nomor di kolase melenceng dari nomor di daftar barang.
+    existing.imageUrls.push(item.imageUrl);
     existing.hours = Math.max(existing.hours, item.hours);
   }
 
@@ -218,9 +245,17 @@ function stuckLabel(hours: number): string {
   return rest ? `${days} hari ${rest} jam` : `${days} hari`;
 }
 
-/** Embed satu order (dipasang bareng satu dropdown). */
-export function orderEmbed(order: StalePickOrder): EmbedBuilder {
+/**
+ * Embed satu order (dipasang bareng satu dropdown).
+ *
+ * `mainPhotoName` = nama lampiran foto barang PERTAMA, dipasang sebagai gambar
+ * utama embed. Foto barang lain (kalau ordernya berisi lebih dari satu barang)
+ * dilampirkan ke pesan yang sama dan tampil sebagai foto tambahan di bawahnya —
+ * satu barang satu foto, tidak digabung.
+ */
+export function orderEmbed(order: StalePickOrder, mainPhotoName?: string): EmbedBuilder {
   const count = order.itemNames.length;
+  const uncovered = Math.max(0, count - MAX_PHOTOS);
 
   const embed = new EmbedBuilder()
     .setColor(order.isEarly ? EMBED_COLOR_EARLY : EMBED_COLOR)
@@ -246,17 +281,26 @@ export function orderEmbed(order: StalePickOrder): EmbedBuilder {
     );
   }
 
+  if (mainPhotoName) embed.setImage(`attachment://${mainPhotoName}`);
+
+  const footer = order.isEarly
+    ? `Ditagih early — ambang ${Math.round(env.PICK_TRIAGE_EARLY_MIN_HOURS / 24)} hari, bukan 24 jam`
+    : "Pilih status di dropdown bawah, lalu isi deskripsi";
+  // Order berisi lebih dari 10 barang: Discord cuma menerima 10 lampiran per
+  // pesan. Katakan terus terang — kalau tidak, foto yang tidak ada terbaca
+  // sebagai "barangnya cuma segitu".
+  const photoNote =
+    mainPhotoName && uncovered > 0
+      ? ` · foto: ${MAX_PHOTOS} barang pertama (${uncovered} sisanya tanpa foto)`
+      : "";
+
   return embed
     .addFields(
       { name: "Barang", value: itemListValue(order.itemNames, order.itemIds), inline: false },
       { name: "Customer", value: order.user, inline: true },
       { name: "Kurir", value: order.shipping, inline: true }
     )
-    .setFooter({
-      text: order.isEarly
-        ? `Ditagih early — ambang ${Math.round(env.PICK_TRIAGE_EARLY_MIN_HOURS / 24)} hari, bukan 24 jam`
-        : "Pilih status di dropdown bawah, lalu isi deskripsi"
-    });
+    .setFooter({ text: `${footer}${photoNote}` });
 }
 
 /**
@@ -314,6 +358,7 @@ export async function runPickTriageCheck(client: Client): Promise<number> {
       orderId: order.orderId,
       itemIds: order.itemIds,
       itemNames: order.itemNames,
+      imageUrls: order.imageUrls,
       user: order.user,
       shipping: order.shipping,
       hours: order.hours,
@@ -322,6 +367,14 @@ export async function runPickTriageCheck(client: Client): Promise<number> {
       channelId,
       messageId: "" // diisi setelah pesan terkirim
     };
+
+    // Foto barang — satu barang satu foto. Yang pertama jadi gambar utama embed,
+    // sisanya menyusul sebagai foto tambahan di pesan yang sama. Kalau semua
+    // fotonya gagal diunduh (CDN mati, barangnya memang tak bergambar), pesannya
+    // tetap dikirim tanpa foto — pertanyaan triase lebih penting dari fotonya.
+    const photos = await buildItemPhotos(order.imageUrls);
+    const mainPhotoName = photos[0]?.name;
+
     // Mention di SEMUA pesan triase, termasuk order yang ditagih early (keputusan
     // user 2026-07-11 — sebelumnya early sengaja tidak di-tag).
     const mention = env.PICK_TRIAGE_MENTION_USER_ID
@@ -330,7 +383,8 @@ export async function runPickTriageCheck(client: Client): Promise<number> {
 
     const message = await textChannel.send({
       ...(mention ? { content: mention } : {}),
-      embeds: [orderEmbed(order)],
+      embeds: [orderEmbed(order, mainPhotoName)],
+      ...(photos.length ? { files: photos.map((p) => p.attachment) } : {}),
       components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(buildTriageSelect(posted))],
       // Batasi siapa yang benar-benar kena ping: tanpa ini, teks lain di embed
       // yang kebetulan berbentuk mention bisa ikut memberi notifikasi.

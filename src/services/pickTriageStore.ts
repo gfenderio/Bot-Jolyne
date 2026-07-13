@@ -31,6 +31,12 @@ export interface PostedOrder {
   user: string;
   shipping: string;
   hours: number;
+  /**
+   * Gambar tiap barang (kyoucdn.id), sejajar dengan itemIds/itemNames. Entri
+   * kosong = barang itu tidak punya gambar di master. Dipakai membangun kolase
+   * bernomor di embed.
+   */
+  imageUrls?: Array<string | undefined>;
   /** Pelunasan ditagih lewat tombol "Early" — barangnya boleh jadi belum datang. */
   isEarly?: boolean;
   /** Perkiraan barang datang (orders.eta), mis. "July-August 2026". */

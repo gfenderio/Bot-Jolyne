@@ -55,10 +55,13 @@ function choiceLabel(choice: TriageChoice): string {
 const MAX_ITEM_LIST_CHARS = 900;
 
 /**
- * Daftar barang satu order sebagai bullet, tiap baris diawali ITEM ID supaya
- * staf bisa langsung mencocokkan dengan barang di rak/admin:
+ * Daftar barang satu order, tiap baris BERNOMOR dan diawali ITEM ID supaya staf
+ * bisa mencocokkan dengan barang di rak/admin:
  *
- *     • `461835` — Nama barang (17cm)
+ *     1. `461835` — Nama barang (17cm)
+ *
+ * Nomornya sengaja: kotak di kolase gambar (lihat services/itemCollage.ts) diberi
+ * badge nomor yang sama, jadi baris teks dan fotonya bisa dicocokkan.
  *
  * Format itu juga yang dibaca balik oleh recoverOrderFromMessage(), jadi kalau
  * diubah, ubah regex di sana.
@@ -74,7 +77,8 @@ export function itemListValue(names: string[], ids: string[] = []): string {
   let chars = 0;
   for (const [i, name] of names.entries()) {
     const id = ids[i];
-    const line = id ? `• \`${id}\` — ${truncate(name, 110)}` : `• ${truncate(name, 120)}`;
+    const num = `${i + 1}.`;
+    const line = id ? `${num} \`${id}\` — ${truncate(name, 110)}` : `${num} ${truncate(name, 120)}`;
     if (chars + line.length + 1 > MAX_ITEM_LIST_CHARS) break;
     lines.push(line);
     chars += line.length + 1;
@@ -215,21 +219,24 @@ function recoverOrderFromMessage(
   const field = (name: string) =>
     embed.fields?.find((f) => f.name.toLowerCase() === name)?.value?.trim() || "-";
 
-  // Baris berformat "• `<itemId>` — <nama>" (lihat itemListValue). Baris ringkas
-  // "…dan N barang lainnya" dan bullet tanpa id (format lama) tetap ditoleransi.
+  // Baris berformat "1. `<itemId>` — <nama>" (lihat itemListValue). Penanda baris
+  // lama "•" tetap diterima: pesan yang sudah terlanjur nangkring di channel
+  // sebelum deploy ini masih memakai bullet, dan tetap harus bisa dijawab.
+  // Baris ringkas "…dan N barang lainnya" dilewati.
+  const BULLET = /^(?:\d+\.|•)\s*/;
   const itemIds: string[] = [];
   const itemNames: string[] = [];
   for (const raw of field("barang").split("\n")) {
     const line = raw.trim();
     if (!line || line === "-" || line.startsWith("_")) continue;
 
-    const withId = line.match(/^•\s*`([^`]+)`\s*—\s*(.+)$/);
+    const withId = line.match(/^(?:\d+\.|•)\s*`([^`]+)`\s*—\s*(.+)$/);
     if (withId) {
       itemIds.push(withId[1]);
       itemNames.push(withId[2].trim());
       continue;
     }
-    itemNames.push(line.replace(/^•\s*/, ""));
+    itemNames.push(line.replace(BULLET, ""));
   }
 
   // Penanda early ada di judul ("— ditagih early ·"), ETA-nya di deskripsi.
