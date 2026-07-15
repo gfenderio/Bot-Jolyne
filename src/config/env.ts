@@ -194,6 +194,12 @@ const envSchema = z.object({
   // Maksimal barang yang diposting sekali jalan (sisanya diringkas).
   PICK_TRIAGE_MAX_ITEMS: pollIntervalSeconds.default(25),
   PICK_TRIAGE_STORE_PATH: optionalString.default("data/pick-triage.json"),
+  // Auto-bersihkan: tiap putaran poll, order yang pesannya sudah nangkring tapi
+  // ternyata SUDAH DI-PACK (atau barangnya sudah di-pick / statusnya berubah)
+  // pesannya dihapus sendiri dari channel, tanpa nunggu staf menjawab dropdown.
+  // Dipaksa "true" di bawah. Aman: order yang cuma "lewat 30 jam tapi masih
+  // nyangkut" TIDAK dihapus — hanya yang benar-benar sudah maju tahapannya.
+  PICK_TRIAGE_AUTOCLEAR_ENABLED: optionalBoolean,
   // Tampilkan kolom upload foto di modal saat opsi "Barang rusak" dipilih.
   // Dipaksa "true" di bawah. Tidak lagi menuntut intent privileged apa pun:
   // fotonya diunggah langsung di dalam modal, bukan lewat pesan di channel.
@@ -225,6 +231,7 @@ process.env.PICK_TRIAGE_RESULT_CHANNEL_ID = "1525411338191376464";
 process.env.PICK_TRIAGE_MENTION_USER_ID = "1337888111471886456";
 process.env.PICK_TRIAGE_ENABLED = "true";
 process.env.PICK_TRIAGE_PHOTO_ENABLED = "true";
+process.env.PICK_TRIAGE_AUTOCLEAR_ENABLED = "true";
 
 // Kiriman terpisah: channel BARU, khusus urusan cetak label gudang jauh —
 // sengaja tidak digabung ke #pending-shipment supaya tidak tenggelam di antara

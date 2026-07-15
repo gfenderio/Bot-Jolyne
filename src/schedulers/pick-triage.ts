@@ -8,7 +8,15 @@ import {
 import { env } from "../config/env.js";
 import { buildItemPhotos, MAX_PHOTOS } from "../services/itemPhotos.js";
 import { fetchNativeQueryWithPagination, type MetabaseConfig } from "../services/metabase.js";
-import { markPosted, isPosted, isResolved, hasLegacyItem, type PostedOrder } from "../services/pickTriageStore.js";
+import {
+  markPosted,
+  isPosted,
+  isResolved,
+  hasLegacyItem,
+  markCleared,
+  listActivePosted,
+  type PostedOrder
+} from "../services/pickTriageStore.js";
 import { adminOrderUrl } from "../services/kyouLinks.js";
 import { buildTriageSelect, itemListValue } from "../handlers/pickTriage.js";
 
@@ -34,6 +42,12 @@ import { buildTriageSelect, itemListValue } from "../handlers/pickTriage.js";
  * order begitu barangnya melewati 24 jam. Dedupe lewat store (`posted`), jadi
  * tiap order muncul tepat sekali. Kalau tidak ada yang baru → diam, tidak ada
  * pesan "tidak ada" (kalau tidak, channel kebanjiran tiap putaran).
+ *
+ * Auto-clear (runPickTriageCleanup): di putaran yang sama, order yang pesannya
+ * sudah nangkring tapi belum dijawab dicek ulang ke DB — kalau ternyata SUDAH
+ * DI-PACK (atau barangnya sudah di-pick / statusnya berubah), pesannya dihapus
+ * sendiri dari channel. Yang cuma "lewat 30 jam tapi masih nyangkut" TIDAK ikut
+ * dihapus. Bisa dimatikan lewat PICK_TRIAGE_AUTOCLEAR_ENABLED.
  *
  * Batas atas MAX_HOURS tetap dipakai sebagai pengaman: kalau store hilang (mis.
  * redeploy tanpa volume di data/), tanpa batas atas bot akan memblast ULANG
@@ -402,6 +416,121 @@ export async function runPickTriageCheck(client: Client): Promise<number> {
   return shown.length;
 }
 
+/**
+ * Cek status terkini order yang pesannya sudah terkirim tapi belum dijawab.
+ * Return map orderId → progres: `stillStuck` (masih layak ditanyakan) + `reason`
+ * (kenapa sudah maju) kalau tidak lagi nyangkut. Order yang sudah tidak ada di
+ * tabel (mis. dibatalkan & dihapus) tidak dikembalikan → dianggap "gone".
+ *
+ * PENTING: "sudah maju" ≠ "lewat 30 jam". Order yang masih paid, belum di-pack,
+ * dan barangnya belum di-pick tetap dianggap nyangkut walau usianya sudah lewat
+ * batas atas band — jangan sampai pesan order yang genuinely mandek ikut dihapus.
+ */
+async function fetchOrderProgress(
+  orderIds: string[]
+): Promise<Map<string, { stillStuck: boolean; reason: string }>> {
+  const result = new Map<string, { stillStuck: boolean; reason: string }>();
+  const config = metabaseConfig();
+  if (!config || orderIds.length === 0) return result;
+
+  // Order id berasal dari store kita sendiri (aslinya dari DB), tapi tetap
+  // disaring ke alfanumerik/dash sebelum masuk klausa IN — jangan pernah
+  // menyisipkan string mentah ke SQL.
+  const safe = orderIds.filter((id) => /^[A-Za-z0-9_-]+$/.test(id));
+  if (safe.length === 0) return result;
+
+  const inList = safe.map((id) => `'${id}'`).join(", ");
+  const query = `
+    SELECT
+      o.order_id AS order_id,
+      o.status AS status,
+      o.pack_status AS pack_status,
+      EXISTS (
+        SELECT 1 FROM order_items oi
+        WHERE oi.order_id = o.order_id
+          AND (oi.is_picked = 0 OR oi.is_picked IS NULL)
+      ) AS has_unpicked
+    FROM orders o
+    WHERE o.order_id IN (${inList})
+  `.trim();
+
+  const { columns, rows } = await fetchNativeQueryWithPagination(config, query);
+  const idx = (name: string) => columns.indexOf(name);
+  const iOrder = idx("order_id");
+  const iStatus = idx("status");
+  const iPack = idx("pack_status");
+  const iUnpicked = idx("has_unpicked");
+  const truthy = (v: unknown) => ["true", "1"].includes(String(v).toLowerCase());
+
+  for (const row of rows) {
+    const orderId = String(row[iOrder] ?? "").trim();
+    if (!orderId) continue;
+    const status = String(row[iStatus] ?? "").trim();
+    const packed = truthy(row[iPack]);
+    const hasUnpicked = truthy(row[iUnpicked]);
+
+    const stillStuck = status === "paid" && !packed && hasUnpicked;
+    const reason = packed
+      ? "sudah di-pack"
+      : !hasUnpicked
+        ? "barang sudah di-pick"
+        : status !== "paid"
+          ? `status jadi '${status}'`
+          : "maju tahapan";
+
+    result.set(orderId, { stillStuck, reason });
+  }
+
+  return result;
+}
+
+/**
+ * Bersihkan pesan order yang sudah maju tahapan (di-pack / di-pick / status
+ * berubah) sebelum staf sempat menjawab dropdown-nya. Pesannya dihapus dari
+ * channel dan order ditandai `cleared` supaya tidak dicoba hapus berulang.
+ *
+ * Return jumlah order yang dibersihkan (dipakai tes/log).
+ */
+export async function runPickTriageCleanup(client: Client): Promise<number> {
+  if (!env.PICK_TRIAGE_AUTOCLEAR_ENABLED) return 0;
+
+  const candidates = listActivePosted();
+  if (candidates.length === 0) return 0;
+
+  let progress: Map<string, { stillStuck: boolean; reason: string }>;
+  try {
+    progress = await fetchOrderProgress(candidates.map((o) => o.orderId));
+  } catch (error) {
+    console.error("[pick-triage] cleanup: gagal cek status order:", error);
+    return 0;
+  }
+
+  let cleared = 0;
+  for (const order of candidates) {
+    const state = progress.get(order.orderId);
+    // Tidak ada di hasil → order lenyap dari DB (dibatalkan+dihapus) → bersihkan.
+    // Ada tapi stillStuck → biarkan (masih perlu dijawab).
+    if (state?.stillStuck) continue;
+    const reason = state?.reason ?? "order tidak ada lagi";
+
+    const channel = await client.channels.fetch(order.channelId).catch(() => null);
+    if (channel?.isTextBased()) {
+      const message = await channel.messages.fetch(order.messageId).catch(() => null);
+      // Pesan mungkin sudah tidak ada (dihapus manual); tetap ditandai cleared
+      // supaya tidak dicek terus tiap putaran.
+      await message?.delete().catch((err) => {
+        console.error(`[pick-triage] cleanup: gagal hapus pesan #${order.orderId}:`, err);
+      });
+    }
+
+    markCleared(order.orderId, reason);
+    cleared++;
+    console.log(`[pick-triage] cleanup: #${order.orderId} dibersihkan (${reason}).`);
+  }
+
+  return cleared;
+}
+
 export function startPickTriageScheduler(client: Client): void {
   if (!env.PICK_TRIAGE_ENABLED) {
     console.log("[pick-triage] poller nonaktif (PICK_TRIAGE_ENABLED=false).");
@@ -422,6 +551,9 @@ export function startPickTriageScheduler(client: Client): void {
     running = true;
     try {
       await runPickTriageCheck(client);
+      // Setelah kirim yang baru, bersihkan yang sudah maju tahapan (di-pack /
+      // di-pick) tapi belum sempat dijawab — pesannya hilang sendiri.
+      await runPickTriageCleanup(client);
     } catch (err) {
       console.error("[pick-triage] gagal cek:", err);
     } finally {

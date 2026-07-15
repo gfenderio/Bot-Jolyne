@@ -41,6 +41,20 @@ export const CHOICE_META: Record<TriageChoice, { emoji: string; label: string; h
 
 const CHOICE_ORDER: TriageChoice[] = ["antri", "rusak", "ketemu"];
 
+/**
+ * Opsi yang boleh melampirkan foto di modal + judul kolom uploadnya. "Masih
+ * antri pick" tidak perlu foto (tidak ada yang perlu dibuktikan); "rusak" butuh
+ * bukti kerusakan, "belum ketemu" butuh bukti rak/lokasi yang sudah dicek.
+ */
+const PHOTO_LABEL: Partial<Record<TriageChoice, string>> = {
+  rusak: "Foto barang rusak",
+  ketemu: "Foto rak / lokasi yang sudah dicek"
+};
+
+function allowsPhoto(choice: TriageChoice): boolean {
+  return env.PICK_TRIAGE_PHOTO_ENABLED && Boolean(PHOTO_LABEL[choice]);
+}
+
 function truncate(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }
@@ -155,10 +169,10 @@ export async function handlePickTriageSelect(interaction: StringSelectMenuIntera
     )
   );
 
-  if (choice === "rusak" && env.PICK_TRIAGE_PHOTO_ENABLED) {
+  if (allowsPhoto(choice)) {
     modal.addLabelComponents(
       new LabelBuilder()
-        .setLabel("Foto barang rusak")
+        .setLabel(PHOTO_LABEL[choice]!)
         .setDescription("Opsional — boleh dikosongkan.")
         .setFileUploadComponent(
           new FileUploadBuilder().setCustomId(PHOTO_FIELD).setRequired(false).setMinValues(0).setMaxValues(1)
@@ -258,8 +272,8 @@ function recoverOrderFromMessage(
 }
 
 /**
- * Ambil foto "barang rusak" dari kolom upload DI DALAM modal, siap ditempel ke
- * embed hasil.
+ * Ambil foto lampiran dari kolom upload DI DALAM modal (opsi "rusak" atau
+ * "belum ketemu"), siap ditempel ke embed hasil.
  *
  * Foto di-UNGGAH ULANG sebagai lampiran embed, bukan disimpan URL-nya: URL CDN
  * Discord bertanda tangan dan kedaluwarsa (~24 jam), jadi embed yang cuma
@@ -268,8 +282,9 @@ function recoverOrderFromMessage(
  * Return null kalau pelapor tidak melampirkan apa-apa (fotonya opsional) atau
  * kalau fotonya gagal diambil — embed hasil tetap dikirim, cuma tanpa gambar.
  */
-async function damagePhotoAttachment(
-  interaction: ModalSubmitInteraction
+async function triagePhotoAttachment(
+  interaction: ModalSubmitInteraction,
+  choice: TriageChoice
 ): Promise<AttachmentBuilder | null> {
   if (!env.PICK_TRIAGE_PHOTO_ENABLED) return null;
 
@@ -283,7 +298,7 @@ async function damagePhotoAttachment(
   }
 
   if (!uploaded) {
-    console.log("[pick-triage] barang rusak dilaporkan tanpa foto.");
+    console.log(`[pick-triage] laporan "${choice}" tanpa foto.`);
     return null;
   }
 
@@ -298,10 +313,10 @@ async function damagePhotoAttachment(
     );
 
     const ext = uploaded.name?.split(".").pop() ?? "jpg";
-    console.log(`[pick-triage] foto barang rusak diterima (${Math.round(buffer.length / 1024)} KB).`);
-    return new AttachmentBuilder(buffer, { name: `rusak-${interaction.id}.${ext}` });
+    console.log(`[pick-triage] foto "${choice}" diterima (${Math.round(buffer.length / 1024)} KB).`);
+    return new AttachmentBuilder(buffer, { name: `${choice}-${interaction.id}.${ext}` });
   } catch (err) {
-    console.error("[pick-triage] gagal mengambil foto barang rusak:", err);
+    console.error(`[pick-triage] gagal mengambil foto "${choice}":`, err);
     return null;
   }
 }
@@ -391,7 +406,7 @@ export async function handlePickTriageModal(interaction: ModalSubmitInteraction)
   // terima, embed hasilnya sendiri tayang di channel hasil.
   await interaction.deferReply({ flags: ["Ephemeral"] });
 
-  const photo = choice === "rusak" ? await damagePhotoAttachment(interaction) : null;
+  const photo = allowsPhoto(choice) ? await triagePhotoAttachment(interaction, choice) : null;
   if (photo) embed.setImage(`attachment://${photo.name}`);
 
   const posted = await sendResult(interaction, {

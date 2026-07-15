@@ -15,6 +15,10 @@ import { env } from "../config/env.js";
  * - `resolved`: order yang sudah dijawab (opsi + deskripsi + siapa + kapan).
  *               Poller melewati order yang sudah ada di sini supaya tidak
  *               diposting ulang di putaran berikutnya.
+ * - `cleared` : order yang pesannya DIHAPUS OTOMATIS karena sudah maju tahapan
+ *               (sudah di-pack / barang sudah di-pick / status berubah) sebelum
+ *               staf sempat menjawab. Ditandai supaya poller cleanup tidak
+ *               mencoba menghapus pesan yang sama berulang tiap putaran.
  *
  * Kompatibilitas: store yang ditulis versi lama ber-key ITEM ID (entrinya punya
  * `itemId` dan tanpa `items`). Entri itu tidak dibaca sebagai order, tapi tetap
@@ -60,9 +64,16 @@ export interface ResolvedOrder {
   at: string; // ISO
 }
 
+/** Order yang pesannya dihapus otomatis oleh cleanup (bukan dijawab staf). */
+export interface ClearedOrder {
+  reason: string; // mis. "packed" / "picked" / "gone"
+  at: string; // ISO
+}
+
 interface TriageStore {
   posted: Record<string, PostedOrder | LegacyPostedItem>;
   resolved: Record<string, ResolvedOrder>;
+  cleared: Record<string, ClearedOrder>;
 }
 
 function storePath(): string {
@@ -79,16 +90,17 @@ function ensureStoreDir() {
 function readStore(): TriageStore {
   ensureStoreDir();
   if (!fs.existsSync(storePath())) {
-    return { posted: {}, resolved: {} };
+    return { posted: {}, resolved: {}, cleared: {} };
   }
   try {
     const parsed = JSON.parse(fs.readFileSync(storePath(), "utf-8"));
     return {
       posted: parsed.posted ?? {},
-      resolved: parsed.resolved ?? {}
+      resolved: parsed.resolved ?? {},
+      cleared: parsed.cleared ?? {}
     };
   } catch {
-    return { posted: {}, resolved: {} };
+    return { posted: {}, resolved: {}, cleared: {} };
   }
 }
 
@@ -147,4 +159,29 @@ export function markResolved(orderId: string, resolved: ResolvedOrder): boolean 
   store.resolved[orderId] = resolved;
   writeStore(store);
   return true;
+}
+
+/** Sudah pernah dibersihkan otomatis (pesannya dihapus poller)? */
+export function isCleared(orderId: string): boolean {
+  return Boolean(readStore().cleared[orderId]);
+}
+
+/** Tandai order sudah dibersihkan otomatis supaya cleanup tidak mengulanginya. */
+export function markCleared(orderId: string, reason: string): void {
+  const store = readStore();
+  store.cleared[orderId] = { reason, at: new Date().toISOString() };
+  writeStore(store);
+}
+
+/**
+ * Order yang sudah diposting tapi BELUM dijawab & BELUM dibersihkan — kandidat
+ * yang perlu dicek cleanup (mungkin sudah di-pack di gudang). Entri store lama
+ * ber-key item (legacy) dilewati.
+ */
+export function listActivePosted(): PostedOrder[] {
+  const store = readStore();
+  return Object.values(store.posted).filter((entry): entry is PostedOrder => {
+    if (isLegacy(entry)) return false;
+    return !store.resolved[entry.orderId] && !store.cleared[entry.orderId];
+  });
 }
