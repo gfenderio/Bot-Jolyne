@@ -466,7 +466,7 @@ export async function generateWsReportWorkbook(wsProofs: WsInboxProofPayload[], 
 }
 
 export function startMachitanDailyReportScheduler(client: Client<true>) {
-  cron.schedule("0 0 * * *", async () => {
+  cron.schedule("0 9 * * *", async () => {
     console.log("[DailyReport] Running Machitan Daily Report Scheduler...");
 
     // Peek dulu (bukan drain) — data cuma di-clear per bagian SETELAH pesannya
@@ -480,7 +480,7 @@ export function startMachitanDailyReportScheduler(client: Client<true>) {
       return;
     }
 
-    const footerText = `Generated ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB · Auto-cron 00:00`;
+    const footerText = `Generated ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB · Auto-cron 09:00`;
 
     const channel = await client.channels.fetch(TARGET_CHANNEL_ID).catch(() => null);
     if (!channel || !channel.isTextBased()) {

@@ -154,8 +154,8 @@ export async function generateWsInboxReportWorkbook(proofs: WsInboxProofPayload[
 }
 
 export function startWsInboxDailyReportScheduler(client: Client<true>) {
-  // Cron tiap jam 7 pagi WIB barengan sama pick pack
-  cron.schedule("0 7 * * *", async () => {
+  // Cron tiap jam 9 pagi WIB
+  cron.schedule("0 9 * * *", async () => {
     executeWsInboxDailyReport(client);
   }, {
     timezone: "Asia/Jakarta"

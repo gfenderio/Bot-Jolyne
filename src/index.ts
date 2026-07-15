@@ -5,11 +5,13 @@ import { handleReady } from "./events/ready.js";
 import { startBirthdayNowScheduler } from "./schedulers/birthday-now.js";
 import { startMachitanDailyReportScheduler } from "./machitan/dailyReportScheduler.js";
 import { registerGuildSlashCommands } from "./services/slash-commands.js";
-import { startNotionStandupScheduler } from "./schedulers/notion-standup.js";
+// Dinonaktifkan — lihat blok ready di bawah.
+// import { startNotionStandupScheduler } from "./schedulers/notion-standup.js";
 import { startMachitanHttpServer } from "./machitan/httpServer.js";
 
 import { startBaitoAttendanceScheduler } from "./schedulers/baito-attendance.js";
-import { startOripaLiveRecapScheduler } from "./schedulers/oripa-live-recap.js";
+// Dinonaktifkan — lihat blok ready di bawah.
+// import { startOripaLiveRecapScheduler } from "./schedulers/oripa-live-recap.js";
 import { startFulfillmentStaleScheduler } from "./schedulers/fulfillment-stale.js";
 import { startPickTriageScheduler } from "./schedulers/pick-triage.js";
 import { startSplitPrintScheduler } from "./schedulers/split-print.js";
@@ -29,9 +31,11 @@ if (!env.DISCORD_TOKEN) {
     startMachitanHttpServer(readyClient);
     startBirthdayNowScheduler(readyClient);
     startMachitanDailyReportScheduler(readyClient);
-    startNotionStandupScheduler(readyClient);
+    // Dinonaktifkan — tidak dipakai lagi (rekap task Jolyne Tracker ke Discord).
+    // startNotionStandupScheduler(readyClient);
     startBaitoAttendanceScheduler(readyClient);
-    startOripaLiveRecapScheduler(readyClient);
+    // Dinonaktifkan — rekap live mingguan tidak perlu cron lagi.
+    // startOripaLiveRecapScheduler(readyClient);
     startFulfillmentStaleScheduler(readyClient);
     startPickTriageScheduler(readyClient);
     startSplitPrintScheduler(readyClient);

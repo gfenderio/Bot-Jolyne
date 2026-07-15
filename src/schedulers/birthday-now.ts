@@ -49,10 +49,11 @@ function getJakartaDateKey(now = new Date()) {
   ].join("-");
 }
 
-function getDelayUntilNextJakartaMidnight(now = new Date()) {
+function getDelayUntilNext9amJakarta(now = new Date()) {
   const today = getJakartaDateParts(now);
-  const nextMidnightUtc = Date.UTC(today.year, today.month - 1, today.day + 1, -7);
-  return Math.max(1_000, nextMidnightUtc - now.getTime());
+  // 09:00 WIB besok = 02:00 UTC (WIB = UTC+7, jadi jam UTC = 9 - 7 = 2).
+  const next9amUtc = Date.UTC(today.year, today.month - 1, today.day + 1, 2);
+  return Math.max(1_000, next9amUtc - now.getTime());
 }
 
 async function readSchedulerState(): Promise<BirthdaySchedulerState> {
@@ -164,7 +165,7 @@ export function startBirthdayNowScheduler(client: Client<true>) {
   let timeout: NodeJS.Timeout | undefined;
 
   const scheduleNextRun = () => {
-    const delay = getDelayUntilNextJakartaMidnight();
+    const delay = getDelayUntilNext9amJakarta();
     timeout = setTimeout(async () => {
       try {
         await runBirthdayAnnouncementOncePerDay(client);
