@@ -17,7 +17,7 @@ import {
   listActivePosted,
   type PostedOrder
 } from "../services/pickTriageStore.js";
-import { adminOrderUrl } from "../services/kyouLinks.js";
+import { adminOrderUrl, orderLink } from "../services/kyouLinks.js";
 import { buildTriageSelect, itemListValue } from "../handlers/pickTriage.js";
 
 /**
@@ -56,6 +56,9 @@ import { buildTriageSelect, itemListValue } from "../handlers/pickTriage.js";
 
 const EMBED_COLOR = 0xd9534f;
 const EMBED_COLOR_EARLY = 0x9b59b6;
+// Hijau, sama dengan embed hasil yang dijawab manual (handlers/pickTriage.ts):
+// laporan yang beres otomatis harus terlihat "selesai", bukan "peringatan".
+const EMBED_COLOR_AUTO = 0x2f8f5b;
 
 /**
  * Order yang pelunasannya ditagih lewat tombol **Early** di panel PO kyou.id.
@@ -485,9 +488,104 @@ async function fetchOrderProgress(
 }
 
 /**
+ * Judul status untuk embed hasil-otomatis, diturunkan dari `reason`
+ * (fetchOrderProgress). Bukan salah satu dari 3 opsi staf (antri/rusak/ketemu) —
+ * ini penyelesaian oleh sistem, bukan jawaban orang.
+ */
+function autoStatusLabel(reason: string): string {
+  if (reason.startsWith("sudah di-pack")) return "📦 Sudah di-pack";
+  if (reason.startsWith("barang sudah di-pick")) return "✅ Barang sudah di-pick";
+  return `✅ ${reason}`; // mis. "status jadi 'canceled'"
+}
+
+/**
+ * Embed hasil untuk order yang beres SENDIRI sebelum staf menjawab. Formatnya
+ * sengaja disamakan dengan embed hasil yang dijawab manual (handlePickTriageModal)
+ * supaya tim B2C di channel hasil membacanya sebagai satu jenis laporan — bedanya
+ * cuma penulisnya "Sistem (otomatis)" dan keterangannya alasan bot menutupnya.
+ */
+function autoResultEmbed(order: PostedOrder, reason: string): EmbedBuilder {
+  const label = autoStatusLabel(reason);
+  const itemCount = order.itemNames.length;
+  const orderUrl = adminOrderUrl(order.orderId);
+
+  return new EmbedBuilder()
+    .setTitle(`${label} — beres sebelum sempat dilapor`)
+    .setURL(orderUrl ?? null)
+    .setColor(EMBED_COLOR_AUTO)
+    .setAuthor({ name: "Sistem (otomatis)" })
+    .addFields(
+      {
+        name: itemCount > 1 ? `Barang (${itemCount})` : "Barang",
+        value: itemListValue(order.itemNames, order.itemIds),
+        inline: false
+      },
+      { name: "Order", value: orderLink(order.orderId), inline: true },
+      { name: "Customer", value: order.user || "-", inline: true },
+      { name: "Nyangkut", value: `${order.hours} jam`, inline: true },
+      { name: "Kurir", value: order.shipping || "-", inline: true },
+      { name: "Status", value: label, inline: true },
+      ...(order.isEarly
+        ? [
+            {
+              name: "Penagihan",
+              value: `🟣 Ditagih early — pelunasan ditagih sebelum barang datang${order.eta ? ` · ETA **${order.eta}**` : ""}`,
+              inline: true
+            }
+          ]
+        : []),
+      {
+        name: "Keterangan",
+        value: `Ditutup otomatis oleh bot — ${reason} (gudang sudah memprosesnya sebelum ada yang menjawab triase).`,
+        inline: false
+      }
+    )
+    .setFooter({ text: "Selesai otomatis — tidak perlu tindakan" })
+    .setTimestamp();
+}
+
+/**
+ * Kirim embed hasil-otomatis ke channel HASIL (sama seperti laporan manual),
+ * dengan jatuh balik ke channel pertanyaan kalau channel hasil tak bisa dikirimi.
+ * Return true kalau berhasil terkirim ke salah satu channel.
+ */
+async function sendAutoResult(
+  client: Client,
+  order: PostedOrder,
+  reason: string
+): Promise<boolean> {
+  const targets = [env.PICK_TRIAGE_RESULT_CHANNEL_ID, order.channelId].filter(
+    (id): id is string => Boolean(id)
+  );
+  const embed = autoResultEmbed(order, reason);
+
+  for (const channelId of targets) {
+    const channel = await client.channels.fetch(channelId).catch(() => null);
+    if (!channel?.isTextBased() || !("send" in channel)) continue;
+    try {
+      await (channel as TextChannel).send({ embeds: [embed] });
+      return true;
+    } catch (err) {
+      console.error(`[pick-triage] cleanup: gagal kirim hasil-otomatis ke ${channelId}:`, err);
+    }
+  }
+  return false;
+}
+
+/**
  * Bersihkan pesan order yang sudah maju tahapan (di-pack / di-pick / status
- * berubah) sebelum staf sempat menjawab dropdown-nya. Pesannya dihapus dari
- * channel dan order ditandai `cleared` supaya tidak dicoba hapus berulang.
+ * berubah) sebelum staf sempat menjawab dropdown-nya.
+ *
+ * Order yang MASIH ADA di DB tapi sudah maju: kirim dulu embed hasil-otomatis ke
+ * channel hasil (biar tercatat sebagai laporan "beres sendiri", bukan hilang
+ * tanpa jejak), baru hapus pesan pertanyaannya. Kalau embednya gagal terkirim,
+ * pesan pertanyaan TIDAK dihapus dan order tidak ditandai cleared — biar dicoba
+ * lagi putaran berikutnya, jangan sampai laporannya hilang.
+ *
+ * Order yang LENYAP dari DB (dibatalkan+dihapus, state undefined): tidak bisa
+ * diklaim "sudah di-pick", jadi cukup hapus diam-diam seperti sebelumnya.
+ *
+ * Order ditandai `cleared` supaya tidak dicoba proses berulang tiap putaran.
  *
  * Return jumlah order yang dibersihkan (dipakai tes/log).
  */
@@ -512,6 +610,19 @@ export async function runPickTriageCleanup(client: Client): Promise<number> {
     // Ada tapi stillStuck → biarkan (masih perlu dijawab).
     if (state?.stillStuck) continue;
     const reason = state?.reason ?? "order tidak ada lagi";
+
+    // Order masih ada di DB & sudah maju tahapan: catat dulu sebagai laporan
+    // "beres sendiri" di channel hasil sebelum pesannya dihapus. Kalau gagal
+    // terkirim, JANGAN hapus pesan & jangan tandai cleared — biar dicoba lagi
+    // putaran depan supaya laporannya tidak hilang. Order yang sudah lenyap dari
+    // DB (state undefined) tidak dikirimi embed (tak bisa diklaim "sudah dipick").
+    if (state) {
+      const sent = await sendAutoResult(client, order, reason);
+      if (!sent) {
+        console.warn(`[pick-triage] cleanup: #${order.orderId} tunda — hasil-otomatis belum terkirim.`);
+        continue;
+      }
+    }
 
     const channel = await client.channels.fetch(order.channelId).catch(() => null);
     if (channel?.isTextBased()) {
