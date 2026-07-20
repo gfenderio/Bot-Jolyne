@@ -34,6 +34,12 @@ import { orderLink, printLabelUrl } from "../services/kyouLinks.js";
  * embed sengaja tidak menuduh ("kalau bagianmu sudah dicetak, abaikan"), bukan
  * penagihan.
  *
+ * PESANNYA BEDA PER GUDANG. Bagian BEKASI kalimatnya lain dan nge-tag head
+ * fulfillment (`SPLIT_PRINT_BEKASI_MENTION_USER_ID`); gudang lain tanpa tag.
+ * Ini TIDAK butuh tahu siapa yang mencetak — bot cuma perlu tahu baris ini
+ * gudangnya apa, dan itu memang dia sendiri yang hitung. Volumenya kecil: pada
+ * uji kering 7 hari, pesan Bekasi keluar 10 kali (±1-2 tag sehari).
+ *
  * YANG TIDAK BISA DILAKUKAN BOT INI. `admin_logs` TIDAK menyimpan gudang mana
  * yang dicetak, jadi bot tidak tahu siapa pemicunya dan tidak tahu label mana
  * yang sudah keluar. Ini bukan karena datanya tidak ada: halaman fulfillment
@@ -47,6 +53,15 @@ import { orderLink, printLabelUrl } from "../services/kyouLinks.js";
  */
 
 const EMBED_COLOR = 0xe67e22;
+
+/**
+ * Group 1 = Bekasi. Dibedakan bukan karena gudangnya istimewa, tapi karena yang
+ * ditagih beda orangnya: bagian Bekasi ditujukan ke head fulfillment, gudang
+ * lain ke channelnya sendiri. Bot memang tidak tahu SIAPA yang mencetak, tapi
+ * dia tahu persis baris ini gudangnya apa — jadi memisahkan pesannya per gudang
+ * tidak butuh tebakan sama sekali.
+ */
+const GROUP_BEKASI = 1;
 
 type SplitRow = {
   orderId: string;
@@ -224,14 +239,18 @@ function daftarBarang(barang: string[]): string {
 function embedFor(row: SplitRow): EmbedBuilder {
   const url = printLabelUrl(row.orderId, row.packGroupId);
   const kg = labelKg(row.gram);
+  const bekasi = row.packGroupId === GROUP_BEKASI;
 
   const embed = new EmbedBuilder()
     .setColor(EMBED_COLOR)
     .setTitle(`📦 #${row.orderId} — ada barang di ${row.kota}`)
     .setDescription(
       [
-        `Order ${orderLink(row.orderId)} ini **pengirimannya terpisah** — tiap gudang kirim paketnya ` +
-          `sendiri, jadi bagian **${row.kota}** perlu label sendiri.`,
+        bekasi
+          ? `Order ${orderLink(row.orderId)} ini **pengirimannya terpisah** dan salah satu bagiannya ` +
+            `ada di **${row.kota}**. Tolong pastikan label bagian ini ikut tercetak.`
+          : `Order ${orderLink(row.orderId)} ini **pengirimannya terpisah** — tiap gudang kirim paketnya ` +
+            `sendiri, jadi bagian **${row.kota}** perlu label sendiri.`,
         "",
         url ? `### 🖨️ [Cetak label ${row.kota}](${url})` : "_Link cetak tidak tersedia._",
         "",
@@ -286,7 +305,16 @@ export async function runSplitPrintCheck(client: Client): Promise<void> {
 
   for (const row of baru) {
     try {
-      const message = await channel.send({ embeds: [embedFor(row)] });
+      // Cuma bagian Bekasi yang nge-tag orang. `allowedMentions` wajib diisi:
+      // tanpa itu tag-nya jadi teks mati dan tidak ada yang kena notifikasi.
+      const mentionId =
+        row.packGroupId === GROUP_BEKASI ? env.SPLIT_PRINT_BEKASI_MENTION_USER_ID : "";
+
+      const message = await channel.send({
+        content: mentionId ? `<@${mentionId}>` : undefined,
+        embeds: [embedFor(row)],
+        allowedMentions: { users: mentionId ? [mentionId] : [] }
+      });
       markPosted({
         orderId: row.orderId,
         packGroupId: row.packGroupId,

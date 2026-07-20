@@ -210,12 +210,15 @@ const envSchema = z.object({
   // butuh label sendiri. Tapi kyou.id menandai "sudah dicetak" di level ORDER,
   // jadi begitu Bekasi mencetak, gudang lain kehilangan kotak centangnya.
   // Bot memantau catatan cetak di admin_logs lalu mengirim link cetak khusus
-  // untuk Tangerang/Surabaya. Bekasi tidak pernah dikirimi link — merekalah
-  // pemicunya.
+  // untuk TIAP gudang di order itu, Bekasi termasuk.
   SPLIT_PRINT_ENABLED: optionalBoolean,
   SPLIT_PRINT_CHANNEL_ID: optionalString.default("1523576053581349006"),
   SPLIT_PRINT_POLL_MINUTES: pollIntervalSeconds.default(15),
-  SPLIT_PRINT_STORE_PATH: optionalString.default("data/split-print.json")
+  SPLIT_PRINT_STORE_PATH: optionalString.default("data/split-print.json"),
+
+  // Khusus pesan bagian BEKASI (pack group 1): yang ditagih head fulfillment,
+  // bukan orang gudangnya. Kosongkan kalau tidak mau ada yang di-tag.
+  SPLIT_PRINT_BEKASI_MENTION_USER_ID: optionalString.default("1337888111471886456")
 });
 
 // Override dari kode agar mengabaikan setting environment server Coolify
@@ -237,6 +240,7 @@ process.env.PICK_TRIAGE_AUTOCLEAR_ENABLED = "true";
 // sengaja tidak digabung ke #pending-shipment supaya tidak tenggelam di antara
 // laporan PICK (yang urusannya orang Bekasi).
 process.env.SPLIT_PRINT_CHANNEL_ID = "1523576053581349006";
+process.env.SPLIT_PRINT_BEKASI_MENTION_USER_ID = "1337888111471886456";
 process.env.SPLIT_PRINT_ENABLED = "true";
 // Env mati yang mungkin masih tersisa di server; dibersihkan biar tidak
 // menyesatkan kalau ada yang membaca konfigurasi Coolify.
