@@ -18,27 +18,35 @@ import { orderLink, printLabelUrl } from "../services/kyouLinks.js";
  * CARA KERJANYA. Bot tidak bisa "melihat" tombol Print ditekan — dia cuma bisa
  * membaca database. Jejaknya ada di `admin_logs` (`print_order_address` /
  * `print_order_address_manual`). Jadi tiap N menit bot mencari catatan cetak
- * BARU, lalu memeriksa: order itu punya barang di Group 2/3 (Tangerang/Surabaya)?
- * Kalau ya → kirim satu pesan berisi link cetak khusus gudang itu.
+ * BARU, lalu memeriksa: order itu barangnya tersebar di lebih dari satu gudang?
+ * Kalau ya → kirim satu pesan per gudang, berisi link cetak khusus gudang itu.
  *
- * KENAPA GROUP 1 (BEKASI) TIDAK PERNAH DIKIRIMI LINK. Bekasi mencetak sendiri
- * dari halaman fulfillment — merekalah yang jadi pemicunya. Data 45 hari
- * membenarkan: dari 124 order terpisah, SEMUANYA melibatkan Group 1 (105 dgn
- * Tangerang, 17 dgn Surabaya, 2 dgn keduanya). Tidak ada satu pun order terpisah
- * tanpa Bekasi — jadi "yang mencetak duluan = Bekasi" adalah asumsi yang aman.
+ * KENAPA SEMUA GUDANG DIKIRIMI LINK, TERMASUK BEKASI. Dulu cuma Group 2/3
+ * (Tangerang/Surabaya) yang dikirimi, dengan asumsi "yang mencetak duluan pasti
+ * Bekasi". Asumsi itu memang sering benar tapi TIDAK selalu: dari 27 order
+ * terpisah dalam 45 hari, 12 di antaranya cetakan pertamanya datang dari gudang
+ * jauh — dan pada order-order itu justru bagian BEKASI yang tidak pernah
+ * ditagih. Keputusan user 2026-07-20: jangan ada yang miss, jadi semua gudang
+ * pada order terpisah dikirimi linknya.
+ *
+ * KONSEKUENSINYA: gudang yang BARUSAN mencetak ikut dikirimi link bagiannya
+ * sendiri. Itu memang tidak bisa dihindari — lihat di bawah — jadi kalimat di
+ * embed sengaja tidak menuduh ("kalau bagianmu sudah dicetak, abaikan"), bukan
+ * penagihan.
  *
  * YANG TIDAK BISA DILAKUKAN BOT INI. `admin_logs` TIDAK menyimpan gudang mana
- * yang dicetak — jadi bot tidak bisa tahu apakah label Tangerang sudah dicetak
- * atau belum. Dia cuma memberi tahu SEKALI, lalu diam (keputusan user: tanpa
- * tombol konfirmasi, tanpa penagihan). Kalau suatu saat ingin bot benar-benar
- * mengejar yang belum dicetak, kyou.id harus menyimpan `packGroupId` ke
- * admin_logs — itu perubahan backend, dan sengaja dihindari di sini.
+ * yang dicetak, jadi bot tidak tahu siapa pemicunya dan tidak tahu label mana
+ * yang sudah keluar. Ini bukan karena datanya tidak ada: halaman fulfillment
+ * MENGIRIM `packGroupId` waktu mencetak dan memakainya untuk memilih isi label
+ * (`Order::itemsForPackGroup`), tapi nilainya tidak ikut ditulis ke
+ * `admin_logs.information` (`OrderController::buildPrintAddressGroups`,
+ * `AdminOrderController::printAddressManually`). Menambahkannya di sana = satu
+ * baris, dan sesudah itu bot bisa tahu persis siapa yang mencetak. Keputusan
+ * user 2026-07-20: JANGAN sentuh backend, semua diselesaikan dari sisi bot.
+ * Selama itu belum berubah, rem satu-satunya adalah hitungan cetak di bawah.
  */
 
 const EMBED_COLOR = 0xe67e22;
-
-/** Group 1 = Bekasi (pemicu, tak pernah dikirimi link). Sisanya yang ditagih. */
-const GUDANG_JAUH = [2, 3];
 
 type SplitRow = {
   orderId: string;
@@ -118,7 +126,13 @@ function splitQuery(sejak: string, sampai: string): string {
     JOIN item_sources s ON s.name      = oi.source
     LEFT JOIN districts d ON d.district_id = s.district_id
     WHERE o.status = 'paid'
-      AND s.pack_group_id IN (${GUDANG_JAUH.join(",")})
+      -- SEMUA gudang, bukan cuma yang jauh. Barang tanpa pack group (PO/UREQ,
+      -- source kosong) tetap terlewat: sebenarnya barang begitu ikut label
+      -- Group 1, tapi jumlahnya kecil (47 baris dalam 30 hari) dan menambalnya
+      -- butuh meniru aturan PO/UREQ dari Order::itemsForPackGroup. Akibatnya
+      -- cuma satu: berat & isi label Bekasi yang ditampilkan bisa kurang dari
+      -- yang benar-benar tercetak kalau ordernya memuat barang PO/UREQ.
+      AND s.pack_group_id IS NOT NULL
       AND EXISTS (
         SELECT 1 FROM admin_logs al
         WHERE al.order_id = o.order_id
@@ -216,12 +230,13 @@ function embedFor(row: SplitRow): EmbedBuilder {
     .setTitle(`📦 #${row.orderId} — ada barang di ${row.kota}`)
     .setDescription(
       [
-        `Order ${orderLink(row.orderId)} ini **pengirimannya terpisah**. Bagian Bekasi sudah dicetak; ` +
-          `bagian **${row.kota}** perlu label sendiri.`,
+        `Order ${orderLink(row.orderId)} ini **pengirimannya terpisah** — tiap gudang kirim paketnya ` +
+          `sendiri, jadi bagian **${row.kota}** perlu label sendiri.`,
         "",
         url ? `### 🖨️ [Cetak label ${row.kota}](${url})` : "_Link cetak tidak tersedia._",
         "",
-        `-# Label ini hanya berisi barang ${row.gudang} — berat & isinya sudah dipisah otomatis.`
+        `-# Label ini hanya berisi barang ${row.gudang} — berat & isinya sudah dipisah otomatis.`,
+        `-# Kalau bagian ${row.kota} barusan kamu cetak, abaikan pesan ini.`
       ].join("\n")
     )
     .addFields(
