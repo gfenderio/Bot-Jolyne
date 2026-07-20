@@ -218,7 +218,17 @@ const envSchema = z.object({
 
   // Khusus pesan bagian BEKASI (pack group 1): yang ditagih head fulfillment,
   // bukan orang gudangnya. Kosongkan kalau tidak mau ada yang di-tag.
-  SPLIT_PRINT_BEKASI_MENTION_USER_ID: optionalString.default("1337888111471886456")
+  SPLIT_PRINT_BEKASI_MENTION_USER_ID: optionalString.default("1337888111471886456"),
+
+  // "Kiriman WSR". Staf toko memilih barang rotasi di PDA lalu menyiapkannya
+  // sebagai kiriman — stoknya belum pindah. Gudang butuh daftar barangnya dalam
+  // bentuk yang bisa dibawa keliling rak, jadi bot memantau tabel wsr_batches
+  // dan mengirim Excel-nya ke channel. Stok baru berpindah saat kiriman itu
+  // dieksekusi dari PDA.
+  WSR_SHIPMENT_ENABLED: optionalBoolean,
+  WSR_SHIPMENT_CHANNEL_ID: optionalString.default("1501899831268868106"),
+  WSR_SHIPMENT_POLL_MINUTES: pollIntervalSeconds.default(5),
+  WSR_SHIPMENT_STORE_PATH: optionalString.default("data/wsr-shipment.json")
 });
 
 // Override dari kode agar mengabaikan setting environment server Coolify
@@ -242,6 +252,11 @@ process.env.PICK_TRIAGE_AUTOCLEAR_ENABLED = "true";
 process.env.SPLIT_PRINT_CHANNEL_ID = "1523576053581349006";
 process.env.SPLIT_PRINT_BEKASI_MENTION_USER_ID = "1337888111471886456";
 process.env.SPLIT_PRINT_ENABLED = "true";
+
+// Kiriman WSR: menumpang channel machitan/pick-pack yang sudah dipakai laporan
+// WS Inbox — penerimanya orang yang sama (gudang), jadi tidak perlu channel baru.
+process.env.WSR_SHIPMENT_CHANNEL_ID = "1501899831268868106";
+process.env.WSR_SHIPMENT_ENABLED = "true";
 // Env mati yang mungkin masih tersisa di server; dibersihkan biar tidak
 // menyesatkan kalau ada yang membaca konfigurasi Coolify.
 delete process.env.PICK_TRIAGE_SINCE;
