@@ -5,32 +5,36 @@ import { fetchNativeQueryWithPagination, type MetabaseConfig } from "../services
 import { getOrInitWatermark, setWatermark } from "../services/wsrShipmentStore.js";
 
 /**
- * Kiriman WSR → Excel ke Discord.
+ * Kiriman WSR → PENGUMUMAN + Excel ke channel gudang. Titik.
  *
- * Alur yang diminta di meeting 20 Jul: staf toko memilih barang di PDA lalu
- * menekan "Siapkan kiriman" — stok BELUM pindah. Gudang perlu daftar barangnya
- * dalam bentuk yang bisa dicetak/dibawa keliling rak, makanya dikirim sebagai
- * Excel ke Discord. Setelah barangnya siap, kiriman dieksekusi dari PDA dan
- * barulah stok berpindah.
+ * Keputusan 22 Jul: Jolyne TIDAK berperan sebagai tiket. Tracking & penilaian
+ * kerjaan tim WH tetap lewat tiket Mornye (/wh-ticket) yang diajukan manual
+ * seperti biasa — sistem tiket (thread, tombol claim/close, rating di
+ * purchasing_ticket_feedbacks, arsip shiro) seluruhnya milik Mornye dan tidak
+ * ditiru dari luar. Jolyne cuma memastikan gudang menerima daftar barangnya
+ * (Excel urut rak) begitu kiriman dibuat di PDA.
  *
- * Bot TIDAK dipanggil oleh hanayo — ia memantau tabel `wsr_batches` lewat
- * Metabase (readonly), pola yang sama dengan split-print. Alasannya: hanayo
- * tidak punya jalur keluar ke Discord, dan menambahkannya berarti menaruh
- * kredensial bot di aplikasi yang tidak membutuhkannya.
+ * Sumber data: tabel `wsr_batches` + `wsr_batch_items` via Metabase (readonly).
+ * Skema hasil normalisasi review Shanieulle: nama barang/gudang/rak/orang
+ * TIDAK disalin ke tabel batch — di-JOIN dari `items`/`item_sources`/`racks`/
+ * `users` (string hanya hidup di tabel asalnya).
  */
 
 interface ShipmentRow {
   id: number;
   unit: string;
   direction: string;
+  status: string;
   totalItems: number;
   totalQty: number;
   createdBy: string;
+  executedBy: string;
+  executedAt: string;
   createdAt: string;
-  items: ShipmentItem[];
 }
 
 interface ShipmentItem {
+  batchId: number;
   itemId: string;
   name: string;
   barcode: string;
@@ -38,6 +42,8 @@ interface ShipmentItem {
   destination: string;
   qty: number;
   rack: string;
+  status: string;
+  error: string;
 }
 
 /** Arah internal → kalimat yang dimengerti orang gudang. */
@@ -59,55 +65,79 @@ function metabaseConfig(): MetabaseConfig | null {
 
 const maxIdQuery = () => `SELECT COALESCE(MAX(id), 0) AS max_id FROM wsr_batches`;
 
-/**
- * Hanya kiriman yang masih menunggu. Yang sudah dieksekusi atau dibatalkan
- * sebelum bot sempat melihatnya memang tidak perlu dikirim — daftarnya sudah
- * tidak berguna buat gudang.
- */
-const shipmentQuery = (sejakId: number) => `
-  SELECT id, unit, direction, total_items, total_qty,
-         COALESCE(created_by_name, '-') AS created_by, created_at, items
-  FROM wsr_batches
-  WHERE id > ${sejakId} AND status = 'pending'
-  ORDER BY id ASC
+// Nama orang di-join dari users (skema normalisasi: created_by = users.user_id).
+const batchSelect = `
+  SELECT b.id, b.unit, b.direction, b.status, b.total_items, b.total_qty,
+         COALESCE(cu.name, '-') AS created_by, COALESCE(eu.name, '-') AS executed_by,
+         COALESCE(b.executed_at, '') AS executed_at, b.created_at
+  FROM wsr_batches b
+  LEFT JOIN users cu ON cu.user_id = b.created_by
+  LEFT JOIN users eu ON eu.user_id = b.executed_by
 `;
 
-function parseItems(raw: unknown): ShipmentItem[] {
-  if (typeof raw !== "string") return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map((it) => ({
-      itemId: String(it?.item_id ?? ""),
-      name: String(it?.name ?? ""),
-      barcode: String(it?.barcode ?? ""),
-      source: String(it?.source ?? ""),
-      destination: String(it?.destination ?? ""),
-      qty: Number(it?.qty ?? 0),
-      rack: String(it?.rack ?? "")
-    }));
-  } catch {
-    return [];
-  }
-}
+const newShipmentsQuery = (sejakId: number) => `
+  ${batchSelect}
+  WHERE b.id > ${sejakId} AND b.status = 'pending'
+  ORDER BY b.id ASC
+`;
 
-async function fetchShipments(config: MetabaseConfig, sejakId: number): Promise<ShipmentRow[]> {
-  const { columns, rows } = await fetchNativeQueryWithPagination(config, shipmentQuery(sejakId));
+// Isi kiriman: semua string di-join dari tabel asalnya (items/item_sources/racks).
+const itemsQuery = (ids: number[]) => `
+  SELECT i.batch_id, i.item_id, it.name, COALESCE(it.barcode, '') AS barcode,
+         ss.name AS source, sd.name AS destination, i.qty,
+         COALESCE(r.name, '') AS rack, i.status, COALESCE(i.error, '') AS error
+  FROM wsr_batch_items i
+  JOIN items it ON it.item_id = i.item_id
+  JOIN item_sources ss ON ss.id = i.source_id
+  JOIN item_sources sd ON sd.id = i.destination_id
+  LEFT JOIN racks r ON r.id = i.rack_id
+  WHERE i.batch_id IN (${ids.join(",")})
+  ORDER BY i.id ASC
+`;
+
+function rowsToShipments(columns: string[], rows: unknown[][]): ShipmentRow[] {
   const idx = (name: string) => columns.indexOf(name);
   return rows.map((row) => ({
     id: Number(row[idx("id")] ?? 0),
     unit: String(row[idx("unit")] ?? ""),
     direction: String(row[idx("direction")] ?? ""),
+    status: String(row[idx("status")] ?? ""),
     totalItems: Number(row[idx("total_items")] ?? 0),
     totalQty: Number(row[idx("total_qty")] ?? 0),
     createdBy: String(row[idx("created_by")] ?? "-"),
-    createdAt: String(row[idx("created_at")] ?? ""),
-    items: parseItems(row[idx("items")])
+    executedBy: String(row[idx("executed_by")] ?? "-"),
+    executedAt: String(row[idx("executed_at")] ?? ""),
+    createdAt: String(row[idx("created_at")] ?? "")
   }));
 }
 
-/** Satu kiriman = satu sheet siap cetak; kolomnya urut sesuai cara orang jalan di rak. */
-export async function buildShipmentWorkbook(shipment: ShipmentRow): Promise<Buffer> {
+async function fetchItems(config: MetabaseConfig, batchIds: number[]): Promise<Map<number, ShipmentItem[]>> {
+  const out = new Map<number, ShipmentItem[]>();
+  if (batchIds.length === 0) return out;
+  const { columns, rows } = await fetchNativeQueryWithPagination(config, itemsQuery(batchIds));
+  const idx = (name: string) => columns.indexOf(name);
+  for (const row of rows) {
+    const item: ShipmentItem = {
+      batchId: Number(row[idx("batch_id")] ?? 0),
+      itemId: String(row[idx("item_id")] ?? ""),
+      name: String(row[idx("name")] ?? ""),
+      barcode: String(row[idx("barcode")] ?? ""),
+      source: String(row[idx("source")] ?? ""),
+      destination: String(row[idx("destination")] ?? ""),
+      qty: Number(row[idx("qty")] ?? 0),
+      rack: String(row[idx("rack")] ?? ""),
+      status: String(row[idx("status")] ?? "pending"),
+      error: String(row[idx("error")] ?? "")
+    };
+    const list = out.get(item.batchId) ?? [];
+    list.push(item);
+    out.set(item.batchId, list);
+  }
+  return out;
+}
+
+/** Satu kiriman = satu sheet siap cetak; urut per rak — gudang jalan sekali lewat. */
+export async function buildShipmentWorkbook(shipment: ShipmentRow, items: ShipmentItem[]): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet(`Kiriman ${shipment.id}`, {
     views: [{ state: "frozen", ySplit: 4, showGridLines: false }],
@@ -136,9 +166,9 @@ export async function buildShipmentWorkbook(shipment: ShipmentRow): Promise<Buff
 
   sheet.getRow(3).height = 6;
 
-  // Sengaja TANPA `header`: ExcelJS menulis header dari `columns` ke baris 1,
-  // dan baris 1 di sini sudah dipakai judul (merge A1:G1) — hasilnya judulnya
-  // ketimpa jadi "Qty". Judul kolom diisi manual di baris 4 di bawah.
+  // Tanpa `header` di columns: ExcelJS menulis header dari `columns` ke baris 1
+  // dan menimpa judul yang di-merge (bug yang pernah ketangkap). Header manual
+  // di baris 4.
   sheet.columns = [
     { key: "rack", width: 12 },
     { key: "itemId", width: 11 },
@@ -158,9 +188,7 @@ export async function buildShipmentWorkbook(shipment: ShipmentRow): Promise<Buff
   });
   headerRow.height = 24;
 
-  // Urut per rak: gudang mengambil barang sambil jalan sekali lewat, bukan
-  // bolak-balik mengikuti urutan prioritas yang dipakai di layar PDA.
-  const sorted = [...shipment.items].sort((a, b) => (a.rack || "￿").localeCompare(b.rack || "￿"));
+  const sorted = [...items].sort((a, b) => (a.rack || "￿").localeCompare(b.rack || "￿"));
   for (const item of sorted) {
     sheet.addRow({
       rack: item.rack || "-",
@@ -177,23 +205,23 @@ export async function buildShipmentWorkbook(shipment: ShipmentRow): Promise<Buff
   return Buffer.from(arrayBuffer);
 }
 
-function embedFor(shipment: ShipmentRow): EmbedBuilder {
-  // Tujuan dirangkum: satu kiriman bisa terbelah ke beberapa gudang.
+function openingEmbed(shipment: ShipmentRow, items: ShipmentItem[]): EmbedBuilder {
   const perTujuan = new Map<string, number>();
-  for (const item of shipment.items) {
+  for (const item of items) {
     perTujuan.set(item.destination, (perTujuan.get(item.destination) ?? 0) + item.qty);
   }
-  const rincian = [...perTujuan.entries()].map(([tujuan, qty]) => `**${tujuan}** ${qty} pcs`).join(" · ");
+  const rincian = [...perTujuan.entries()].map(([t, q]) => `**${t}** ${q} pcs`).join(" · ");
 
   return new EmbedBuilder()
     .setColor(0x00897b)
-    .setTitle(`[Kiriman WSR #${shipment.id}] — ${shipment.unit}`)
+    .setTitle(`📦 Kiriman WSR #${shipment.id} — ${shipment.unit}`)
     .setDescription(
       `${ARAH[shipment.direction] ?? shipment.direction}\n\n` +
         `**${shipment.totalItems} barang · ${shipment.totalQty} pcs**\n${rincian}\n\n` +
-        `Disiapkan oleh **${shipment.createdBy}**.\n` +
-        `Stok **belum** berpindah. Siapkan barangnya sesuai daftar terlampir, ` +
-        `lalu buka menu **Kiriman** di PDA dan tekan *Pindahkan sekarang*.`
+        `Dibuat oleh **${shipment.createdBy}**.\n` +
+        `Stok **belum** berpindah. Siapkan barangnya sesuai daftar terlampir, lalu ` +
+        `buka menu **Kiriman** di PDA → **Pindahkan sekarang**. ` +
+        `Jangan lupa ajukan tiketnya lewat /wh-ticket seperti biasa.`
     )
     .setFooter({ text: `Dibuat ${shipment.createdAt} WIB` })
     .setTimestamp();
@@ -213,11 +241,13 @@ export async function runWsrShipmentCheck(client: Client): Promise<void> {
   const sejakId = getOrInitWatermark(maxId);
   if (maxId <= sejakId) return; // tak ada kiriman baru
 
-  const shipments = await fetchShipments(config, sejakId);
+  const res = await fetchNativeQueryWithPagination(config, newShipmentsQuery(sejakId));
+  const shipments = rowsToShipments(res.columns, res.rows);
   if (shipments.length === 0) {
     setWatermark(maxId);
     return;
   }
+  const itemsByBatch = await fetchItems(config, shipments.map((s) => s.id));
 
   const channel = (await client.channels.fetch(env.WSR_SHIPMENT_CHANNEL_ID).catch(() => null)) as TextChannel | null;
   if (!channel?.isTextBased()) {
@@ -230,21 +260,22 @@ export async function runWsrShipmentCheck(client: Client): Promise<void> {
   let terkirim = 0;
   for (const shipment of shipments) {
     try {
-      const buffer = await buildShipmentWorkbook(shipment);
+      const items = itemsByBatch.get(shipment.id) ?? [];
+      const buffer = await buildShipmentWorkbook(shipment, items);
       const attachment = new AttachmentBuilder(buffer, {
         name: `Kiriman_WSR_${shipment.id}_${shipment.unit}.xlsx`
       });
-      await channel.send({ embeds: [embedFor(shipment)], files: [attachment] });
+      await channel.send({ embeds: [openingEmbed(shipment, items)], files: [attachment] });
       terkirim++;
     } catch (err) {
-      console.error(`[wsr-shipment] gagal kirim #${shipment.id}:`, err);
+      console.error(`[wsr-shipment] gagal kirim kiriman #${shipment.id}:`, err);
     }
   }
 
-  // Digeser SETELAH terkirim — sama alasannya dengan split-print: kalau digeser
-  // duluan lalu pengiriman gagal, kirimannya hilang selamanya dari pantauan.
+  // Digeser SETELAH pesan terkirim — kegagalan kirim tidak membuat kiriman
+  // hilang dari pantauan.
   setWatermark(maxId);
-  console.log(`[wsr-shipment] ${terkirim} kiriman dikirim ke channel.`);
+  console.log(`[wsr-shipment] ${terkirim} kiriman diumumkan ke channel.`);
 }
 
 export function startWsrShipmentScheduler(client: Client): void {
@@ -273,5 +304,5 @@ export function startWsrShipmentScheduler(client: Client): void {
 
   setInterval(tick, intervalMs).unref?.();
   void tick();
-  console.log(`[wsr-shipment] poller aktif — cek tiap ${env.WSR_SHIPMENT_POLL_MINUTES} menit.`);
+  console.log(`[wsr-shipment] poller tiket kiriman aktif — cek tiap ${env.WSR_SHIPMENT_POLL_MINUTES} menit.`);
 }
