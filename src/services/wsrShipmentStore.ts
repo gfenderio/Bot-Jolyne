@@ -3,23 +3,36 @@ import path from "path";
 import { env } from "../config/env.js";
 
 /**
- * Store untuk fitur "kiriman WSR — daftar barang buat gudang".
+ * Store untuk "tiket kiriman WSR" ala Jolyne.
  *
- * Isinya cuma satu: `lastSeenBatchId`, id kiriman terakhir yang sudah dikirim
- * ke Discord. Poll berikutnya hanya melihat id yang LEBIH BESAR.
+ * Dua isinya:
  *
- * Kenapa pakai id, bukan waktu seperti splitPrintStore: id kiriman berasal dari
- * AUTO_INCREMENT — selalu naik, tak pernah bentrok, dan tidak perlu memikirkan
- * beda zona waktu antara server bot dan DB (jebakan yang sudah pernah kena di
- * fitur split-print: admin_logs jam WIB tapi NOW() UTC).
+ * - `lastSeenBatchId`: watermark id kiriman terakhir yang sudah dibuatkan
+ *   thread. Id AUTO_INCREMENT selalu naik — tidak ada jebakan zona waktu
+ *   seperti kolom datetime (pelajaran dari split-print).
+ *
+ * - `tracked`: kiriman yang thread-nya masih HIDUP (belum done/cancelled),
+ *   kunci = batchId. Poll berikutnya membandingkan status DB dengan
+ *   `lastStatus`/`lastFailed` di sini untuk tahu kapan harus post update
+ *   ("selesai", "dibatalkan", "gagal sebagian") lalu menutup thread.
  *
  * Kalau store hilang saat redeploy (tak ada volume persisten, sama seperti
- * store lain di repo ini), watermark di-set = id tertinggi saat itu → kiriman
- * lama sengaja dilewat, bukan diblast ulang ke channel.
+ * store lain di repo ini): watermark di-set = id tertinggi saat itu, jadi
+ * kiriman lama tidak diblast ulang; thread tiket yang masih terbuka saat
+ * redeploy TIDAK akan di-update lagi oleh bot (konsekuensi yang diterima —
+ * status aslinya selalu bisa dilihat di menu Kiriman PDA).
  */
+
+export interface TrackedShipment {
+  threadId: string;
+  lastStatus: string;   // pending | running | done | cancelled
+  lastFailed: number;   // jumlah barang berstatus failed saat terakhir dilihat
+  unit: string;
+}
 
 interface WsrShipmentStore {
   lastSeenBatchId: number | null;
+  tracked: Record<string, TrackedShipment>;
 }
 
 function storePath(): string {
@@ -28,13 +41,16 @@ function storePath(): string {
 
 function readStore(): WsrShipmentStore {
   const file = storePath();
-  if (!fs.existsSync(file)) return { lastSeenBatchId: null };
+  if (!fs.existsSync(file)) return { lastSeenBatchId: null, tracked: {} };
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
     const id = Number(parsed.lastSeenBatchId);
-    return { lastSeenBatchId: Number.isFinite(id) ? id : null };
+    return {
+      lastSeenBatchId: Number.isFinite(id) ? id : null,
+      tracked: parsed.tracked ?? {}
+    };
   } catch {
-    return { lastSeenBatchId: null };
+    return { lastSeenBatchId: null, tracked: {} };
   }
 }
 
@@ -44,19 +60,41 @@ function writeStore(store: WsrShipmentStore): void {
   fs.writeFileSync(file, JSON.stringify(store, null, 2), "utf-8");
 }
 
-/**
- * Ambil batas bawah. Putaran pertama: dipatok ke id tertinggi yang ada sekarang,
- * jadi kiriman yang dibuat sebelum bot nyala tidak ikut terkirim.
- */
+/** Putaran pertama: patok watermark ke id tertinggi supaya backlog lama dilewat. */
 export function getOrInitWatermark(currentMaxId: number): number {
   const store = readStore();
   if (store.lastSeenBatchId === null) {
-    writeStore({ lastSeenBatchId: currentMaxId });
+    writeStore({ ...store, lastSeenBatchId: currentMaxId });
     return currentMaxId;
   }
   return store.lastSeenBatchId;
 }
 
 export function setWatermark(id: number): void {
-  writeStore({ lastSeenBatchId: id });
+  const store = readStore();
+  writeStore({ ...store, lastSeenBatchId: id });
+}
+
+export function trackShipment(batchId: number, info: TrackedShipment): void {
+  const store = readStore();
+  store.tracked[String(batchId)] = info;
+  writeStore(store);
+}
+
+export function getTracked(): Record<string, TrackedShipment> {
+  return readStore().tracked;
+}
+
+export function updateTracked(batchId: number, patch: Partial<TrackedShipment>): void {
+  const store = readStore();
+  const cur = store.tracked[String(batchId)];
+  if (!cur) return;
+  store.tracked[String(batchId)] = { ...cur, ...patch };
+  writeStore(store);
+}
+
+export function untrack(batchId: number): void {
+  const store = readStore();
+  delete store.tracked[String(batchId)];
+  writeStore(store);
 }
