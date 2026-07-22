@@ -228,11 +228,7 @@ const envSchema = z.object({
   WSR_SHIPMENT_ENABLED: optionalBoolean,
   WSR_SHIPMENT_CHANNEL_ID: optionalString.default("1501899831268868106"),
   WSR_SHIPMENT_POLL_MINUTES: pollIntervalSeconds.default(5),
-  WSR_SHIPMENT_STORE_PATH: optionalString.default("data/wsr-shipment.json"),
-  // Specialist WH yang di-mention saat thread kiriman dibuka. Default = user
-  // yang jadi assignee hampir semua tiket wh_wsr Mornye di purchasing_tickets
-  // (dicek dari data prod). Kosongkan untuk mematikan mention.
-  WSR_TICKET_MENTION_USER_ID: optionalString.default("1115194334497755157")
+  WSR_SHIPMENT_STORE_PATH: optionalString.default("data/wsr-shipment.json")
 });
 
 // Override dari kode agar mengabaikan setting environment server Coolify
