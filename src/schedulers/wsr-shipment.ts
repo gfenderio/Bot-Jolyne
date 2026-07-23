@@ -53,6 +53,16 @@ const ARAH: Record<string, string> = {
   event: "Kirim ke lokasi lain"
 };
 
+/**
+ * Kode kiriman — PENGGANTI "nama sheet" Google Sheet WSR yang lama.
+ * Staf menyalin kode ini ke kolom **Batch (Sheet name)** saat mengajukan tiket
+ * /wh-ticket, jadi tiket <-> kiriman <-> Excel saling terhubung tanpa sheet.
+ * Deterministik dari unit + id (id AUTO_INCREMENT, unik selamanya).
+ */
+function shipmentCode(shipment: ShipmentRow): string {
+  return `WSR-${shipment.unit}-${shipment.id}`;
+}
+
 function metabaseConfig(): MetabaseConfig | null {
   if (!env.METABASE_URL || !env.METABASE_EMAIL || !env.METABASE_PASSWORD) return null;
   return {
@@ -156,6 +166,7 @@ export async function buildShipmentWorkbook(shipment: ShipmentRow, items: Shipme
   sheet.mergeCells("A2:G2");
   const subtitle = sheet.getCell("A2");
   subtitle.value =
+    `Kode: ${shipmentCode(shipment)}    ` +
     `${ARAH[shipment.direction] ?? shipment.direction}    ` +
     `${shipment.totalItems} barang    ${shipment.totalQty} pcs    ` +
     `Dibuat: ${shipment.createdBy}`;
@@ -212,16 +223,19 @@ function openingEmbed(shipment: ShipmentRow, items: ShipmentItem[]): EmbedBuilde
   }
   const rincian = [...perTujuan.entries()].map(([t, q]) => `**${t}** ${q} pcs`).join(" · ");
 
+  const code = shipmentCode(shipment);
   return new EmbedBuilder()
     .setColor(0x00897b)
-    .setTitle(`📦 Kiriman WSR #${shipment.id} — ${shipment.unit}`)
+    .setTitle(`📦 ${code} — Kiriman WSR #${shipment.id}`)
     .setDescription(
       `${ARAH[shipment.direction] ?? shipment.direction}\n\n` +
         `**${shipment.totalItems} barang · ${shipment.totalQty} pcs**\n${rincian}\n\n` +
+        // Blok kode = gampang disalin dari Discord (tombol copy muncul saat hover).
+        `Kode kiriman (pengganti nama sheet):\n\`\`\`\n${code}\n\`\`\`` +
         `Dibuat oleh **${shipment.createdBy}**.\n` +
         `Stok **belum** berpindah. Siapkan barangnya sesuai daftar terlampir, lalu ` +
-        `buka menu **Kiriman** di PDA → **Pindahkan sekarang**. ` +
-        `Jangan lupa ajukan tiketnya lewat /wh-ticket seperti biasa.`
+        `buka menu **Kiriman** di PDA → **Pindahkan sekarang**.\n` +
+        `Saat mengajukan tiket **/wh-ticket**, isi kolom **Batch (Sheet name)** dengan kode di atas.`
     )
     .setFooter({ text: `Dibuat ${shipment.createdAt} WIB` })
     .setTimestamp();
@@ -263,7 +277,7 @@ export async function runWsrShipmentCheck(client: Client): Promise<void> {
       const items = itemsByBatch.get(shipment.id) ?? [];
       const buffer = await buildShipmentWorkbook(shipment, items);
       const attachment = new AttachmentBuilder(buffer, {
-        name: `Kiriman_WSR_${shipment.id}_${shipment.unit}.xlsx`
+        name: `${shipmentCode(shipment)}.xlsx`
       });
       await channel.send({ embeds: [openingEmbed(shipment, items)], files: [attachment] });
       terkirim++;

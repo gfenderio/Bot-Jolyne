@@ -226,7 +226,7 @@ const envSchema = z.object({
   // dan mengirim Excel-nya ke channel. Stok baru berpindah saat kiriman itu
   // dieksekusi dari PDA.
   WSR_SHIPMENT_ENABLED: optionalBoolean,
-  WSR_SHIPMENT_CHANNEL_ID: optionalString.default("1501899831268868106"),
+  WSR_SHIPMENT_CHANNEL_ID: optionalString.default("1529679453876256859"),
   WSR_SHIPMENT_POLL_MINUTES: pollIntervalSeconds.default(5),
   WSR_SHIPMENT_STORE_PATH: optionalString.default("data/wsr-shipment.json")
 });
@@ -255,7 +255,9 @@ process.env.SPLIT_PRINT_ENABLED = "true";
 
 // Kiriman WSR: menumpang channel machitan/pick-pack yang sudah dipakai laporan
 // WS Inbox — penerimanya orang yang sama (gudang), jadi tidak perlu channel baru.
-process.env.WSR_SHIPMENT_CHANNEL_ID = "1501899831268868106";
+// Kiriman WSR pindah ke channel khusus (permintaan 22 Jul) — tidak lagi
+// menumpang channel laporan WS Inbox.
+process.env.WSR_SHIPMENT_CHANNEL_ID = "1529679453876256859";
 process.env.WSR_SHIPMENT_ENABLED = "true";
 // Env mati yang mungkin masih tersisa di server; dibersihkan biar tidak
 // menyesatkan kalau ada yang membaca konfigurasi Coolify.
