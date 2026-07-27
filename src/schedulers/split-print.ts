@@ -21,35 +21,38 @@ import { orderLink, printLabelUrl } from "../services/kyouLinks.js";
  * BARU, lalu memeriksa: order itu barangnya tersebar di lebih dari satu gudang?
  * Kalau ya → kirim satu pesan per gudang, berisi link cetak khusus gudang itu.
  *
- * KENAPA SEMUA GUDANG DIKIRIMI LINK, TERMASUK BEKASI. Dulu cuma Group 2/3
- * (Tangerang/Surabaya) yang dikirimi, dengan asumsi "yang mencetak duluan pasti
- * Bekasi". Asumsi itu memang sering benar tapi TIDAK selalu: dari 27 order
- * terpisah dalam 45 hari, 12 di antaranya cetakan pertamanya datang dari gudang
- * jauh — dan pada order-order itu justru bagian BEKASI yang tidak pernah
- * ditagih. Keputusan user 2026-07-20: jangan ada yang miss, jadi semua gudang
- * pada order terpisah dikirimi linknya.
+ * GUDANG MANA YANG SUDAH CETAK — DIBACA DARI LOKASI ORANGNYA. `admin_logs`
+ * tidak menyimpan bagian mana yang dicetak (halaman fulfillment mengirim
+ * `packGroupId`, tapi nilainya tidak ikut ditulis ke `information`). Yang
+ * tersimpan: SIAPA yang mencetak. Dan setiap admin punya lokasi kerja di
+ * `users.office_location` (ALPHA / OMEGA / BETA / GAMMA / KCC) — isinya persis
+ * nama source di `item_sources`, jadi lokasi itu bisa dipetakan ke pack group
+ * lewat join biasa, tanpa daftar hardcode:
  *
- * KONSEKUENSINYA: gudang yang BARUSAN mencetak ikut dikirimi link bagiannya
- * sendiri. Itu memang tidak bisa dihindari — lihat di bawah — jadi kalimat di
- * embed sengaja tidak menuduh ("kalau bagianmu sudah dicetak, abaikan"), bukan
- * penagihan.
+ *   ALPHA, OMEGA → group 1 (Bekasi) · BETA, KCC → group 2 (Tangerang) ·
+ *   GAMMA → group 3 (Surabaya)
  *
- * PESANNYA BEDA PER GUDANG. Bagian BEKASI kalimatnya lain dan nge-tag head
- * fulfillment (`SPLIT_PRINT_BEKASI_MENTION_USER_ID`); gudang lain tanpa tag.
- * Ini TIDAK butuh tahu siapa yang mencetak — bot cuma perlu tahu baris ini
- * gudangnya apa, dan itu memang dia sendiri yang hitung. Volumenya kecil: pada
- * uji kering 7 hari, pesan Bekasi keluar 10 kali (±1-2 tag sehari).
+ * Orang gudang mencetak bagiannya sendiri, jadi "Savira (BETA) mencetak order
+ * ini" = label Tangerang sudah keluar. Konsekuensinya: gudang yang sudah punya
+ * pencetak TIDAK dikirimi pesan lagi, dan tag head fulfillment hanya keluar
+ * kalau bagian Bekasi memang belum disentuh orang Bekasi.
  *
- * YANG TIDAK BISA DILAKUKAN BOT INI. `admin_logs` TIDAK menyimpan gudang mana
- * yang dicetak, jadi bot tidak tahu siapa pemicunya dan tidak tahu label mana
- * yang sudah keluar. Ini bukan karena datanya tidak ada: halaman fulfillment
- * MENGIRIM `packGroupId` waktu mencetak dan memakainya untuk memilih isi label
- * (`Order::itemsForPackGroup`), tapi nilainya tidak ikut ditulis ke
- * `admin_logs.information` (`OrderController::buildPrintAddressGroups`,
- * `AdminOrderController::printAddressManually`). Menambahkannya di sana = satu
- * baris, dan sesudah itu bot bisa tahu persis siapa yang mencetak. Keputusan
- * user 2026-07-20: JANGAN sentuh backend, semua diselesaikan dari sisi bot.
- * Selama itu belum berubah, rem satu-satunya adalah hitungan cetak di bawah.
+ * KENAPA INI PERLU. Sebelumnya semua gudang dikirimi pesan dan bagian Bekasi
+ * SELALU nge-tag, termasuk waktu orang Bekasi sendiri yang barusan mencetak —
+ * keluhan head fulfillment 2026-07-27: "gua yang ngeprint juga bakal muncul di
+ * pisah kirim". Dari 19 order terpisah dalam 30 hari, 11 cetakan pertamanya
+ * datang dari orang grup 1; tag pada 11 order itu memang tidak ada gunanya.
+ *
+ * KALAU LOKASINYA KOSONG. 19 admin (dan user yang sudah dihapus) tidak punya
+ * `office_location`. Cetakan mereka tidak bisa dihubungkan ke gudang manapun,
+ * jadi dipakai rem lama: kalau jumlah cetakan tak-dikenal itu sudah sebanyak
+ * gudang yang tersisa, anggap saja sudah tercetak dan diamkan. Kasar, tapi
+ * hanya berlaku untuk sisa kecil (2 dari 19 order).
+ *
+ * OBAT YANG SEBENARNYA tetap menulis `packGroupId` ke `admin_logs.information`
+ * (satu baris di `OrderController::buildPrintAddressGroups` &
+ * `AdminOrderController::printAddressManually`). Keputusan user 2026-07-20 &
+ * 2026-07-27: JANGAN sentuh backend — semua diselesaikan dari sisi bot.
  */
 
 const EMBED_COLOR = 0xe67e22;
@@ -57,11 +60,28 @@ const EMBED_COLOR = 0xe67e22;
 /**
  * Group 1 = Bekasi. Dibedakan bukan karena gudangnya istimewa, tapi karena yang
  * ditagih beda orangnya: bagian Bekasi ditujukan ke head fulfillment, gudang
- * lain ke channelnya sendiri. Bot memang tidak tahu SIAPA yang mencetak, tapi
- * dia tahu persis baris ini gudangnya apa — jadi memisahkan pesannya per gudang
- * tidak butuh tebakan sama sekali.
+ * lain ke channelnya sendiri.
  */
 const GROUP_BEKASI = 1;
+
+/**
+ * Potongan SQL: benar tepat ketika sudah ada orang BER-LOKASI GUDANG INI yang
+ * mencetak order ini. `users.office_location` → `item_sources.name` →
+ * `pack_group_id`; user tanpa lokasi (atau sudah dihapus) tidak ikut, biar
+ * ditangani rem hitungan di bawah.
+ */
+function sudahDicetakGudangIni(kolomGrup: string): string {
+  return `
+        EXISTS (
+          SELECT 1
+          FROM admin_logs alp
+          JOIN users pu           ON pu.user_id = alp.user_id
+          JOIN item_sources psrc  ON psrc.name  = pu.office_location
+          WHERE alp.order_id = o.order_id
+            AND alp.action IN ('print_order_address', 'print_order_address_manual')
+            AND psrc.pack_group_id = ${kolomGrup}
+        )`.trim();
+}
 
 type SplitRow = {
   orderId: string;
@@ -155,29 +175,43 @@ function splitQuery(sejak: string, sampai: string): string {
           AND al.created_at >  '${sejak}'
           AND al.created_at <= '${sampai}'
       )
-      -- Cuma kirim kalau JUMLAH CETAK masih KURANG dari JUMLAH GUDANG.
-      --
-      -- Tanpa ini bot berisik dan menyebalkan: yang mencetak sering justru staf
-      -- gudang jauh itu sendiri (Savira rutin mencetak label Tangerang), jadi
-      -- bot akan menagih pekerjaan yang baru saja selesai. Diuji pada cetakan
-      -- 13:00-16:04 tgl 13 Jul: 14 baris turun jadi 8 — yang didiamkan persis
-      -- order yang sudah dicetak >= jumlah gudangnya (396668 sudah 5x cetak).
-      --
-      -- Ini heuristik, bukan kebenaran: admin_logs TIDAK menyimpan gudang mana
-      -- yang dicetak, jadi cetak-ulang di gudang yang sama ikut terhitung dan
-      -- bisa membuat order yang benar-benar kurang label jadi terlewat. Satu-
-      -- satunya obat yang jujur adalah menyimpan packGroupId ke admin_logs
-      -- (perubahan backend kyou.id, sengaja dihindari).
+      -- Cuma order yang pengirimannya BENAR-BENAR terpisah. Dulu ini kebetulan
+      -- terjaga oleh hitungan "cetak < gudang" (order satu gudang selalu 1 >= 1
+      -- begitu dicetak). Hitungan itu diganti, jadi syaratnya ditulis eksplisit
+      -- — tanpa ini order biasa yang kebetulan dicetak orang gudang lain ikut
+      -- terkirim.
       AND (
-        SELECT COUNT(*) FROM admin_logs al2
+        SELECT COUNT(DISTINCT s3.pack_group_id)
+        FROM order_items oi3
+        JOIN item_sources s3 ON s3.name = oi3.source
+        WHERE oi3.order_id = o.order_id
+          AND s3.pack_group_id IS NOT NULL
+      ) > 1
+      -- Gudang yang SUDAH mencetak bagiannya tidak usah dikirimi apa-apa. Ini
+      -- yang bikin head fulfillment berhenti ketag waktu dia sendiri yang
+      -- mencetak: begitu ada orang berlokasi Bekasi mencetak order ini, baris
+      -- grup 1 hilang — dan tag menempel pada baris grup 1.
+      AND NOT ${sudahDicetakGudangIni("s.pack_group_id")}
+      -- Rem untuk cetakan yang pencetaknya tidak punya lokasi (tidak bisa
+      -- dihubungkan ke gudang manapun): kalau jumlahnya sudah sebanyak gudang
+      -- yang belum ketahuan mencetak, anggap sudah beres dan diam. Ini hitungan
+      -- kasar yang lama, sekarang cuma dipakai untuk sisa kecil ini — bukan
+      -- lagi satu-satunya rem.
+      AND (
+        SELECT COUNT(*)
+        FROM admin_logs al2
+        LEFT JOIN users uu          ON uu.user_id = al2.user_id
+        LEFT JOIN item_sources usrc ON usrc.name  = uu.office_location
         WHERE al2.order_id = o.order_id
           AND al2.action IN ('print_order_address', 'print_order_address_manual')
+          AND usrc.pack_group_id IS NULL
       ) < (
         SELECT COUNT(DISTINCT s2.pack_group_id)
         FROM order_items oi2
         JOIN item_sources s2 ON s2.name = oi2.source
         WHERE oi2.order_id = o.order_id
           AND s2.pack_group_id IS NOT NULL
+          AND NOT ${sudahDicetakGudangIni("s2.pack_group_id")}
       )
     GROUP BY o.order_id, s.pack_group_id
     ORDER BY dicetak_pada ASC
