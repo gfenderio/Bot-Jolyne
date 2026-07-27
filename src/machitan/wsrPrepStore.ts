@@ -35,6 +35,31 @@ interface PrepBatch {
   marks: Record<string, PrepMark>;
   /** Riwayat centang & lepas — inilah "ketrack"-nya, termasuk yang dibatalkan. */
   log: PrepLogEntry[];
+  /** Diisi saat kiriman ditutup: apa yang jadi dipindah, apa yang tidak, kenapa. */
+  closure?: PrepClosure;
+}
+
+/**
+ * Catatan penutupan kiriman. Yang dijawab di sini persis pertanyaan orang toko
+ * saat barangnya datang kurang: "kok cuma 5, bukan 6 — kenapa?".
+ *
+ * Barang yang TIDAK jadi dipindah wajib berkeretangan, jadi tidak ada yang
+ * hilang tanpa penjelasan. Catatan ini yang dibaca layar Kiriman di PDA.
+ */
+export interface PrepClosure {
+  by: string;
+  at: string;
+  moved: ClosureItem[];
+  skipped: ClosureItem[];
+}
+
+export interface ClosureItem {
+  itemId: string;
+  name: string;
+  destination: string;
+  qty: number;
+  /** Wajib untuk yang tidak jadi dipindah; kosong untuk yang dipindah. */
+  reason: string;
 }
 
 export interface PrepLogEntry {
@@ -173,6 +198,50 @@ export function countPrep(batchIds: number[]): Promise<Record<string, number>> {
     const out: Record<string, number> = {};
     for (const id of batchIds) {
       out[String(id)] = Object.keys(store.batches[String(id)]?.marks ?? {}).length;
+    }
+    return out;
+  });
+}
+
+/**
+ * Simpan catatan penutupan. Ditulis PDA SETELAH stok yang tercentang benar-benar
+ * berpindah — bukan sebelum, supaya catatan tidak pernah mengklaim perpindahan
+ * yang ternyata gagal.
+ */
+export function setClosure(batchId: number, closure: PrepClosure): Promise<void> {
+  return withLock(async () => {
+    const store = await readStore();
+    const id = String(batchId);
+    const batch: PrepBatch = store.batches[id] ?? { marks: {}, log: [] };
+    batch.closure = closure;
+    store.batches[id] = batch;
+    await writeStore(store);
+  });
+}
+
+export function getClosure(batchId: number): Promise<PrepClosure | null> {
+  return withLock(async () => {
+    const store = await readStore();
+    return store.batches[String(batchId)]?.closure ?? null;
+  });
+}
+
+/** Ringkasan penutupan beberapa kiriman — buat baris "5 dari 6" di layar daftar. */
+export function closureSummaries(
+  batchIds: number[]
+): Promise<Record<string, { by: string; at: string; moved: number; skipped: number }>> {
+  return withLock(async () => {
+    const store = await readStore();
+    const out: Record<string, { by: string; at: string; moved: number; skipped: number }> = {};
+    for (const id of batchIds) {
+      const closure = store.batches[String(id)]?.closure;
+      if (!closure) continue;
+      out[String(id)] = {
+        by: closure.by,
+        at: closure.at,
+        moved: closure.moved.length,
+        skipped: closure.skipped.length
+      };
     }
     return out;
   });

@@ -65,7 +65,7 @@ export function startMachitanHttpServer(client: Client<true>) {
     }
 
     if (pathname.startsWith("/machitan/wsr/")) {
-      handleWsrRequest(request, response).catch((error) => {
+      handleWsrRequest(request, response, client).catch((error) => {
         console.error("Gagal memproses Machitan WSR", error);
         if (!response.headersSent) {
           sendJson(response, 500, { ok: false, error: "Internal server error handling WSR request" });

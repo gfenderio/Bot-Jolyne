@@ -1,19 +1,31 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { EmbedBuilder, type Client, type TextChannel } from "discord.js";
+import { env } from "../config/env.js";
 import { isAuthorizedMachitanIntake } from "./intakeAuth.js";
 import { fetchIncomingStock } from "./wsrIncoming.js";
-import { countPrep, getPrep, getPrepLog, setPrep } from "./wsrPrepStore.js";
+import {
+  closureSummaries,
+  countPrep,
+  getClosure,
+  getPrep,
+  getPrepLog,
+  setClosure,
+  setPrep,
+  type ClosureItem
+} from "./wsrPrepStore.js";
 
 /**
  * Semua endpoint /machitan/wsr/* — dipakai PDA untuk dua hal yang sengaja TIDAK
  * dititipkan ke hanayo (keputusan 27 Jul):
  *
  *   GET  /machitan/wsr/incoming?source=ALPHA   barang yang belum benar-benar sampai
- *   GET  /machitan/wsr/prep?batch=12           centangan penyiapan satu kiriman
+ *   GET  /machitan/wsr/prep?batch=12           centangan + catatan penutupan
  *   POST /machitan/wsr/prep                    centang / lepas satu barang
- *   GET  /machitan/wsr/prep-count?batches=1,2  jumlah tercentang buat layar daftar
+ *   GET  /machitan/wsr/prep-count?batches=1,2  ringkasan buat layar daftar
+ *   POST /machitan/wsr/close                   catatan "yang pindah cuma N, sisanya kenapa"
  *
  * Stok tetap dipindah lewat endpoint hanayo yang sudah ada — bot tidak pernah
- * menyentuh stok.
+ * menyentuh stok. Yang disimpan di sini murni catatan kerja orang.
  */
 
 function sendJson(response: ServerResponse, statusCode: number, payload: unknown) {
@@ -35,7 +47,66 @@ async function readBody(request: IncomingMessage, maxBytes = 64 * 1024): Promise
   return body;
 }
 
-export async function handleWsrRequest(request: IncomingMessage, response: ServerResponse) {
+/** Barang yang tidak jadi dikirim, dibersihkan & dibatasi panjangnya. */
+function parseClosureItems(raw: unknown, wajibAlasan: boolean): ClosureItem[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, 500).map((row) => {
+    const item = (row ?? {}) as Record<string, unknown>;
+    return {
+      itemId: String(item.itemId ?? "").slice(0, 30),
+      name: String(item.name ?? "").slice(0, 200),
+      destination: String(item.destination ?? "").toUpperCase().slice(0, 50),
+      qty: Number(item.qty ?? 0) || 0,
+      reason: wajibAlasan ? String(item.reason ?? "").slice(0, 300) : ""
+    };
+  });
+}
+
+/**
+ * Kabar balik ke channel gudang saat kiriman ditutup tidak utuh. Yang menunggu
+ * barangnya orang toko — kalau yang datang cuma 5 dari 6, dia harus tahu
+ * kenapa TANPA perlu bertanya. Kiriman yang lengkap tidak diumumkan (tak ada
+ * kabar = tak ada masalah, channel-nya tidak perlu ramai).
+ */
+async function kabarkanPenutupan(
+  client: Client,
+  batchId: number,
+  by: string,
+  moved: ClosureItem[],
+  skipped: ClosureItem[]
+): Promise<void> {
+  if (skipped.length === 0) return;
+  const channel = (await client.channels.fetch(env.WSR_SHIPMENT_CHANNEL_ID).catch(() => null)) as TextChannel | null;
+  if (!channel?.isTextBased()) return;
+
+  const daftar = skipped
+    .slice(0, 20)
+    .map((item) => `• **${item.name || item.itemId}** (${item.qty} pcs → ${item.destination}) — ${item.reason || "tanpa keterangan"}`)
+    .join("\n");
+  const sisa = skipped.length > 20 ? `\n…dan ${skipped.length - 20} barang lagi.` : "";
+
+  await channel
+    .send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xef6c00)
+          .setTitle(`📦 Kiriman #${batchId} ditutup — ${moved.length} dari ${moved.length + skipped.length} barang dikirim`)
+          .setDescription(
+            `Dikerjakan **${by}**.\n\nYang **tidak** ikut dikirim:\n${daftar}${sisa}\n\n` +
+              `Stok yang berpindah hanya ${moved.length} barang di atas. Barang yang tidak ikut ` +
+              `masih di gudang asal — buat kiriman baru dari PDA kalau tetap dibutuhkan.`
+          )
+          .setTimestamp()
+      ]
+    })
+    .catch((error) => console.error(`[wsr-close] gagal kirim kabar penutupan #${batchId}:`, error));
+}
+
+export async function handleWsrRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  client: Client
+) {
   if (!isAuthorizedMachitanIntake(request.headers.authorization)) {
     return sendJson(response, 401, { ok: false, error: "Unauthorized" });
   }
@@ -67,8 +138,12 @@ export async function handleWsrRequest(request: IncomingMessage, response: Serve
     if (!Number.isInteger(batchId) || batchId <= 0) {
       return sendJson(response, 422, { ok: false, error: "batch tidak valid." });
     }
-    const [marks, log] = await Promise.all([getPrep(batchId), getPrepLog(batchId)]);
-    return sendJson(response, 200, { ok: true, data: { batch: batchId, marks, log } });
+    const [marks, log, closure] = await Promise.all([
+      getPrep(batchId),
+      getPrepLog(batchId),
+      getClosure(batchId)
+    ]);
+    return sendJson(response, 200, { ok: true, data: { batch: batchId, marks, log, closure } });
   }
 
   if (method === "GET" && pathname === "/machitan/wsr/prep-count") {
@@ -77,8 +152,45 @@ export async function handleWsrRequest(request: IncomingMessage, response: Serve
       .map((raw) => Number(raw.trim()))
       .filter((id) => Number.isInteger(id) && id > 0)
       .slice(0, 100);
-    const counts = ids.length === 0 ? {} : await countPrep(ids);
-    return sendJson(response, 200, { ok: true, data: { counts } });
+    const [counts, closures] = ids.length === 0
+      ? [{}, {}]
+      : await Promise.all([countPrep(ids), closureSummaries(ids)]);
+    return sendJson(response, 200, { ok: true, data: { counts, closures } });
+  }
+
+  // Kiriman ditutup dari PDA: catat apa yang jadi pindah dan apa yang tidak.
+  if (method === "POST" && pathname === "/machitan/wsr/close") {
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(await readBody(request));
+    } catch {
+      return sendJson(response, 400, { ok: false, error: "Body bukan JSON yang sah." });
+    }
+
+    const batchId = Number(payload.batchId);
+    const by = String(payload.by ?? "").trim();
+    if (!Number.isInteger(batchId) || batchId <= 0 || by === "") {
+      return sendJson(response, 422, { ok: false, error: "batchId & by wajib diisi." });
+    }
+
+    const moved = parseClosureItems(payload.moved, false);
+    const skipped = parseClosureItems(payload.skipped, true);
+    // Barang yang tidak jadi dikirim TANPA keterangan ditolak: seluruh gunanya
+    // catatan ini adalah menjawab "kenapa cuma segini".
+    const tanpaAlasan = skipped.filter((item) => item.reason.trim() === "");
+    if (tanpaAlasan.length > 0) {
+      return sendJson(response, 422, {
+        ok: false,
+        error: `${tanpaAlasan.length} barang yang tidak dikirim belum diberi keterangan.`
+      });
+    }
+
+    const closure = { by: by.slice(0, 60), at: new Date().toISOString(), moved, skipped };
+    await setClosure(batchId, closure);
+    // Kabar ke Discord best-effort — catatannya sudah tersimpan, kegagalan kirim
+    // pesan tidak boleh membuat PDA mengira penutupannya gagal.
+    void kabarkanPenutupan(client, batchId, closure.by, moved, skipped);
+    return sendJson(response, 200, { ok: true, data: { batch: batchId, closure } });
   }
 
   if (method === "POST" && pathname === "/machitan/wsr/prep") {
