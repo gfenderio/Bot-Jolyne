@@ -20,7 +20,15 @@ import { env } from "../config/env.js";
 
 interface WsrShipmentStore {
   lastSeenBatchId: number | null;
+  /**
+   * Kiriman yang sudah dapat pengingat susulan. Dicatat supaya pengingatnya
+   * SEKALI saja — poller jalan tiap 5 menit, tanpa ini gudang di-tag terus.
+   */
+  reminded: number[];
 }
+
+/** Batas daftar pengingat; kiriman lama tidak perlu diingat selamanya. */
+const MAX_REMINDED = 200;
 
 function storePath(): string {
   return env.WSR_SHIPMENT_STORE_PATH;
@@ -28,13 +36,17 @@ function storePath(): string {
 
 function readStore(): WsrShipmentStore {
   const file = storePath();
-  if (!fs.existsSync(file)) return { lastSeenBatchId: null };
+  if (!fs.existsSync(file)) return { lastSeenBatchId: null, reminded: [] };
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
     const id = Number(parsed.lastSeenBatchId);
-    return { lastSeenBatchId: Number.isFinite(id) ? id : null };
+    // `reminded` baru ada belakangan — store lama tanpa field itu tetap terbaca.
+    const reminded = Array.isArray(parsed.reminded)
+      ? parsed.reminded.map(Number).filter(Number.isFinite)
+      : [];
+    return { lastSeenBatchId: Number.isFinite(id) ? id : null, reminded };
   } catch {
-    return { lastSeenBatchId: null };
+    return { lastSeenBatchId: null, reminded: [] };
   }
 }
 
@@ -51,12 +63,24 @@ function writeStore(store: WsrShipmentStore): void {
 export function getOrInitWatermark(currentMaxId: number): number {
   const store = readStore();
   if (store.lastSeenBatchId === null) {
-    writeStore({ lastSeenBatchId: currentMaxId });
+    writeStore({ ...store, lastSeenBatchId: currentMaxId });
     return currentMaxId;
   }
   return store.lastSeenBatchId;
 }
 
 export function setWatermark(id: number): void {
-  writeStore({ lastSeenBatchId: id });
+  writeStore({ ...readStore(), lastSeenBatchId: id });
+}
+
+/** Kiriman mana saja yang sudah pernah diingatkan. */
+export function getReminded(): number[] {
+  return readStore().reminded;
+}
+
+export function markReminded(ids: number[]): void {
+  if (ids.length === 0) return;
+  const store = readStore();
+  const gabungan = [...new Set([...store.reminded, ...ids])].sort((a, b) => a - b);
+  writeStore({ ...store, reminded: gabungan.slice(-MAX_REMINDED) });
 }

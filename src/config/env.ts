@@ -228,7 +228,19 @@ const envSchema = z.object({
   WSR_SHIPMENT_ENABLED: optionalBoolean,
   WSR_SHIPMENT_CHANNEL_ID: optionalString.default("1529679453876256859"),
   WSR_SHIPMENT_POLL_MINUTES: pollIntervalSeconds.default(5),
-  WSR_SHIPMENT_STORE_PATH: optionalString.default("data/wsr-shipment.json")
+  WSR_SHIPMENT_STORE_PATH: optionalString.default("data/wsr-shipment.json"),
+
+  // Orang gudang yang di-tag tiap ada kiriman WSR baru (keputusan 27 Jul: Jolyne
+  // jadi pengingat, bukan tiket). Kosongkan kalau tidak mau ada yang di-tag.
+  WSR_SHIPMENT_MENTION_USER_ID: optionalString.default("1115194334497755157"),
+
+  // Pengingat susulan sekali untuk kiriman yang masih menggantung sekian jam.
+  WSR_SHIPMENT_REMINDER_HOURS: z.coerce.number().int().min(1).max(168).default(24),
+
+  // Catatan "barang mana yang sudah disiapkan gudang, oleh siapa" — lihat
+  // src/machitan/wsrPrepStore.ts. Ditaruh di /app/data (volume) supaya tidak
+  // hilang saat deploy ulang.
+  WSR_PREP_STORE_PATH: optionalString.default("data/wsr-prepared.json")
 });
 
 // Override dari kode agar mengabaikan setting environment server Coolify

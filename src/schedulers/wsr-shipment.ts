@@ -2,17 +2,20 @@ import ExcelJS from "exceljs";
 import { AttachmentBuilder, Client, EmbedBuilder, TextChannel } from "discord.js";
 import { env } from "../config/env.js";
 import { fetchNativeQueryWithPagination, type MetabaseConfig } from "../services/metabase.js";
-import { getOrInitWatermark, setWatermark } from "../services/wsrShipmentStore.js";
+import { getOrInitWatermark, getReminded, markReminded, setWatermark } from "../services/wsrShipmentStore.js";
 
 /**
- * Kiriman WSR → PENGUMUMAN + Excel ke channel gudang. Titik.
+ * Kiriman WSR → PENGINGAT + Excel ke channel gudang. Titik.
  *
- * Keputusan 22 Jul: Jolyne TIDAK berperan sebagai tiket. Tracking & penilaian
- * kerjaan tim WH tetap lewat tiket Mornye (/wh-ticket) yang diajukan manual
- * seperti biasa — sistem tiket (thread, tombol claim/close, rating di
- * purchasing_ticket_feedbacks, arsip shiro) seluruhnya milik Mornye dan tidak
- * ditiru dari luar. Jolyne cuma memastikan gudang menerima daftar barangnya
- * (Excel urut rak) begitu kiriman dibuat di PDA.
+ * Keputusan 22 Jul: Jolyne TIDAK berperan sebagai tiket — sistem tiket (thread,
+ * claim/close, rating) seluruhnya milik Mornye dan tidak ditiru dari luar.
+ *
+ * Keputusan 27 Jul: rencana "dikerjakan lewat tiket /wh-ticket" DIBATALKAN.
+ * Kiriman dibuat anak toko di PDA, dikerjakan anak gudang di PDA juga (menu
+ * Kiriman: centang barang yang sudah disiapkan, lalu Pindahkan stok). Peran
+ * Jolyne di sini cuma satu: menepuk pundak orang gudang — tag orangnya, kirim
+ * daftar barangnya (Excel urut rak), lalu ingatkan sekali lagi kalau kirimannya
+ * masih menggantung. Kolom Excel-nya sengaja tidak diubah sama sekali.
  *
  * Sumber data: tabel `wsr_batches` + `wsr_batch_items` via Metabase (readonly).
  * Skema hasil normalisasi review Shanieulle: nama barang/gudang/rak/orang
@@ -54,9 +57,9 @@ const ARAH: Record<string, string> = {
 };
 
 /**
- * Kode kiriman — PENGGANTI "nama sheet" Google Sheet WSR yang lama.
- * Staf menyalin kode ini ke kolom **Batch (Sheet name)** saat mengajukan tiket
- * /wh-ticket, jadi tiket <-> kiriman <-> Excel saling terhubung tanpa sheet.
+ * Kode kiriman — PENGGANTI "nama sheet" Google Sheet WSR yang lama. Dipakai
+ * sebagai nama berkas Excel dan judul pengingat, sama persis dengan yang tampil
+ * di menu Kiriman PDA, supaya orang gudang tahu pesan ini kiriman yang mana.
  * Deterministik dari unit + id (id AUTO_INCREMENT, unik selamanya).
  */
 function shipmentCode(shipment: ShipmentRow): string {
@@ -90,6 +93,29 @@ const newShipmentsQuery = (sejakId: number) => `
   WHERE b.id > ${sejakId} AND b.status = 'pending'
   ORDER BY b.id ASC
 `;
+
+/**
+ * Kiriman yang masih menunggu padahal sudah lewat sekian jam. 'running' ikut:
+ * eksekusi yang mati di tengah jalan juga barang yang belum sampai tujuan.
+ *
+ * Batas waktunya dihitung di sini (Node), BUKAN `NOW() - INTERVAL n HOUR`.
+ * Alasannya jebakan yang sudah pernah kena di fitur split-print: kolom created_at
+ * ditulis Laravel dengan timezone Asia/Jakarta, sedangkan NOW() server DB belum
+ * tentu WIB — selisih 7 jam bikin pengingat datang kepagian atau tak datang sama
+ * sekali. Kirim tanggalnya apa adanya dalam WIB, tidak ada yang perlu ditebak.
+ */
+const staleShipmentsQuery = (batasWib: string) => `
+  ${batchSelect}
+  WHERE b.status IN ('pending', 'running')
+    AND b.created_at < '${batasWib}'
+  ORDER BY b.id ASC
+`;
+
+/** "YYYY-MM-DD HH:MM:SS" WIB, sekian jam ke belakang dari sekarang. */
+function batasWaktuWib(jam: number): string {
+  const wib = new Date(Date.now() - jam * 3_600_000 + 7 * 3_600_000);
+  return wib.toISOString().slice(0, 19).replace("T", " ");
+}
 
 // Isi kiriman: semua string di-join dari tabel asalnya (items/item_sources/racks).
 const itemsQuery = (ids: number[]) => `
@@ -230,15 +256,73 @@ function openingEmbed(shipment: ShipmentRow, items: ShipmentItem[]): EmbedBuilde
     .setDescription(
       `${ARAH[shipment.direction] ?? shipment.direction}\n\n` +
         `**${shipment.totalItems} barang · ${shipment.totalQty} pcs**\n${rincian}\n\n` +
-        // Blok kode = gampang disalin dari Discord (tombol copy muncul saat hover).
-        `Kode kiriman (pengganti nama sheet):\n\`\`\`\n${code}\n\`\`\`` +
-        `Dibuat oleh **${shipment.createdBy}**.\n` +
-        `Stok **belum** berpindah. Siapkan barangnya sesuai daftar terlampir, lalu ` +
-        `buka menu **Kiriman** di PDA → **Pindahkan sekarang**.\n` +
-        `Saat mengajukan tiket **/wh-ticket**, isi kolom **Batch (Sheet name)** dengan kode di atas.`
+        `Diminta oleh **${shipment.createdBy}** dari **${shipment.unit}**.\n\n` +
+        `**Cara mengerjakan — semuanya di PDA, tidak perlu tiket:**\n` +
+        `1. Buka menu **Kiriman**, cari **${code}**.\n` +
+        `2. Siapkan barangnya sesuai daftar terlampir (urut rak), **centang** tiap barang yang sudah diambil.\n` +
+        `3. Kalau sudah semua, tekan **Pindahkan stok**.\n\n` +
+        `Stok **belum** berpindah sampai langkah 3. Siapa yang mencentang dan siapa ` +
+        `yang memindahkan tercatat otomatis.`
     )
     .setFooter({ text: `Dibuat ${shipment.createdAt} WIB` })
     .setTimestamp();
+}
+
+/**
+ * Pengingat susulan untuk kiriman yang masih menggantung. Sekali saja per
+ * kiriman (lihat markReminded) — poller jalan tiap 5 menit, tanpa itu orang
+ * gudang di-tag terus-terusan dan pengingatnya jadi diabaikan.
+ */
+function reminderEmbed(shipment: ShipmentRow, jam: number): EmbedBuilder {
+  return new EmbedBuilder()
+    .setColor(0xef6c00)
+    .setTitle(`⏰ ${shipmentCode(shipment)} belum dikerjakan`)
+    .setDescription(
+      `Kiriman ini dibuat **${shipment.createdBy}** lebih dari **${jam} jam** lalu dan ` +
+        `stoknya masih belum berpindah.\n\n` +
+        `${shipment.totalItems} barang · ${shipment.totalQty} pcs · ` +
+        `${ARAH[shipment.direction] ?? shipment.direction}\n\n` +
+        `Buka menu **Kiriman** di PDA. Kalau barangnya memang tidak bisa dikirim, ` +
+        `batalkan kirimannya dari sana biar tidak menggantung.`
+    )
+    .setFooter({ text: `Dibuat ${shipment.createdAt} WIB` })
+    .setTimestamp();
+}
+
+/** Tag orang gudang; kosong kalau env-nya sengaja dikosongkan. */
+function mention(): string {
+  const id = env.WSR_SHIPMENT_MENTION_USER_ID?.trim();
+  return id ? `<@${id}> ` : "";
+}
+
+/**
+ * Kiriman lama yang masih menggantung → satu pengingat, sekali saja.
+ * Dijalankan setelah pengumuman kiriman baru, memakai koneksi Metabase yang sama.
+ */
+async function kirimPengingat(config: MetabaseConfig, channel: TextChannel): Promise<void> {
+  const jam = env.WSR_SHIPMENT_REMINDER_HOURS;
+  const res = await fetchNativeQueryWithPagination(config, staleShipmentsQuery(batasWaktuWib(jam)));
+  const stale = rowsToShipments(res.columns, res.rows);
+  if (stale.length === 0) return;
+
+  const sudah = new Set(getReminded());
+  const belum = stale.filter((s) => !sudah.has(s.id));
+  if (belum.length === 0) return;
+
+  const terkirim: number[] = [];
+  for (const shipment of belum) {
+    try {
+      await channel.send({ content: mention(), embeds: [reminderEmbed(shipment, jam)] });
+      terkirim.push(shipment.id);
+    } catch (err) {
+      console.error(`[wsr-shipment] gagal kirim pengingat #${shipment.id}:`, err);
+    }
+  }
+  // Hanya yang benar-benar terkirim yang ditandai — yang gagal dicoba lagi nanti.
+  markReminded(terkirim);
+  if (terkirim.length > 0) {
+    console.log(`[wsr-shipment] ${terkirim.length} pengingat kiriman menggantung dikirim.`);
+  }
 }
 
 export async function runWsrShipmentCheck(client: Client): Promise<void> {
@@ -253,15 +337,6 @@ export async function runWsrShipmentCheck(client: Client): Promise<void> {
   if (!Number.isFinite(maxId)) return;
 
   const sejakId = getOrInitWatermark(maxId);
-  if (maxId <= sejakId) return; // tak ada kiriman baru
-
-  const res = await fetchNativeQueryWithPagination(config, newShipmentsQuery(sejakId));
-  const shipments = rowsToShipments(res.columns, res.rows);
-  if (shipments.length === 0) {
-    setWatermark(maxId);
-    return;
-  }
-  const itemsByBatch = await fetchItems(config, shipments.map((s) => s.id));
 
   const channel = (await client.channels.fetch(env.WSR_SHIPMENT_CHANNEL_ID).catch(() => null)) as TextChannel | null;
   if (!channel?.isTextBased()) {
@@ -271,25 +346,45 @@ export async function runWsrShipmentCheck(client: Client): Promise<void> {
     return;
   }
 
-  let terkirim = 0;
-  for (const shipment of shipments) {
-    try {
-      const items = itemsByBatch.get(shipment.id) ?? [];
-      const buffer = await buildShipmentWorkbook(shipment, items);
-      const attachment = new AttachmentBuilder(buffer, {
-        name: `${shipmentCode(shipment)}.xlsx`
-      });
-      await channel.send({ embeds: [openingEmbed(shipment, items)], files: [attachment] });
-      terkirim++;
-    } catch (err) {
-      console.error(`[wsr-shipment] gagal kirim kiriman #${shipment.id}:`, err);
+  if (maxId > sejakId) {
+    const res = await fetchNativeQueryWithPagination(config, newShipmentsQuery(sejakId));
+    const shipments = rowsToShipments(res.columns, res.rows);
+    if (shipments.length === 0) {
+      setWatermark(maxId);
+    } else {
+      const itemsByBatch = await fetchItems(config, shipments.map((s) => s.id));
+
+      let terkirim = 0;
+      for (const shipment of shipments) {
+        try {
+          const items = itemsByBatch.get(shipment.id) ?? [];
+          const buffer = await buildShipmentWorkbook(shipment, items);
+          const attachment = new AttachmentBuilder(buffer, {
+            name: `${shipmentCode(shipment)}.xlsx`
+          });
+          // Tag ditaruh di isi pesan, bukan di embed: mention di dalam embed
+          // TIDAK memicu notifikasi Discord — orangnya tak akan tahu.
+          await channel.send({
+            content: mention(),
+            embeds: [openingEmbed(shipment, items)],
+            files: [attachment]
+          });
+          terkirim++;
+        } catch (err) {
+          console.error(`[wsr-shipment] gagal kirim kiriman #${shipment.id}:`, err);
+        }
+      }
+
+      // Digeser SETELAH pesan terkirim — kegagalan kirim tidak membuat kiriman
+      // hilang dari pantauan.
+      setWatermark(maxId);
+      console.log(`[wsr-shipment] ${terkirim} kiriman diumumkan ke channel.`);
     }
   }
 
-  // Digeser SETELAH pesan terkirim — kegagalan kirim tidak membuat kiriman
-  // hilang dari pantauan.
-  setWatermark(maxId);
-  console.log(`[wsr-shipment] ${terkirim} kiriman diumumkan ke channel.`);
+  // Selalu dijalankan, termasuk saat tidak ada kiriman baru — justru kiriman
+  // yang sudah lama diam itulah yang perlu diingatkan.
+  await kirimPengingat(config, channel);
 }
 
 export function startWsrShipmentScheduler(client: Client): void {
