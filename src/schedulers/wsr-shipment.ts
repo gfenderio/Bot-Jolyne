@@ -24,8 +24,8 @@ import {
  * dengan urutan rak dan centang per barang — jadi berkas kedua di Discord cuma
  * jadi salinan yang bisa basi begitu ada yang dicentang. Peran Jolyne tinggal
  * dua: (1) menepuk pundak orang gudang saat ada kiriman baru & saat menggantung,
- * (2) melapor balik setelah dikerjakan — siapa yang mengerjakan, apa yang jadi
- * dikirim, apa yang kurang dan kenapa.
+ * (2) melapor balik setelah dikerjakan — siapa yang mengerjakan, berapa yang jadi
+ * dikirim, dan berapa yang tidak (biasanya karena barangnya belum ada).
  *
  * Sumber data: tabel `wsr_batches` + `wsr_batch_items` via Metabase (readonly).
  * Skema hasil normalisasi review Shanieulle: nama barang/gudang/rak/orang
@@ -118,6 +118,9 @@ const staleShipmentsQuery = (batasWib: string) => `
   ${batchSelect}
   WHERE b.status IN ('pending', 'running')
     AND b.created_at < '${batasWib}'
+    AND NOT EXISTS (
+      SELECT 1 FROM wsr_batch_items i WHERE i.batch_id = b.id AND i.status = 'done'
+    )
   ORDER BY b.id ASC
 `;
 
@@ -142,24 +145,23 @@ const itemsQuery = (ids: number[]) => `
 `;
 
 /**
- * Kiriman yang SUDAH dikerjakan tapi laporannya belum dikirim. 'partial' = ada
- * barang yang sengaja tidak ikut (lihat wsr_batch_items.skip_reason).
+ * Kiriman yang sudah selesai dikerjakan: 'done' = semuanya pindah, 'cancelled' =
+ * sisanya dibatalkan (barang yang terlanjur pindah tetap pindah).
  */
-const doneShipmentsQuery = (sejakId: number) => `
+const doneShipmentsQuery = () => `
   ${batchSelect}
-  WHERE b.status IN ('done', 'partial') AND b.id > ${sejakId}
+  WHERE b.status IN ('done', 'cancelled')
   ORDER BY b.id ASC
 `;
 
-/** Barang yang tidak jadi dikirim + alasannya, untuk laporan penyelesaian. */
-const skippedItemsQuery = (ids: number[]) => `
-  SELECT i.batch_id, it.name, sd.name AS destination, i.qty,
-         COALESCE(i.skip_reason, '') AS skip_reason
+/** Berapa barang yang benar-benar pindah vs tidak, untuk laporan penyelesaian. */
+const closingCountsQuery = (ids: number[]) => `
+  SELECT i.batch_id,
+         SUM(i.status = 'done') AS dipindah,
+         SUM(i.status <> 'done') AS tidak_dipindah
   FROM wsr_batch_items i
-  JOIN items it ON it.item_id = i.item_id
-  JOIN item_sources sd ON sd.id = i.destination_id
-  WHERE i.batch_id IN (${ids.join(",")}) AND i.status = 'skipped'
-  ORDER BY i.id ASC
+  WHERE i.batch_id IN (${ids.join(",")})
+  GROUP BY i.batch_id
 `;
 
 function rowsToShipments(columns: string[], rows: unknown[][]): ShipmentRow[] {
@@ -295,68 +297,57 @@ async function kirimPengingat(config: MetabaseConfig, channel: TextChannel): Pro
  * mati setelah stok berpindah, laporannya tetap terkirim di putaran berikutnya.
  */
 async function laporkanSelesai(config: MetabaseConfig, channel: TextChannel): Promise<void> {
-  const res = await fetchNativeQueryWithPagination(config, doneShipmentsQuery(0));
+  const res = await fetchNativeQueryWithPagination(config, doneShipmentsQuery());
   const selesai = rowsToShipments(res.columns, res.rows);
   if (selesai.length === 0) return;
 
   const sudah = new Set(getReported());
+  // Putaran pertama (store kosong / hilang saat deploy ulang): tandai semua yang
+  // sudah selesai sebagai "sudah dilapor" TANPA mengirim apa pun. Tanpa ini,
+  // kiriman lama diblast ke channel begitu fitur ini naik.
+  if (sudah.size === 0) {
+    markReported(selesai.map((s) => s.id));
+    return;
+  }
+
   const belum = selesai.filter((s) => !sudah.has(s.id));
   if (belum.length === 0) return;
 
-  // Barang yang tidak ikut ditarik sekali untuk seluruh kiriman yang mau dilapor.
-  const tidakIkut = new Map<number, { name: string; destination: string; qty: number; reason: string }[]>();
-  const adaPartial = belum.some((s) => s.status === "partial");
-  if (adaPartial) {
-    const skipRes = await fetchNativeQueryWithPagination(config, skippedItemsQuery(belum.map((s) => s.id)));
-    const idx = (name: string) => skipRes.columns.indexOf(name);
-    for (const row of skipRes.rows) {
-      const batchId = Number(row[idx("batch_id")] ?? 0);
-      const list = tidakIkut.get(batchId) ?? [];
-      list.push({
-        name: String(row[idx("name")] ?? ""),
-        destination: String(row[idx("destination")] ?? ""),
-        qty: Number(row[idx("qty")] ?? 0),
-        reason: String(row[idx("skip_reason")] ?? "")
-      });
-      tidakIkut.set(batchId, list);
-    }
+  // Hitungan per kiriman ditarik sekali untuk semua yang mau dilapor.
+  const hitung = new Map<number, { dipindah: number; tidak: number }>();
+  const countRes = await fetchNativeQueryWithPagination(config, closingCountsQuery(belum.map((s) => s.id)));
+  const idx = (name: string) => countRes.columns.indexOf(name);
+  for (const row of countRes.rows) {
+    hitung.set(Number(row[idx("batch_id")] ?? 0), {
+      dipindah: Number(row[idx("dipindah")] ?? 0),
+      tidak: Number(row[idx("tidak_dipindah")] ?? 0)
+    });
   }
 
   const terkirim: number[] = [];
   for (const shipment of belum) {
-    const kurang = tidakIkut.get(shipment.id) ?? [];
-    const dikirim = shipment.totalItems - kurang.length;
-    const lengkap = kurang.length === 0;
-    const daftar = kurang
-      .slice(0, 20)
-      .map((k) => `• **${k.name}** (${k.qty} pcs → ${k.destination.toUpperCase()}) — ${k.reason || "tanpa keterangan"}`)
-      .join("\n");
-    const sisa = kurang.length > 20 ? `
-…dan ${kurang.length - 20} barang lagi.` : "";
+    const angka = hitung.get(shipment.id) ?? { dipindah: 0, tidak: 0 };
+    // Dibatalkan tanpa satu pun barang berpindah = tidak ada yang perlu dilaporkan
+    // ke orang toko selain "batal"; tetap dikabarkan, tapi nadanya beda.
+    const utuh = shipment.status === "done";
 
     try {
       await channel.send({
         embeds: [
           new EmbedBuilder()
-            .setColor(lengkap ? 0x2e7d32 : 0xef6c00)
+            .setColor(utuh ? 0x2e7d32 : 0xef6c00)
             .setTitle(
-              lengkap
-                ? `✅ ${shipmentCode(shipment)} selesai — ${dikirim} barang dikirim`
-                : `📦 ${shipmentCode(shipment)} ditutup — ${dikirim} dari ${shipment.totalItems} barang dikirim`
+              utuh
+                ? `✅ ${shipmentCode(shipment)} selesai — ${angka.dipindah} barang dikirim`
+                : `📦 ${shipmentCode(shipment)} ditutup — ${angka.dipindah} dari ${shipment.totalItems} barang dikirim`
             )
             .setDescription(
-              `Dikerjakan **${shipment.executedBy}**.
-` +
-                `Diminta **${shipment.createdBy}** dari **${shipment.unit}**.
-
-` +
-                (lengkap
+              `Dikerjakan **${shipment.executedBy}**.\n` +
+                `Diminta **${shipment.createdBy}** dari **${shipment.unit}**.\n\n` +
+                (utuh
                   ? "Semua barang di kiriman ini sudah dipindah, tidak ada yang tertinggal."
-                  : `Yang **tidak** ikut dikirim:
-${daftar}${sisa}
-
-` +
-                    "Barang yang tidak ikut masih di gudang asal — buat kiriman baru dari PDA kalau tetap dibutuhkan.")
+                  : `**${angka.tidak} barang tidak jadi dikirim** — biasanya karena barangnya belum ada ` +
+                    "di gudang asal. Barang itu masih di tempatnya; buat kiriman baru dari PDA kalau tetap dibutuhkan.")
             )
             .setFooter({ text: `Dikerjakan ${shipment.executedAt} WIB` })
             .setTimestamp()
