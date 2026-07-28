@@ -1,21 +1,24 @@
-import ExcelJS from "exceljs";
-import { AttachmentBuilder, Client, EmbedBuilder, TextChannel } from "discord.js";
+import { Client, EmbedBuilder, TextChannel } from "discord.js";
 import { env } from "../config/env.js";
 import { fetchNativeQueryWithPagination, type MetabaseConfig } from "../services/metabase.js";
 import { getOrInitWatermark, getReminded, markReminded, setWatermark } from "../services/wsrShipmentStore.js";
 
 /**
- * Kiriman WSR → PENGINGAT + Excel ke channel gudang. Titik.
+ * Kiriman WSR → PENGINGAT ke channel gudang. Titik.
  *
  * Keputusan 22 Jul: Jolyne TIDAK berperan sebagai tiket — sistem tiket (thread,
  * claim/close, rating) seluruhnya milik Mornye dan tidak ditiru dari luar.
  *
  * Keputusan 27 Jul: rencana "dikerjakan lewat tiket /wh-ticket" DIBATALKAN.
  * Kiriman dibuat anak toko di PDA, dikerjakan anak gudang di PDA juga (menu
- * Kiriman: centang barang yang sudah disiapkan, lalu Pindahkan stok). Peran
- * Jolyne di sini cuma satu: menepuk pundak orang gudang — tag orangnya, kirim
- * daftar barangnya (Excel urut rak), lalu ingatkan sekali lagi kalau kirimannya
- * masih menggantung. Kolom Excel-nya sengaja tidak diubah sama sekali.
+ * Kiriman: centang barang yang sudah disiapkan, lalu Pindahkan stok).
+ *
+ * Keputusan 28 Jul: Excel DIHAPUS. Daftar barangnya sudah ada di PDA — lengkap
+ * dengan urutan rak dan centang per barang — jadi berkas kedua di Discord cuma
+ * jadi salinan yang bisa basi begitu ada yang dicentang. Peran Jolyne tinggal
+ * dua: (1) menepuk pundak orang gudang saat ada kiriman baru & saat menggantung,
+ * (2) melapor balik setelah dikerjakan — siapa yang mengerjakan, apa yang jadi
+ * dikirim, apa yang kurang dan kenapa.
  *
  * Sumber data: tabel `wsr_batches` + `wsr_batch_items` via Metabase (readonly).
  * Skema hasil normalisasi review Shanieulle: nama barang/gudang/rak/orang
@@ -172,76 +175,6 @@ async function fetchItems(config: MetabaseConfig, batchIds: number[]): Promise<M
   return out;
 }
 
-/** Satu kiriman = satu sheet siap cetak; urut per rak — gudang jalan sekali lewat. */
-export async function buildShipmentWorkbook(shipment: ShipmentRow, items: ShipmentItem[]): Promise<Buffer> {
-  const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet(`Kiriman ${shipment.id}`, {
-    views: [{ state: "frozen", ySplit: 4, showGridLines: false }],
-    pageSetup: { orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 },
-    properties: { defaultRowHeight: 22 }
-  });
-
-  sheet.mergeCells("A1:G1");
-  const title = sheet.getCell("A1");
-  title.value = `Kiriman WSR #${shipment.id} — ${shipment.unit}`;
-  title.font = { name: "Segoe UI Semibold", size: 16, bold: true, color: { argb: "FFFFFFFF" } };
-  title.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
-  title.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF00695C" } };
-  sheet.getRow(1).height = 32;
-
-  sheet.mergeCells("A2:G2");
-  const subtitle = sheet.getCell("A2");
-  subtitle.value =
-    `Kode: ${shipmentCode(shipment)}    ` +
-    `${ARAH[shipment.direction] ?? shipment.direction}    ` +
-    `${shipment.totalItems} barang    ${shipment.totalQty} pcs    ` +
-    `Dibuat: ${shipment.createdBy}`;
-  subtitle.font = { name: "Segoe UI", size: 10, color: { argb: "FF424242" }, italic: true };
-  subtitle.alignment = { vertical: "middle", horizontal: "left", indent: 1 };
-  subtitle.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE0F2F1" } };
-  sheet.getRow(2).height = 22;
-
-  sheet.getRow(3).height = 6;
-
-  // Tanpa `header` di columns: ExcelJS menulis header dari `columns` ke baris 1
-  // dan menimpa judul yang di-merge (bug yang pernah ketangkap). Header manual
-  // di baris 4.
-  sheet.columns = [
-    { key: "rack", width: 12 },
-    { key: "itemId", width: 11 },
-    { key: "barcode", width: 16 },
-    { key: "name", width: 46 },
-    { key: "source", width: 12 },
-    { key: "destination", width: 12 },
-    { key: "qty", width: 8 }
-  ];
-
-  const headerRow = sheet.getRow(4);
-  headerRow.values = ["Rak", "Item ID", "Barcode", "Nama Barang", "Dari", "Ke", "Qty"];
-  headerRow.eachCell((cell) => {
-    cell.font = { name: "Segoe UI Semibold", size: 10, bold: true, color: { argb: "FFFFFFFF" } };
-    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF00897B" } };
-    cell.alignment = { vertical: "middle", horizontal: "center" };
-  });
-  headerRow.height = 24;
-
-  const sorted = [...items].sort((a, b) => (a.rack || "￿").localeCompare(b.rack || "￿"));
-  for (const item of sorted) {
-    sheet.addRow({
-      rack: item.rack || "-",
-      itemId: item.itemId,
-      barcode: item.barcode || "-",
-      name: item.name,
-      source: item.source,
-      destination: item.destination,
-      qty: item.qty
-    });
-  }
-
-  const arrayBuffer = await workbook.xlsx.writeBuffer();
-  return Buffer.from(arrayBuffer);
-}
-
 function openingEmbed(shipment: ShipmentRow, items: ShipmentItem[]): EmbedBuilder {
   const perTujuan = new Map<string, number>();
   for (const item of items) {
@@ -358,16 +291,11 @@ export async function runWsrShipmentCheck(client: Client): Promise<void> {
       for (const shipment of shipments) {
         try {
           const items = itemsByBatch.get(shipment.id) ?? [];
-          const buffer = await buildShipmentWorkbook(shipment, items);
-          const attachment = new AttachmentBuilder(buffer, {
-            name: `${shipmentCode(shipment)}.xlsx`
-          });
           // Tag ditaruh di isi pesan, bukan di embed: mention di dalam embed
           // TIDAK memicu notifikasi Discord — orangnya tak akan tahu.
           await channel.send({
             content: mention(),
-            embeds: [openingEmbed(shipment, items)],
-            files: [attachment]
+            embeds: [openingEmbed(shipment, items)]
           });
           terkirim++;
         } catch (err) {

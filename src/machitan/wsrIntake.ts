@@ -63,10 +63,13 @@ function parseClosureItems(raw: unknown, wajibAlasan: boolean): ClosureItem[] {
 }
 
 /**
- * Kabar balik ke channel gudang saat kiriman ditutup tidak utuh. Yang menunggu
- * barangnya orang toko — kalau yang datang cuma 5 dari 6, dia harus tahu
- * kenapa TANPA perlu bertanya. Kiriman yang lengkap tidak diumumkan (tak ada
- * kabar = tak ada masalah, channel-nya tidak perlu ramai).
+ * Kabar balik ke channel gudang SETIAP kali kiriman selesai dikerjakan
+ * (permintaan 28 Jul). Yang menunggu barangnya orang toko: dia harus tahu
+ * siapa yang mengerjakan, apa yang jadi dikirim, dan apa yang kurang beserta
+ * alasannya — tanpa perlu bertanya ke siapa pun.
+ *
+ * Dua rasa: lengkap (hijau, sekadar tanda beres) dan tidak lengkap (oranye,
+ * memuat daftar barang yang tidak ikut + keterangannya).
  */
 async function kabarkanPenutupan(
   client: Client,
@@ -75,30 +78,38 @@ async function kabarkanPenutupan(
   moved: ClosureItem[],
   skipped: ClosureItem[]
 ): Promise<void> {
-  if (skipped.length === 0) return;
   const channel = (await client.channels.fetch(env.WSR_SHIPMENT_CHANNEL_ID).catch(() => null)) as TextChannel | null;
   if (!channel?.isTextBased()) return;
 
-  const daftar = skipped
+  const total = moved.length + skipped.length;
+  const pcs = moved.reduce((sum, item) => sum + item.qty, 0);
+  const lengkap = skipped.length === 0;
+
+  const daftarKurang = skipped
     .slice(0, 20)
     .map((item) => `• **${item.name || item.itemId}** (${item.qty} pcs → ${item.destination}) — ${item.reason || "tanpa keterangan"}`)
     .join("\n");
   const sisa = skipped.length > 20 ? `\n…dan ${skipped.length - 20} barang lagi.` : "";
 
+  const embed = new EmbedBuilder()
+    .setColor(lengkap ? 0x2e7d32 : 0xef6c00)
+    .setTitle(
+      lengkap
+        ? `✅ Kiriman #${batchId} selesai — ${moved.length} barang dikirim`
+        : `📦 Kiriman #${batchId} ditutup — ${moved.length} dari ${total} barang dikirim`
+    )
+    .setDescription(
+      `Dikerjakan **${by}**.\n\n` +
+        `Stok yang berpindah: **${moved.length} barang · ${pcs} pcs**.\n\n` +
+        (lengkap
+          ? "Semua barang di kiriman ini sudah dipindah, tidak ada yang tertinggal."
+          : `Yang **tidak** ikut dikirim:\n${daftarKurang}${sisa}\n\n` +
+            "Barang yang tidak ikut masih di gudang asal — buat kiriman baru dari PDA kalau tetap dibutuhkan.")
+    )
+    .setTimestamp();
+
   await channel
-    .send({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0xef6c00)
-          .setTitle(`📦 Kiriman #${batchId} ditutup — ${moved.length} dari ${moved.length + skipped.length} barang dikirim`)
-          .setDescription(
-            `Dikerjakan **${by}**.\n\nYang **tidak** ikut dikirim:\n${daftar}${sisa}\n\n` +
-              `Stok yang berpindah hanya ${moved.length} barang di atas. Barang yang tidak ikut ` +
-              `masih di gudang asal — buat kiriman baru dari PDA kalau tetap dibutuhkan.`
-          )
-          .setTimestamp()
-      ]
-    })
+    .send({ embeds: [embed] })
     .catch((error) => console.error(`[wsr-close] gagal kirim kabar penutupan #${batchId}:`, error));
 }
 
