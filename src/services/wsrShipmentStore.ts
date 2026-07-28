@@ -20,6 +20,8 @@ import { env } from "../config/env.js";
 
 interface WsrShipmentStore {
   lastSeenBatchId: number | null;
+  /** Kiriman yang laporan "sudah dikerjakan"-nya sudah dikirim. */
+  reported?: number[];
   /**
    * Kiriman yang sudah dapat pengingat susulan. Dicatat supaya pengingatnya
    * SEKALI saja — poller jalan tiap 5 menit, tanpa ini gudang di-tag terus.
@@ -36,7 +38,7 @@ function storePath(): string {
 
 function readStore(): WsrShipmentStore {
   const file = storePath();
-  if (!fs.existsSync(file)) return { lastSeenBatchId: null, reminded: [] };
+  if (!fs.existsSync(file)) return { lastSeenBatchId: null, reminded: [], reported: [] };
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
     const id = Number(parsed.lastSeenBatchId);
@@ -44,9 +46,12 @@ function readStore(): WsrShipmentStore {
     const reminded = Array.isArray(parsed.reminded)
       ? parsed.reminded.map(Number).filter(Number.isFinite)
       : [];
-    return { lastSeenBatchId: Number.isFinite(id) ? id : null, reminded };
+    const reported = Array.isArray(parsed.reported)
+      ? parsed.reported.map(Number).filter(Number.isFinite)
+      : [];
+    return { lastSeenBatchId: Number.isFinite(id) ? id : null, reminded, reported };
   } catch {
-    return { lastSeenBatchId: null, reminded: [] };
+    return { lastSeenBatchId: null, reminded: [], reported: [] };
   }
 }
 
@@ -76,6 +81,18 @@ export function setWatermark(id: number): void {
 /** Kiriman mana saja yang sudah pernah diingatkan. */
 export function getReminded(): number[] {
   return readStore().reminded;
+}
+
+/** Kiriman mana yang laporan penyelesaiannya sudah dikirim. */
+export function getReported(): number[] {
+  return readStore().reported ?? [];
+}
+
+export function markReported(ids: number[]): void {
+  if (ids.length === 0) return;
+  const store = readStore();
+  const gabungan = [...new Set([...(store.reported ?? []), ...ids])].sort((a, b) => a - b);
+  writeStore({ ...store, reported: gabungan.slice(-MAX_REMINDED) });
 }
 
 export function markReminded(ids: number[]): void {

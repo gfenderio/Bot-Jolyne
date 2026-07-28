@@ -5,7 +5,6 @@ import { handleMachitanPickProof } from "./pickProofIntake.js";
 import { handleWsInboxIntake } from "./wsInboxIntake.js";
 import { handleAbsenRequest } from "./absenIntake.js";
 import { handleMachitanPickupProof } from "./pickupProofIntake.js";
-import { handleWsrRequest } from "./wsrIntake.js";
 
 function sendJson(response: ServerResponse, statusCode: number, payload: unknown) {
   const body = JSON.stringify(payload);
@@ -59,16 +58,6 @@ export function startMachitanHttpServer(client: Client<true>) {
         console.error("Gagal memproses Machitan WS inbox", error);
         if (!response.headersSent) {
           sendJson(response, 500, { ok: false, error: "Internal server error handling WS Inbox request" });
-        }
-      });
-      return;
-    }
-
-    if (pathname.startsWith("/machitan/wsr/")) {
-      handleWsrRequest(request, response, client).catch((error) => {
-        console.error("Gagal memproses Machitan WSR", error);
-        if (!response.headersSent) {
-          sendJson(response, 500, { ok: false, error: "Internal server error handling WSR request" });
         }
       });
       return;

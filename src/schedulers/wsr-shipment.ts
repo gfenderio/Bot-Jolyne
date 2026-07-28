@@ -1,7 +1,14 @@
 import { Client, EmbedBuilder, TextChannel } from "discord.js";
 import { env } from "../config/env.js";
 import { fetchNativeQueryWithPagination, type MetabaseConfig } from "../services/metabase.js";
-import { getOrInitWatermark, getReminded, markReminded, setWatermark } from "../services/wsrShipmentStore.js";
+import {
+  getOrInitWatermark,
+  getReminded,
+  getReported,
+  markReminded,
+  markReported,
+  setWatermark
+} from "../services/wsrShipmentStore.js";
 
 /**
  * Kiriman WSR → PENGINGAT ke channel gudang. Titik.
@@ -134,6 +141,27 @@ const itemsQuery = (ids: number[]) => `
   ORDER BY i.id ASC
 `;
 
+/**
+ * Kiriman yang SUDAH dikerjakan tapi laporannya belum dikirim. 'partial' = ada
+ * barang yang sengaja tidak ikut (lihat wsr_batch_items.skip_reason).
+ */
+const doneShipmentsQuery = (sejakId: number) => `
+  ${batchSelect}
+  WHERE b.status IN ('done', 'partial') AND b.id > ${sejakId}
+  ORDER BY b.id ASC
+`;
+
+/** Barang yang tidak jadi dikirim + alasannya, untuk laporan penyelesaian. */
+const skippedItemsQuery = (ids: number[]) => `
+  SELECT i.batch_id, it.name, sd.name AS destination, i.qty,
+         COALESCE(i.skip_reason, '') AS skip_reason
+  FROM wsr_batch_items i
+  JOIN items it ON it.item_id = i.item_id
+  JOIN item_sources sd ON sd.id = i.destination_id
+  WHERE i.batch_id IN (${ids.join(",")}) AND i.status = 'skipped'
+  ORDER BY i.id ASC
+`;
+
 function rowsToShipments(columns: string[], rows: unknown[][]): ShipmentRow[] {
   const idx = (name: string) => columns.indexOf(name);
   return rows.map((row) => ({
@@ -258,6 +286,95 @@ async function kirimPengingat(config: MetabaseConfig, channel: TextChannel): Pro
   }
 }
 
+/**
+ * Laporan balik SETELAH kiriman dikerjakan (permintaan 28 Jul): orang toko yang
+ * menunggu barangnya harus tahu siapa yang mengerjakan, apa yang jadi dikirim,
+ * dan apa yang kurang — tanpa perlu bertanya.
+ *
+ * Sumbernya tabel kiriman itu sendiri, bukan titipan dari PDA: kalau PDA keburu
+ * mati setelah stok berpindah, laporannya tetap terkirim di putaran berikutnya.
+ */
+async function laporkanSelesai(config: MetabaseConfig, channel: TextChannel): Promise<void> {
+  const res = await fetchNativeQueryWithPagination(config, doneShipmentsQuery(0));
+  const selesai = rowsToShipments(res.columns, res.rows);
+  if (selesai.length === 0) return;
+
+  const sudah = new Set(getReported());
+  const belum = selesai.filter((s) => !sudah.has(s.id));
+  if (belum.length === 0) return;
+
+  // Barang yang tidak ikut ditarik sekali untuk seluruh kiriman yang mau dilapor.
+  const tidakIkut = new Map<number, { name: string; destination: string; qty: number; reason: string }[]>();
+  const adaPartial = belum.some((s) => s.status === "partial");
+  if (adaPartial) {
+    const skipRes = await fetchNativeQueryWithPagination(config, skippedItemsQuery(belum.map((s) => s.id)));
+    const idx = (name: string) => skipRes.columns.indexOf(name);
+    for (const row of skipRes.rows) {
+      const batchId = Number(row[idx("batch_id")] ?? 0);
+      const list = tidakIkut.get(batchId) ?? [];
+      list.push({
+        name: String(row[idx("name")] ?? ""),
+        destination: String(row[idx("destination")] ?? ""),
+        qty: Number(row[idx("qty")] ?? 0),
+        reason: String(row[idx("skip_reason")] ?? "")
+      });
+      tidakIkut.set(batchId, list);
+    }
+  }
+
+  const terkirim: number[] = [];
+  for (const shipment of belum) {
+    const kurang = tidakIkut.get(shipment.id) ?? [];
+    const dikirim = shipment.totalItems - kurang.length;
+    const lengkap = kurang.length === 0;
+    const daftar = kurang
+      .slice(0, 20)
+      .map((k) => `• **${k.name}** (${k.qty} pcs → ${k.destination.toUpperCase()}) — ${k.reason || "tanpa keterangan"}`)
+      .join("\n");
+    const sisa = kurang.length > 20 ? `
+…dan ${kurang.length - 20} barang lagi.` : "";
+
+    try {
+      await channel.send({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(lengkap ? 0x2e7d32 : 0xef6c00)
+            .setTitle(
+              lengkap
+                ? `✅ ${shipmentCode(shipment)} selesai — ${dikirim} barang dikirim`
+                : `📦 ${shipmentCode(shipment)} ditutup — ${dikirim} dari ${shipment.totalItems} barang dikirim`
+            )
+            .setDescription(
+              `Dikerjakan **${shipment.executedBy}**.
+` +
+                `Diminta **${shipment.createdBy}** dari **${shipment.unit}**.
+
+` +
+                (lengkap
+                  ? "Semua barang di kiriman ini sudah dipindah, tidak ada yang tertinggal."
+                  : `Yang **tidak** ikut dikirim:
+${daftar}${sisa}
+
+` +
+                    "Barang yang tidak ikut masih di gudang asal — buat kiriman baru dari PDA kalau tetap dibutuhkan.")
+            )
+            .setFooter({ text: `Dikerjakan ${shipment.executedAt} WIB` })
+            .setTimestamp()
+        ]
+      });
+      terkirim.push(shipment.id);
+    } catch (err) {
+      console.error(`[wsr-shipment] gagal kirim laporan selesai #${shipment.id}:`, err);
+    }
+  }
+
+  // Hanya yang benar-benar terkirim yang ditandai — sisanya dicoba lagi nanti.
+  markReported(terkirim);
+  if (terkirim.length > 0) {
+    console.log(`[wsr-shipment] ${terkirim.length} laporan kiriman selesai dikirim.`);
+  }
+}
+
 export async function runWsrShipmentCheck(client: Client): Promise<void> {
   const config = metabaseConfig();
   if (!config) {
@@ -313,6 +430,7 @@ export async function runWsrShipmentCheck(client: Client): Promise<void> {
   // Selalu dijalankan, termasuk saat tidak ada kiriman baru — justru kiriman
   // yang sudah lama diam itulah yang perlu diingatkan.
   await kirimPengingat(config, channel);
+  await laporkanSelesai(config, channel);
 }
 
 export function startWsrShipmentScheduler(client: Client): void {
