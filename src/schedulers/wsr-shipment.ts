@@ -98,9 +98,21 @@ const batchSelect = `
   LEFT JOIN users eu ON eu.user_id = b.executed_by
 `;
 
+/**
+ * SENGAJA tanpa saringan status. Poller ini berjalan tiap beberapa menit, dan
+ * kiriman bisa selesai dikerjakan di dalam sela itu (toko membuat kiriman saat
+ * orang gudang sudah berdiri di raknya). Versi lama menyaring `status =
+ * 'pending'`, jadi kiriman seperti itu tidak pernah diumumkan SAMA SEKALI --
+ * watermark tetap digeser, dan pengumumannya hilang selamanya. Terbukti 30 Jul:
+ * WSR-GAMMA_LAMBDA-5 dibuat 14:54:54, dipindahkan 14:57:12, dan yang sampai ke
+ * Discord cuma laporan selesainya.
+ *
+ * Yang menentukan perlu-tidaknya orang di-tag adalah status kiriman SAAT
+ * diumumkan, bukan apakah dia masuk daftar ini (lihat pemanggilnya).
+ */
 const newShipmentsQuery = (sejakId: number) => `
   ${batchSelect}
-  WHERE b.id > ${sejakId} AND b.status = 'pending'
+  WHERE b.id > ${sejakId}
   ORDER BY b.id ASC
 `;
 
@@ -213,17 +225,18 @@ function openingEmbed(shipment: ShipmentRow, items: ShipmentItem[]): EmbedBuilde
   const rincian = [...perTujuan.entries()].map(([t, q]) => `**${t}** ${q} pcs`).join(" · ");
 
   const code = shipmentCode(shipment);
+  const sudahBeres = shipment.status === "done" || shipment.status === "cancelled";
   return new EmbedBuilder()
-    .setColor(0x00897b)
-    .setTitle(`📦 ${code} — Kiriman WSR #${shipment.id}`)
+    .setColor(sudahBeres ? 0x9e9e9e : 0x00897b)
+    .setTitle(`📦 ${code} — Kiriman WSR #${shipment.id}${sudahBeres ? " (sudah dikerjakan)" : ""}`)
     .setDescription(
       `${ARAH[shipment.direction] ?? shipment.direction}\n\n` +
         `**${shipment.totalItems} barang · ${shipment.totalQty} pcs**\n${rincian}\n\n` +
         `Diminta oleh **${shipment.createdBy}** dari **${shipment.unit}**.\n\n` +
         `**Cara mengerjakan — semuanya di PDA, tidak perlu tiket:**\n` +
         `1. Buka menu **Kiriman**, cari **${code}**.\n` +
-        `2. Siapkan barangnya sesuai daftar terlampir (urut rak), **centang** tiap barang yang sudah diambil.\n` +
-        `3. Kalau sudah semua, tekan **Pindahkan stok**.\n\n` +
+        `2. Siapkan barangnya sesuai daftar **di PDA** — sudah urut rak dan selalu kondisi terbaru. **Centang** tiap barang yang sudah diambil dari rak.\n` +
+        `3. Tekan **Pindahkan N barang** — yang berpindah HANYA yang kamu centang; sisanya tetap menunggu di kiriman ini.\n\n` +
         `Stok **belum** berpindah sampai langkah 3. Siapa yang mencentang dan siapa ` +
         `yang memindahkan tercatat otomatis.`
     )
@@ -401,8 +414,14 @@ export async function runWsrShipmentCheck(client: Client): Promise<void> {
           const items = itemsByBatch.get(shipment.id) ?? [];
           // Tag ditaruh di isi pesan, bukan di embed: mention di dalam embed
           // TIDAK memicu notifikasi Discord — orangnya tak akan tahu.
+          //
+          // Kiriman yang saat diumumkan sudah selesai/dibatalkan tetap dikabarkan
+          // (biar ada jejak "kiriman ini pernah dibuat"), tapi TANPA tag: menepuk
+          // pundak orang untuk kerjaan yang sudah beres cuma bikin tag-nya
+          // berhenti dipercaya.
+          const perluDikerjakan = shipment.status === "pending" || shipment.status === "running";
           await channel.send({
-            content: mention(),
+            content: perluDikerjakan ? mention() : undefined,
             embeds: [openingEmbed(shipment, items)]
           });
           terkirim++;
