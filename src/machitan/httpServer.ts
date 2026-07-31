@@ -5,6 +5,7 @@ import { handleMachitanPickProof } from "./pickProofIntake.js";
 import { handleWsInboxIntake } from "./wsInboxIntake.js";
 import { handleAbsenRequest } from "./absenIntake.js";
 import { handleMachitanPickupProof } from "./pickupProofIntake.js";
+import { handleArrivalProof } from "./arrivalProofIntake.js";
 
 function sendJson(response: ServerResponse, statusCode: number, payload: unknown) {
   const body = JSON.stringify(payload);
@@ -58,6 +59,16 @@ export function startMachitanHttpServer(client: Client<true>) {
         console.error("Gagal memproses Machitan WS inbox", error);
         if (!response.headersSent) {
           sendJson(response, 500, { ok: false, error: "Internal server error handling WS Inbox request" });
+        }
+      });
+      return;
+    }
+
+    if (pathname === "/machitan/arrival-proof") {
+      handleArrivalProof(request, response, client).catch((error) => {
+        console.error("Gagal memproses Arrival proof (bukti bongkar)", error);
+        if (!response.headersSent) {
+          sendJson(response, 500, { ok: false, error: "Internal server error handling arrival proof" });
         }
       });
       return;
