@@ -79,12 +79,18 @@ export async function handleArrivalProof(request: IncomingMessage, response: Ser
       return Number.isFinite(v) && v > 0 ? `Rp${v.toLocaleString("id-ID")}` : "";
     };
     const totalIdr = rupiah(body.totalIdr);
-    const ems = rupiah(body.emsCost);
-    const pajak = rupiah(body.tax);
-    // EMS & pajak diisi belakangan (setelah tagihannya keluar), jadi seringnya
-    // masih nol saat foto dikirim — barisnya sengaja hilang, bukan menulis Rp0
-    // yang terbaca seperti "memang gratis".
-    const ongkos = [ems && `EMS ${ems}`, pajak && `pajak ${pajak}`].filter(Boolean).join(" · ");
+
+    // Koli = kardus fisik, dihitung orang saat bongkar. Kalau ada, jumlah barang
+    // ditulis sekalian per koli — itu ukuran yang dipakai gudang untuk menakar
+    // seberapa berat kerjaannya, bukan totalnya saja.
+    const koli = Number(body.koli);
+    const barang = Number(body.itemCount);
+    const adaKoli = Number.isFinite(koli) && koli > 0;
+    const adaBarang = Number.isFinite(barang) && barang > 0;
+    const barangTeks = adaBarang
+      ? `${barang.toLocaleString("id-ID")} barang` + (adaKoli ? ` · ±${Math.round(barang / koli)}/koli` : "")
+      : "";
+    const ipDominan = body.ipDominan ? String(body.ipDominan).trim() : "";
 
     const embed = new EmbedBuilder()
       .setColor(0xfc4c02)
@@ -93,9 +99,10 @@ export async function handleArrivalProof(request: IncomingMessage, response: Ser
         { name: "Invoice", value: shippingNo, inline: true },
         { name: "Dibongkar oleh", value: staff, inline: true },
         { name: "Jumlah foto", value: String(buffers.length), inline: true },
-        ...(body.itemCount ? [{ name: "Barang", value: `${body.itemCount} baris`, inline: true }] : []),
+        ...(adaKoli ? [{ name: "Koli", value: `${koli.toLocaleString("id-ID")} koli`, inline: true }] : []),
+        ...(barangTeks ? [{ name: "Barang", value: barangTeks, inline: true }] : []),
         ...(totalIdr ? [{ name: "Total modal", value: totalIdr, inline: true }] : []),
-        ...(ongkos ? [{ name: "Ongkos & pajak", value: ongkos, inline: true }] : []),
+        ...(ipDominan ? [{ name: "IP dominan", value: ipDominan.slice(0, 1024), inline: false }] : []),
         ...(notes ? [{ name: "Catatan", value: notes.slice(0, 1024), inline: false }] : []),
       )
       .setImage("attachment://arrival_proof.jpg")
