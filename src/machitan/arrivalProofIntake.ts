@@ -74,10 +74,9 @@ export async function handleArrivalProof(request: IncomingMessage, response: Ser
     // (R2 + warehouse.arrival_photos) untuk penelusuran belakangan.
     const utama = new AttachmentBuilder(buffers[0], { name: "arrival_proof.jpg" });
 
-    // Berapa foto yang sebenarnya diunggah — dikirim pengirimnya, karena yang
-    // sampai ke sini cuma satu.
-    const jumlahFoto = Number(body.photoCount);
-    const totalFoto = Number.isFinite(jumlahFoto) && jumlahFoto > 0 ? jumlahFoto : buffers.length;
+    // photoCount ikut dikirim kakera (berapa foto yang sebenarnya diunggah) tapi
+    // tidak ditampilkan: yang dicari orang di kanal ini isi kirimannya, bukan
+    // administrasi fotonya. Angkanya tetap ada di log kakera dan di tabel arsip.
 
     // Angka rupiah dari kakera dikirim sebagai bilangan bulat; pemformatannya di
     // sini supaya yang membaca di Discord melihat "Rp9.839.654", bukan 9839654.
@@ -85,7 +84,16 @@ export async function handleArrivalProof(request: IncomingMessage, response: Ser
       const v = Number(n);
       return Number.isFinite(v) && v > 0 ? `Rp${v.toLocaleString("id-ID")}` : "";
     };
-    const totalIdr = rupiah(body.totalIdr);
+    const arrivalValue = rupiah(body.totalIdr);
+
+    // Tanggal submit, WIB. Pakai jam server saat pesan dibuat, bukan yang
+    // dikirim pengirim: yang dicatat kanal ini adalah kapan laporannya masuk.
+    const tanggal = new Date().toLocaleDateString("id-ID", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      timeZone: "Asia/Jakarta",
+    });
 
     // Koli = kardus fisik, dihitung orang saat bongkar. Kalau ada, jumlah barang
     // ditulis sekalian per koli — itu ukuran yang dipakai gudang untuk menakar
@@ -94,26 +102,21 @@ export async function handleArrivalProof(request: IncomingMessage, response: Ser
     const barang = Number(body.itemCount);
     const adaKoli = Number.isFinite(koli) && koli > 0;
     const adaBarang = Number.isFinite(barang) && barang > 0;
-    const barangTeks = adaBarang
-      ? `${barang.toLocaleString("id-ID")} barang` + (adaKoli ? ` · ±${Math.round(barang / koli)}/koli` : "")
-      : "";
     const ipDominan = body.ipDominan ? String(body.ipDominan).trim() : "";
 
     const embed = new EmbedBuilder()
       .setColor(0xfc4c02)
-      .setTitle(`${uji ? "🧪 [UJI COBA] " : "📦 "}Bukti Bongkar — ${batchName || shippingNo}`.slice(0, 256))
+      .setTitle(`${uji ? "🧪 [UJI COBA] " : "📦 "}Arrival Works — ${tanggal}`.slice(0, 256))
       .addFields(
-        { name: "Invoice", value: shippingNo, inline: true },
-        { name: "Dibongkar oleh", value: staff, inline: true },
-        {
-          name: "Foto",
-          value: totalFoto > 1 ? `${totalFoto} foto (1 tampil, semua tersimpan)` : "1 foto",
-          inline: true,
-        },
+        // Nomor invoice sengaja tidak ditampilkan: yang membaca kanal ini bukan
+        // yang mengurus kiriman JSUB. Nama batch tetap ada karena itu nama yang
+        // dipakai orang menyebut kirimannya.
+        ...(batchName ? [{ name: "Batch", value: batchName.slice(0, 256), inline: true }] : []),
+        { name: "Disubmit oleh", value: staff, inline: true },
         ...(adaKoli ? [{ name: "Koli", value: `${koli.toLocaleString("id-ID")} koli`, inline: true }] : []),
-        ...(barangTeks ? [{ name: "Barang", value: barangTeks, inline: true }] : []),
-        ...(totalIdr ? [{ name: "Total modal", value: totalIdr, inline: true }] : []),
-        ...(ipDominan ? [{ name: "IP dominan", value: ipDominan.slice(0, 1024), inline: false }] : []),
+        ...(adaBarang ? [{ name: "Barang", value: `${barang.toLocaleString("id-ID")} barang`, inline: true }] : []),
+        ...(arrivalValue ? [{ name: "Arrival value", value: arrivalValue, inline: true }] : []),
+        ...(ipDominan ? [{ name: "IP dominant", value: ipDominan.slice(0, 1024), inline: false }] : []),
         ...(notes ? [{ name: "Catatan", value: notes.slice(0, 1024), inline: false }] : []),
       )
       .setImage("attachment://arrival_proof.jpg")
