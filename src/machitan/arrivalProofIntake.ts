@@ -68,9 +68,16 @@ export async function handleArrivalProof(request: IncomingMessage, response: Ser
       throw new Error(`Tidak bisa kirim ke channel ${channelId}`);
     }
 
-    const attachments = buffers.map(
-      (buf, i) => new AttachmentBuilder(buf, { name: i === 0 ? "arrival_proof.jpg" : `arrival_proof_${i + 1}.jpg` }),
-    );
+    // SATU lampiran saja, yang tampil di dalam embed. Sisanya sengaja tidak
+    // diposting: lampiran berjejer di bawah embed membuat kanal ini tak terbaca
+    // sekilas, padahal itu gunanya. Foto yang lain sudah tersimpan di arsip
+    // (R2 + warehouse.arrival_photos) untuk penelusuran belakangan.
+    const utama = new AttachmentBuilder(buffers[0], { name: "arrival_proof.jpg" });
+
+    // Berapa foto yang sebenarnya diunggah — dikirim pengirimnya, karena yang
+    // sampai ke sini cuma satu.
+    const jumlahFoto = Number(body.photoCount);
+    const totalFoto = Number.isFinite(jumlahFoto) && jumlahFoto > 0 ? jumlahFoto : buffers.length;
 
     // Angka rupiah dari kakera dikirim sebagai bilangan bulat; pemformatannya di
     // sini supaya yang membaca di Discord melihat "Rp9.839.654", bukan 9839654.
@@ -98,7 +105,11 @@ export async function handleArrivalProof(request: IncomingMessage, response: Ser
       .addFields(
         { name: "Invoice", value: shippingNo, inline: true },
         { name: "Dibongkar oleh", value: staff, inline: true },
-        { name: "Jumlah foto", value: String(buffers.length), inline: true },
+        {
+          name: "Foto",
+          value: totalFoto > 1 ? `${totalFoto} foto (1 tampil, semua tersimpan)` : "1 foto",
+          inline: true,
+        },
         ...(adaKoli ? [{ name: "Koli", value: `${koli.toLocaleString("id-ID")} koli`, inline: true }] : []),
         ...(barangTeks ? [{ name: "Barang", value: barangTeks, inline: true }] : []),
         ...(totalIdr ? [{ name: "Total modal", value: totalIdr, inline: true }] : []),
@@ -108,13 +119,9 @@ export async function handleArrivalProof(request: IncomingMessage, response: Ser
       .setImage("attachment://arrival_proof.jpg")
       .setTimestamp();
 
-    // Discord maks 10 file/pesan — chunk.
-    const chunks: (typeof attachments)[] = [];
-    for (let i = 0; i < attachments.length; i += 10) chunks.push(attachments.slice(i, i + 10));
-    await channel.send({ embeds: [embed], files: chunks[0] });
-    for (let i = 1; i < chunks.length; i++) await channel.send({ files: chunks[i] });
+    await channel.send({ embeds: [embed], files: [utama] });
 
-    return sendJson(response, 200, { ok: true, message: "Bukti bongkar terkirim ke Discord", photos: buffers.length });
+    return sendJson(response, 200, { ok: true, message: "Bukti bongkar terkirim ke Discord", photos: 1 });
   } catch (error) {
     console.error("Arrival proof intake error:", error);
     if (error instanceof PayloadTooLargeError) return sendJson(response, 413, { ok: false, error: error.message });
