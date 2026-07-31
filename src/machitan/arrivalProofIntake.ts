@@ -6,6 +6,12 @@ import { fitImageToLimit, DISCORD_BOT_ATTACHMENT_LIMIT_BYTES } from "./imageFit.
 // #sns-arrival-works. Bisa dioverride lewat env ARRIVAL_PROOF_CHANNEL_ID.
 const ARRIVAL_PROOF_CHANNEL_ID = process.env.ARRIVAL_PROOF_CHANNEL_ID || "1511674279958417449";
 
+// Kanal uji coba. Dipakai hanya kalau pengirim menyertakan `test: true` —
+// supaya contoh embed bisa dilihat utuh tanpa mengotori kanal kerja gudang,
+// dan tanpa perlu menaruh id kanal di badan permintaan (yang berarti siapa pun
+// pemegang token bisa memposting ke kanal mana saja).
+const ARRIVAL_PROOF_TEST_CHANNEL_ID = process.env.ARRIVAL_PROOF_TEST_CHANNEL_ID || "1501899831268868106";
+
 class PayloadTooLargeError extends Error {}
 
 function sendJson(response: ServerResponse, statusCode: number, payload: unknown) {
@@ -55,24 +61,41 @@ export async function handleArrivalProof(request: IncomingMessage, response: Ser
       }
     }
 
-    const channel = await client.channels.fetch(ARRIVAL_PROOF_CHANNEL_ID);
+    const uji = body.test === true || body.test === "true";
+    const channelId = uji ? ARRIVAL_PROOF_TEST_CHANNEL_ID : ARRIVAL_PROOF_CHANNEL_ID;
+    const channel = await client.channels.fetch(channelId);
     if (!channel || !channel.isTextBased() || !("send" in channel)) {
-      throw new Error(`Tidak bisa kirim ke channel ${ARRIVAL_PROOF_CHANNEL_ID}`);
+      throw new Error(`Tidak bisa kirim ke channel ${channelId}`);
     }
 
     const attachments = buffers.map(
       (buf, i) => new AttachmentBuilder(buf, { name: i === 0 ? "arrival_proof.jpg" : `arrival_proof_${i + 1}.jpg` }),
     );
 
+    // Angka rupiah dari kakera dikirim sebagai bilangan bulat; pemformatannya di
+    // sini supaya yang membaca di Discord melihat "Rp9.839.654", bukan 9839654.
+    const rupiah = (n: unknown) => {
+      const v = Number(n);
+      return Number.isFinite(v) && v > 0 ? `Rp${v.toLocaleString("id-ID")}` : "";
+    };
+    const totalIdr = rupiah(body.totalIdr);
+    const ems = rupiah(body.emsCost);
+    const pajak = rupiah(body.tax);
+    // EMS & pajak diisi belakangan (setelah tagihannya keluar), jadi seringnya
+    // masih nol saat foto dikirim — barisnya sengaja hilang, bukan menulis Rp0
+    // yang terbaca seperti "memang gratis".
+    const ongkos = [ems && `EMS ${ems}`, pajak && `pajak ${pajak}`].filter(Boolean).join(" · ");
+
     const embed = new EmbedBuilder()
       .setColor(0xfc4c02)
-      .setTitle(`📦 Bukti Bongkar — ${shippingNo}`.slice(0, 256))
+      .setTitle(`${uji ? "🧪 [UJI COBA] " : "📦 "}Bukti Bongkar — ${batchName || shippingNo}`.slice(0, 256))
       .addFields(
         { name: "Invoice", value: shippingNo, inline: true },
         { name: "Dibongkar oleh", value: staff, inline: true },
         { name: "Jumlah foto", value: String(buffers.length), inline: true },
-        ...(batchName ? [{ name: "Batch", value: batchName.slice(0, 1024), inline: false }] : []),
-        ...(body.itemCount ? [{ name: "Barang", value: `${body.itemCount} item`, inline: true }] : []),
+        ...(body.itemCount ? [{ name: "Barang", value: `${body.itemCount} baris`, inline: true }] : []),
+        ...(totalIdr ? [{ name: "Total modal", value: totalIdr, inline: true }] : []),
+        ...(ongkos ? [{ name: "Ongkos & pajak", value: ongkos, inline: true }] : []),
         ...(notes ? [{ name: "Catatan", value: notes.slice(0, 1024), inline: false }] : []),
       )
       .setImage("attachment://arrival_proof.jpg")
