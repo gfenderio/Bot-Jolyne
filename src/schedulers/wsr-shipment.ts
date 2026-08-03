@@ -265,10 +265,29 @@ function reminderEmbed(shipment: ShipmentRow, jam: number): EmbedBuilder {
     .setTimestamp();
 }
 
-/** Tag orang gudang; kosong kalau env-nya sengaja dikosongkan. */
-function mention(): string {
-  const id = env.WSR_SHIPMENT_MENTION_USER_ID?.trim();
-  return id ? `<@${id}> ` : "";
+/**
+ * Tag per unit. Unit-nya cuma tiga (lihat PdaController: GAMMA_LAMBDA, ALPHA,
+ * BETA), dan GAMMA_LAMBDA — toko Gamma minta barang ke gudang Lambda, dua-duanya
+ * Surabaya — dikerjakan orang Surabaya. Menepuk pundak orang gudang default
+ * (Bekasi) untuk kiriman itu cuma bikin tag-nya berhenti dipercaya.
+ */
+function mentionIdUntuk(unit: string): string {
+  const khusus =
+    unit.trim().toUpperCase() === "GAMMA_LAMBDA" ? env.WSR_SHIPMENT_MENTION_GAMMA_LAMBDA_ID : undefined;
+  return (khusus?.trim() || env.WSR_SHIPMENT_MENTION_USER_ID?.trim()) ?? "";
+}
+
+/**
+ * Tag orang gudang; kosong kalau env-nya sengaja dikosongkan.
+ *
+ * Bentuk tag-nya ditentukan saat kirim, bukan dihafal: id yang sama bisa milik
+ * role (`<@&id>`) atau orang (`<@id>`), dan salah bentuk bikin tag-nya tampil
+ * sebagai teks mentah tanpa notifikasi ke siapa pun.
+ */
+function mention(shipment: ShipmentRow, channel: TextChannel): string {
+  const id = mentionIdUntuk(shipment.unit);
+  if (!id) return "";
+  return channel.guild?.roles.cache.has(id) ? `<@&${id}> ` : `<@${id}> `;
 }
 
 /**
@@ -288,7 +307,7 @@ async function kirimPengingat(config: MetabaseConfig, channel: TextChannel): Pro
   const terkirim: number[] = [];
   for (const shipment of belum) {
     try {
-      await channel.send({ content: mention(), embeds: [reminderEmbed(shipment, jam)] });
+      await channel.send({ content: mention(shipment, channel), embeds: [reminderEmbed(shipment, jam)] });
       terkirim.push(shipment.id);
     } catch (err) {
       console.error(`[wsr-shipment] gagal kirim pengingat #${shipment.id}:`, err);
@@ -421,7 +440,7 @@ export async function runWsrShipmentCheck(client: Client): Promise<void> {
           // berhenti dipercaya.
           const perluDikerjakan = shipment.status === "pending" || shipment.status === "running";
           await channel.send({
-            content: perluDikerjakan ? mention() : undefined,
+            content: perluDikerjakan ? mention(shipment, channel) : undefined,
             embeds: [openingEmbed(shipment, items)]
           });
           terkirim++;

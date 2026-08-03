@@ -234,6 +234,12 @@ const envSchema = z.object({
   // jadi pengingat, bukan tiket). Kosongkan kalau tidak mau ada yang di-tag.
   WSR_SHIPMENT_MENTION_USER_ID: optionalString.default("1115194334497755157"),
 
+  // Kiriman unit GAMMA_LAMBDA (toko Gamma minta barang ke gudang Lambda, dua-duanya
+  // Surabaya) ditangani orang Surabaya, bukan orang gudang default. Permintaan
+  // 3 Agu: kiriman itu jangan lagi menepuk pundak orang yang salah kota.
+  // Kosongkan → balik memakai tag default di atas.
+  WSR_SHIPMENT_MENTION_GAMMA_LAMBDA_ID: optionalString.default("1224581529854939138"),
+
   // Pengingat susulan sekali untuk kiriman yang masih menggantung sekian jam.
   WSR_SHIPMENT_REMINDER_HOURS: z.coerce.number().int().min(1).max(168).default(24),
 
