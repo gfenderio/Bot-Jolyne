@@ -89,22 +89,14 @@ export async function handleMachitanShipping(
     const attachments = imageBuffers.map((buf, i) =>
       new AttachmentBuilder(buf, { name: `shipping-proof-${i + 1}.jpg` })
     );
-    const firstAttachmentName = attachments[0].name as string;
-
     // Format List of Orders
     let orderDescription = orderIdsArr.join("\n");
     if (orderDescription.length > 1900) {
       orderDescription = orderDescription.slice(0, 1890) + "\n...";
     }
 
-    const photoLabel = rawImages.length > 1 ? ` · ${rawImages.length} foto` : "";
-    const embed = new EmbedBuilder()
-      .setTitle(`📦 Shipping Out — ${notes !== "-" ? notes : `${orderCount} Order(s)`}${photoLabel}`)
-      .setDescription(`**Total:** ${orderCount} Order(s)\n\n**List Order ID:**\n\`\`\`\n${orderDescription}\n\`\`\``)
-      .setColor("#3498db")
-      .setImage(`attachment://${firstAttachmentName}`)
-      .setFooter({ text: `Shipped by ${actorName}` })
-      .setTimestamp(new Date());
+    const photoCount = attachments.length;
+    const photoLabel = photoCount > 1 ? ` · ${photoCount} foto` : "";
 
     const channel = await client.channels.fetch(targetChannelId).catch(() => null);
     if (!channel || !channel.isTextBased()) {
@@ -112,14 +104,55 @@ export async function handleMachitanShipping(
     }
 
     const ch = channel as import("discord.js").TextChannel;
-    const chunks: (typeof attachments)[] = [];
-    for (let i = 0; i < attachments.length; i += 10) {
-      chunks.push(attachments.slice(i, i + 10));
+
+    // Foto ditata sebagai GALERI, bukan lampiran berserakan.
+    //
+    // Discord menggabungkan beberapa embed jadi satu kisi gambar kalau embed-nya
+    // berbagi `url` yang sama persis — maksimal 4 gambar per kisi. Sebelumnya
+    // cuma foto pertama yang masuk embed, sisanya menggantung sebagai lampiran
+    // polos di bawahnya, dan foto ke-11 dan seterusnya dikirim sebagai pesan
+    // telanjang tanpa keterangan apa pun.
+    //
+    // `url` ini tidak pernah diklik orang; ia cuma penanda pengelompokan.
+    const GALLERY_URL = "https://kyou.id/#shipping-out";
+    const PHOTOS_PER_GALLERY = 4;
+
+    const groups: typeof attachments[] = [];
+    for (let i = 0; i < attachments.length; i += PHOTOS_PER_GALLERY) {
+      groups.push(attachments.slice(i, i + PHOTOS_PER_GALLERY));
     }
 
-    await ch.send({ embeds: [embed], files: chunks[0] });
-    for (let i = 1; i < chunks.length; i++) {
-      await ch.send({ files: chunks[i] });
+    for (let g = 0; g < groups.length; g++) {
+      const group = groups[g];
+      const isFirst = g === 0;
+      const from = g * PHOTOS_PER_GALLERY + 1;
+      const to = from + group.length - 1;
+
+      const embeds = group.map((att, i) => {
+        const embed = new EmbedBuilder()
+          .setURL(GALLERY_URL)
+          .setColor("#3498db")
+          .setImage(`attachment://${att.name as string}`);
+
+        // Keterangan hanya di embed pertama tiap kisi — kalau ditulis di
+        // semuanya, Discord memajangnya berulang di atas tiap gambar.
+        if (i === 0) {
+          if (isFirst) {
+            embed
+              .setTitle(`📦 Shipping Out — ${notes !== "-" ? notes : `${orderCount} Order(s)`}${photoLabel}`)
+              .setDescription(`**Total:** ${orderCount} Order(s)\n\n**List Order ID:**\n\`\`\`\n${orderDescription}\n\`\`\``)
+              .setFooter({ text: `Shipped by ${actorName}` })
+              .setTimestamp(new Date());
+          } else {
+            // Lanjutan tetap diberi judul supaya jelas ini kiriman yang sama,
+            // bukan pengiriman lain yang kebetulan menyusul.
+            embed.setTitle(`📦 Lanjutan foto ${from}–${to} dari ${photoCount}`);
+          }
+        }
+        return embed;
+      });
+
+      await ch.send({ embeds, files: group });
     }
 
     return sendJson(response, 200, { message: "Shipping proof sent to Discord", ok: true });
