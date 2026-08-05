@@ -152,6 +152,22 @@ export async function handleMachitanPickProof(
       : [];
     const imageBase64 = imagesBase64[0] ?? "";
 
+    // KETERANGAN PER FOTO (PDA partner). Satu order partner dibagi ke banyak
+    // konsumen, jadi tiap unit dipotret sendiri — dan foto tanpa keterangan
+    // tidak bisa menjawab "unit yang mana yang dikirim ke orang ini". PDA lama
+    // tidak mengirim ini; kalau kosong, semuanya berjalan seperti sebelumnya.
+    const imageLabels: string[] = Array.isArray(body.imageLabels)
+      ? body.imageLabels.map((x: unknown) => String(x ?? "").trim())
+      : [];
+    // Nama berkas ikut keterangannya supaya keterangan itu terbaca DI BAWAH
+    // fotonya di Discord, bukan cuma sebagai daftar terpisah yang harus
+    // dicocokkan sendiri urutannya.
+    const namaAman = (s: string) => s.replace(/[^a-zA-Z0-9-_ ]+/g, "").trim().replace(/\s+/g, "_").slice(0, 40);
+    // Jumlah unit yang seharusnya dipotret — dipakai menandai foto yang kurang.
+    const totalUnit = Array.isArray(body.items)
+      ? body.items.reduce((n: number, it: any) => n + Number(it?.qty ?? it?.quantity ?? 1), 0)
+      : 0;
+
     // Bot Discord dibatasi ~8MB per attachment (beda dari limit user biasa).
     // Foto oversize TIDAK ditolak 413 lagi — di-resize bertahap server-side
     // (fitImageToLimit) sampai muat; foto yang sudah muat lewat utuh tanpa
@@ -330,10 +346,17 @@ export async function handleMachitanPickProof(
     // Semua foto jadi attachment; embed menampilkan foto pertama, sisanya tampil
     // sebagai attachment tambahan di pesan yang sama.
     const proofBaseName = isPackProof ? "pack_proof" : "pick_proof";
-    const attachments = imageBuffers.map((buf, i) =>
-      new AttachmentBuilder(buf, { name: i === 0 ? `${proofBaseName}.jpg` : `${proofBaseName}_${i + 1}.jpg` })
-    );
-    const photoLabel = imagesBase64.length > 1 ? ` · ${imagesBase64.length} foto` : "";
+    const attachments = imageBuffers.map((buf, i) => {
+      const ket = namaAman(imageLabels[i] ?? "");
+      const dasar = i === 0 ? proofBaseName : `${proofBaseName}_${i + 1}`;
+      return new AttachmentBuilder(buf, { name: ket ? `${dasar}_${ket}.jpg` : `${dasar}.jpg` });
+    });
+    // Judulnya menyebut foto DAN unit sekaligus: "3 foto dari 5 unit" langsung
+    // memperlihatkan ada dua yang belum dipotret, tanpa siapa pun menghitung.
+    const photoLabel =
+      imagesBase64.length > 1 || (totalUnit > 1 && imagesBase64.length > 0)
+        ? ` · ${imagesBase64.length} foto${totalUnit > 1 ? ` dari ${totalUnit} unit` : ""}`
+        : "";
 
     // Create Embed
     const embed = new EmbedBuilder()
@@ -349,7 +372,17 @@ export async function handleMachitanPickProof(
         ...(adminNotes !== "-" ? [{ name: "Admin Notes", value: adminNotes.slice(0, 1024), inline: !isPackProof }] : []),
         ...(pdaNotes ? [{ name: `Catatan ${actorLabel}`, value: pdaNotes.slice(0, 1024), inline: false }] : []),
         ...(isPackProof ? [{ name: "Status", value: "Diproses ke RESI Fulfillment", inline: true }] : []),
-        { name: "Items", value: itemDetails, inline: false }
+        { name: "Items", value: itemDetails, inline: false },
+        ...(imageLabels.some((x) => x)
+          ? [{
+              name: "Foto",
+              value: imagesBase64
+                .map((_, i) => `${i + 1}. ${imageLabels[i] || "(tanpa keterangan)"}`)
+                .join("\n")
+                .slice(0, 1024),
+              inline: false,
+            }]
+          : [])
       )
       .setImage(isPackProof ? "attachment://pack_proof.jpg" : "attachment://pick_proof.jpg")
       .setTimestamp();
