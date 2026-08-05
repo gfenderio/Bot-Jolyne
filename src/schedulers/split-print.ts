@@ -174,6 +174,12 @@ function splitQuery(sejak: string, sampai: string): string {
           AND al.action IN ('print_order_address', 'print_order_address_manual')
           AND al.created_at >  '${sejak}'
           AND al.created_at <= '${sampai}'
+          -- Penandaan "partner mencetak sendiri" dari papan kakera memakai
+          -- catatan yang sama supaya /admin lama & PDA ikut melihatnya, tapi
+          -- TIDAK boleh memicu pesan ini: labelnya dicetak partner di luar
+          -- sistem, jadi memanggil gudang lain untuk mencetak bagiannya cuma
+          -- menyuruh orang mengerjakan sesuatu yang tidak ada.
+          AND al.information NOT LIKE '%"partner_self_print":true%'
       )
       -- Cuma order yang pengirimannya BENAR-BENAR terpisah. Dulu ini kebetulan
       -- terjaga oleh hitungan "cetak < gudang" (order satu gudang selalu 1 >= 1
