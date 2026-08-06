@@ -48,3 +48,29 @@ export function printLabelUrl(orderId: string | number, packGroupId: number): st
   if (!/^\d+$/.test(id) || !Number.isInteger(packGroupId)) return null;
   return `https://old.kyou.id/admin/orders/print-address?id=${id}&packGroupId=${packGroupId}`;
 }
+
+/**
+ * Tautan cetak yang LEWAT BOT DULU.
+ *
+ *   https://<bot>/print/396668/2   →  dicatat  →  302 ke printLabelUrl di atas
+ *
+ * Gunanya cuma satu: bot jadi tahu GUDANG MANA yang dibuka. `admin_logs` tidak
+ * menyimpan itu, jadi selama ini ditebak dari lokasi kerja si pencetak — dan
+ * tebakan itu meleset tiap kali orang gudang lain yang mengklik. Lihat
+ * `splitPrintClickStore.ts` untuk kenapa kliknya tidak diperlakukan sebagai
+ * bukti cetak.
+ *
+ * `base` kosong → balik null, dan pemanggilnya memakai tautan langsung seperti
+ * sebelumnya. Jadi fitur ini menyala hanya kalau alamat publiknya memang diisi.
+ */
+export function printLabelClickUrl(
+  orderId: string | number,
+  packGroupId: number,
+  base: string
+): string | null {
+  const pangkal = String(base ?? "").trim().replace(/\/+$/, "");
+  if (!pangkal) return null;
+  const id = String(orderId ?? "").trim();
+  if (!/^\d+$/.test(id) || !Number.isInteger(packGroupId)) return null;
+  return `${pangkal}/print/${id}/${packGroupId}`;
+}

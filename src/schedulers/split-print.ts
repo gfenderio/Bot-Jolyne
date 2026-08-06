@@ -2,7 +2,8 @@ import { EmbedBuilder, type Client, type TextChannel } from "discord.js";
 import { env } from "../config/env.js";
 import { fetchNativeQueryWithPagination, type MetabaseConfig } from "../services/metabase.js";
 import { getOrInitWatermark, setWatermark, isPosted, markPosted } from "../services/splitPrintStore.js";
-import { orderLink, printLabelUrl } from "../services/kyouLinks.js";
+import { orderLink, printLabelUrl, printLabelClickUrl } from "../services/kyouLinks.js";
+import { daftarKlik, geserMenit, JENDELA_KLIK_MENIT, type PrintClick } from "../services/splitPrintClickStore.js";
 
 /**
  * "Kiriman terpisah — label gudang lain belum dicetak."
@@ -21,10 +22,18 @@ import { orderLink, printLabelUrl } from "../services/kyouLinks.js";
  * BARU, lalu memeriksa: order itu barangnya tersebar di lebih dari satu gudang?
  * Kalau ya → kirim satu pesan per gudang, berisi link cetak khusus gudang itu.
  *
- * GUDANG MANA YANG SUDAH CETAK — DIBACA DARI LOKASI ORANGNYA. `admin_logs`
- * tidak menyimpan bagian mana yang dicetak (halaman fulfillment mengirim
- * `packGroupId`, tapi nilainya tidak ikut ditulis ke `information`). Yang
- * tersimpan: SIAPA yang mencetak. Dan setiap admin punya lokasi kerja di
+ * GUDANG MANA YANG SUDAH CETAK — DUA SUMBER, SEJAK 6 AGU 2026.
+ *
+ * Yang PASTI: tautan cetak di pesan ini lewat `/print/<order>/<grup>` di server
+ * bot dulu, jadi bot tahu gudang mana yang dibuka. Catatan cetak yang muncul di
+ * jendela sesudah klik itu dihubungkan ke gudang tersebut. Kliknya sendiri
+ * bukan bukti — lihat `splitPrintClickStore.ts`.
+ *
+ * Yang DITEBAK, dipakai untuk cetakan yang tidak lewat tautan bot (halaman
+ * /admin) dan untuk seluruh catatan lama: `admin_logs` tidak menyimpan bagian
+ * mana yang dicetak (halaman fulfillment mengirim `packGroupId`, tapi nilainya
+ * tidak ikut ditulis ke `information`). Yang tersimpan: SIAPA yang mencetak.
+ * Dan setiap admin punya lokasi kerja di
  * `users.office_location` (ALPHA / OMEGA / BETA / GAMMA / KCC) — isinya persis
  * nama source di `item_sources`, jadi lokasi itu bisa dipetakan ke pack group
  * lewat join biasa, tanpa daftar hardcode:
@@ -49,10 +58,13 @@ import { orderLink, printLabelUrl } from "../services/kyouLinks.js";
  * gudang yang tersisa, anggap saja sudah tercetak dan diamkan. Kasar, tapi
  * hanya berlaku untuk sisa kecil (2 dari 19 order).
  *
- * OBAT YANG SEBENARNYA tetap menulis `packGroupId` ke `admin_logs.information`
- * (satu baris di `OrderController::buildPrintAddressGroups` &
- * `AdminOrderController::printAddressManually`). Keputusan user 2026-07-20 &
- * 2026-07-27: JANGAN sentuh backend — semua diselesaikan dari sisi bot.
+ * OBAT YANG PALING BERSIH tetap menulis `packGroupId` ke
+ * `admin_logs.information` (satu baris di `OrderController::
+ * buildPrintAddressGroups`, `AdminOrderController::printAddressManual`, dan
+ * keempat halaman gudang). Keputusan user 2026-07-20, 2026-07-27, dan 2026-08-06:
+ * JANGAN sentuh backend — semua diselesaikan dari sisi bot. Pencocokan klik di
+ * atas adalah bentuk terdekat yang bisa dicapai tanpa itu; sisa tebakannya cuma
+ * untuk cetakan yang tidak lewat tautan bot.
  */
 
 const EMBED_COLOR = 0xe67e22;
@@ -65,21 +77,82 @@ const EMBED_COLOR = 0xe67e22;
 const GROUP_BEKASI = 1;
 
 /**
- * Potongan SQL: benar tepat ketika sudah ada orang BER-LOKASI GUDANG INI yang
- * mencetak order ini. `users.office_location` → `item_sources.name` →
- * `pack_group_id`; user tanpa lokasi (atau sudah dihapus) tidak ikut, biar
- * ditangani rem hitungan di bawah.
+ * KLIK YANG DIAKUI. Tautan cetak di pesan ini lewat `/print/<order>/<grup>` di
+ * server bot dulu, jadi bot tahu gudang mana yang dibuka — sesuatu yang tidak
+ * disimpan `admin_logs` sama sekali.
+ *
+ * Kliknya BUKAN bukti cetak (sesi bisa habis dan orangnya mendarat di halaman
+ * login), jadi yang dipakai adalah pasangannya: catatan cetak yang jatuh di
+ * jendela sesudah klik dianggap berasal dari gudang yang diklik itu. Tidak ada
+ * catatan → kliknya tidak berarti apa-apa dan gudangnya tetap dipanggil.
+ *
+ * Nilai-nilainya ditulis langsung ke SQL, jadi disaring dulu: order harus
+ * angka, grup harus bilangan bulat 1-99, jam harus DATETIME apa adanya.
  */
-function sudahDicetakGudangIni(kolomGrup: string): string {
+function klikSah(): PrintClick[] {
+  return daftarKlik().filter(
+    (c) =>
+      /^\d+$/.test(c.orderId) &&
+      Number.isInteger(c.packGroupId) &&
+      c.packGroupId > 0 &&
+      c.packGroupId < 100 &&
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(c.at)
+  );
+}
+
+/** Satu catatan cetak jatuh di jendela klik ini. */
+function jendelaKlik(c: PrintClick): string {
+  return `(alp.order_id = ${c.orderId} AND alp.created_at >= '${c.at}' AND alp.created_at <= '${geserMenit(c.at, JENDELA_KLIK_MENIT)}')`;
+}
+
+/** Catatan cetak ini sudah diklaim oleh SEBUAH klik — grup mana pun. */
+export function diklaimSiapaPun(klik: PrintClick[]): string {
+  if (klik.length === 0) return "FALSE";
+  return `(${klik.map(jendelaKlik).join(" OR ")})`;
+}
+
+/** Catatan cetak ini diklaim klik untuk gudang yang sedang diperiksa. */
+export function diklaimGrupIni(klik: PrintClick[], kolomGrup: string): string {
+  if (klik.length === 0) return "FALSE";
+  return `(${klik.map((c) => `(${kolomGrup} = ${c.packGroupId} AND ${jendelaKlik(c)})`).join(" OR ")})`;
+}
+
+/**
+ * Potongan SQL: benar tepat ketika bagian gudang ini sudah dicetak.
+ *
+ * Dua jalur, dan urutannya penting:
+ *
+ *  1. CATATAN YANG DIKLAIM KLIK — dipakai apa adanya. Ini yang pasti: angkanya
+ *     datang dari tautan yang dikirim bot sendiri, bukan dari siapa yang login.
+ *
+ *  2. CATATAN YANG TIDAK DIKLAIM SIAPA PUN — jatuh ke tebakan lama:
+ *     `users.office_location` → `item_sources.name` → `pack_group_id`.
+ *     Dipertahankan karena cetakan dari halaman /admin (yang tidak lewat
+ *     tautan bot) memang tidak punya klik, dan karena 2,6 juta catatan lama
+ *     tidak akan pernah punya. Untuk halaman gudang `/admin/alpha|beta|gamma|
+ *     omega` tebakan ini justru tepat: rutenya dijaga middleware lokasi, jadi
+ *     orang BETA memang cuma bisa mencetak dari halaman BETA.
+ *
+ * Yang berubah dibanding versi lama: catatan yang SUDAH diklaim klik tidak lagi
+ * ikut ditebak. Itu yang menutup kasus "orang Bekasi membuka tautan Tangerang"
+ * — dulu catatan itu membungkam Bekasi, sekarang dia menandai Tangerang.
+ *
+ * JOIN-nya jadi LEFT: catatan yang diklaim klik harus tetap terhitung meskipun
+ * pencetaknya tidak punya lokasi kerja.
+ */
+export function sudahDicetakGudangIni(kolomGrup: string, klik: PrintClick[]): string {
   return `
         EXISTS (
           SELECT 1
           FROM admin_logs alp
-          JOIN users pu           ON pu.user_id = alp.user_id
-          JOIN item_sources psrc  ON psrc.name  = pu.office_location
+          LEFT JOIN users pu           ON pu.user_id = alp.user_id
+          LEFT JOIN item_sources psrc  ON psrc.name  = pu.office_location
           WHERE alp.order_id = o.order_id
             AND alp.action IN ('print_order_address', 'print_order_address_manual')
-            AND psrc.pack_group_id = ${kolomGrup}
+            AND (
+              ${diklaimGrupIni(klik, kolomGrup)}
+              OR (NOT ${diklaimSiapaPun(klik)} AND psrc.pack_group_id = ${kolomGrup})
+            )
         )`.trim();
 }
 
@@ -135,7 +208,7 @@ function watermarkQuery(): string {
  * order 396668 punya 5 catatan, dan beratnya sempat terbaca 5.000 g padahal
  * aslinya 1.000 g.
  */
-function splitQuery(sejak: string, sampai: string): string {
+function splitQuery(sejak: string, sampai: string, klik: PrintClick[]): string {
   return `
     SELECT
       o.order_id                                   AS order_id,
@@ -197,12 +270,16 @@ function splitQuery(sejak: string, sampai: string): string {
       -- yang bikin head fulfillment berhenti ketag waktu dia sendiri yang
       -- mencetak: begitu ada orang berlokasi Bekasi mencetak order ini, baris
       -- grup 1 hilang — dan tag menempel pada baris grup 1.
-      AND NOT ${sudahDicetakGudangIni("s.pack_group_id")}
+      AND NOT ${sudahDicetakGudangIni("s.pack_group_id", klik)}
       -- Rem untuk cetakan yang pencetaknya tidak punya lokasi (tidak bisa
       -- dihubungkan ke gudang manapun): kalau jumlahnya sudah sebanyak gudang
       -- yang belum ketahuan mencetak, anggap sudah beres dan diam. Ini hitungan
       -- kasar yang lama, sekarang cuma dipakai untuk sisa kecil ini — bukan
       -- lagi satu-satunya rem.
+      --
+      -- Catatan yang sudah diklaim klik DIKELUARKAN dari hitungan ini: gudangnya
+      -- sudah ketahuan pasti di atas, jadi menghitungnya lagi sebagai "tak
+      -- dikenal" akan membungkam gudang yang justru belum mencetak.
       AND (
         SELECT COUNT(*)
         FROM admin_logs al2
@@ -211,13 +288,14 @@ function splitQuery(sejak: string, sampai: string): string {
         WHERE al2.order_id = o.order_id
           AND al2.action IN ('print_order_address', 'print_order_address_manual')
           AND usrc.pack_group_id IS NULL
+          AND NOT ${diklaimSiapaPun(klik).replace(/alp\./g, "al2.")}
       ) < (
         SELECT COUNT(DISTINCT s2.pack_group_id)
         FROM order_items oi2
         JOIN item_sources s2 ON s2.name = oi2.source
         WHERE oi2.order_id = o.order_id
           AND s2.pack_group_id IS NOT NULL
-          AND NOT ${sudahDicetakGudangIni("s2.pack_group_id")}
+          AND NOT ${sudahDicetakGudangIni("s2.pack_group_id", klik)}
       )
     GROUP BY o.order_id, s.pack_group_id
     ORDER BY dicetak_pada ASC
@@ -239,8 +317,13 @@ function toMysqlDatetime(raw: unknown): string {
   return String(raw ?? "").trim().replace("T", " ").replace(/(\+\d{2}:\d{2}|Z)$/, "").slice(0, 19);
 }
 
-async function fetchSplits(config: MetabaseConfig, sejak: string, sampai: string): Promise<SplitRow[]> {
-  const { columns, rows } = await fetchNativeQueryWithPagination(config, splitQuery(sejak, sampai));
+async function fetchSplits(
+  config: MetabaseConfig,
+  sejak: string,
+  sampai: string,
+  klik: PrintClick[]
+): Promise<SplitRow[]> {
+  const { columns, rows } = await fetchNativeQueryWithPagination(config, splitQuery(sejak, sampai, klik));
   const idx = (name: string) => columns.indexOf(name);
 
   return rows.map((row): SplitRow => ({
@@ -277,7 +360,12 @@ function daftarBarang(barang: string[]): string {
 }
 
 function embedFor(row: SplitRow): EmbedBuilder {
-  const url = printLabelUrl(row.orderId, row.packGroupId);
+  // Lewat bot kalau alamat publiknya diisi, supaya gudang yang dibuka tercatat.
+  // Kalau tidak, tautan langsung seperti sebelumnya — tidak ada yang hilang
+  // selain ketepatan tebakannya.
+  const url =
+    printLabelClickUrl(row.orderId, row.packGroupId, env.SPLIT_PRINT_LINK_BASE) ??
+    printLabelUrl(row.orderId, row.packGroupId);
   const kg = labelKg(row.gram);
   const bekasi = row.packGroupId === GROUP_BEKASI;
 
@@ -292,6 +380,10 @@ function embedFor(row: SplitRow): EmbedBuilder {
           : `Order ${orderLink(row.orderId)} ini **pengirimannya terpisah** — tiap gudang kirim paketnya ` +
             `sendiri, jadi bagian **${row.kota}** perlu label sendiri.`,
         "",
+        // Peringatan ditaruh DI ATAS tautan. Di bawah, orang sudah terlanjur
+        // mengklik sebelum sempat membacanya.
+        "-# ⚠️ Membuka link ini **langsung mencetak label** dan tercatat di admin logs atas namamu.",
+        `-# Jangan dibuka kalau cuma mau lihat isinya — barang, berat, dan kurirnya sudah ada di pesan ini.`,
         url ? `### 🖨️ [Cetak label ${row.kota}](${url})` : "_Link cetak tidak tersedia._",
         "",
         `-# Label ini hanya berisi barang ${row.gudang} — berat & isinya sudah dipisah otomatis.`,
@@ -329,7 +421,7 @@ export async function runSplitPrintCheck(client: Client): Promise<void> {
   // Perbandingan string aman: format DATETIME MySQL berurut secara leksikografis.
   if (sampai <= sejak) return; // tak ada cetakan baru
 
-  const rows = await fetchSplits(config, sejak, sampai);
+  const rows = await fetchSplits(config, sejak, sampai, klikSah());
   const baru = rows.filter((r) => r.orderId && !isPosted(r.orderId, r.packGroupId));
 
   if (baru.length === 0) {

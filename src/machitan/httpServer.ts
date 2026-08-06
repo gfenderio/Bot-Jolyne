@@ -6,6 +6,8 @@ import { handleWsInboxIntake } from "./wsInboxIntake.js";
 import { handleAbsenRequest } from "./absenIntake.js";
 import { handleMachitanPickupProof } from "./pickupProofIntake.js";
 import { handleArrivalProof } from "./arrivalProofIntake.js";
+import { printLabelUrl } from "../services/kyouLinks.js";
+import { catatKlik } from "../services/splitPrintClickStore.js";
 
 function sendJson(response: ServerResponse, statusCode: number, payload: unknown) {
   const body = JSON.stringify(payload);
@@ -71,6 +73,31 @@ export function startMachitanHttpServer(client: Client<true>) {
           sendJson(response, 500, { ok: false, error: "Internal server error handling arrival proof" });
         }
       });
+      return;
+    }
+
+    // Pembelokan tautan cetak "kiriman terpisah". Bukan endpoint data: dia cuma
+    // mencatat gudang mana yang dibuka lalu melempar ke halaman cetak yang sama
+    // seperti dulu. Sengaja TANPA token — ini tautan yang diklik orang gudang
+    // dari Discord, dan halaman tujuannya sendiri sudah menuntut login admin.
+    // Yang bisa dilakukan orang asing di sini cuma menaruh catatan klik palsu;
+    // catatan itu tidak pernah dianggap bukti cetak (lihat splitPrintClickStore).
+    if (pathname.startsWith("/print/")) {
+      const [, , orderId, packGroupId] = pathname.split("/");
+      const tujuan = printLabelUrl(orderId ?? "", Number(packGroupId));
+      if (!tujuan) {
+        sendJson(response, 400, { ok: false, error: "Order atau pack group tidak sah" });
+        return;
+      }
+      try {
+        catatKlik(String(orderId), Number(packGroupId));
+      } catch (error) {
+        // Gagal mencatat TIDAK boleh menahan orang mencetak. Akibatnya cuma
+        // satu: gudangnya kembali ditebak dari lokasi, seperti sebelum ini ada.
+        console.error("[split-print] gagal mencatat klik cetak:", error);
+      }
+      response.writeHead(302, { location: tujuan });
+      response.end();
       return;
     }
 

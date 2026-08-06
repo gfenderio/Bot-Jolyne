@@ -220,6 +220,21 @@ const envSchema = z.object({
   // bukan orang gudangnya. Kosongkan kalau tidak mau ada yang di-tag.
   SPLIT_PRINT_BEKASI_MENTION_USER_ID: optionalString.default("1337888111471886456"),
 
+  // Alamat PUBLIK server HTTP bot ini (yang sama dengan yang dipakai PDA untuk
+  // /machitan/pick-proof), tanpa garis miring di belakang. Kalau diisi, tautan
+  // cetak di pesan kiriman terpisah lewat sini dulu — bot mencatat GUDANG MANA
+  // yang dibuka, lalu membelokkan ke old.kyou.id. Itu yang menghapus tebak-
+  // tebakan "siapa yang mencetak bagian mana"; lihat splitPrintClickStore.ts.
+  //
+  // KOSONG = tautan langsung ke old.kyou.id, persis seperti sebelumnya. Fitur
+  // ini mati dengan tenang, tidak ada yang rusak.
+  SPLIT_PRINT_LINK_BASE: optionalString.default(""),
+
+  // Catatan "siapa membuka tautan cetak gudang mana, jam berapa". Bukan bukti
+  // cetak — bukti tetap dicari di admin_logs; ini cuma penunjuk yang membuat
+  // catatan cetak bisa dihubungkan ke gudang yang benar.
+  SPLIT_PRINT_CLICK_STORE_PATH: optionalString.default("data/split-print-clicks.json"),
+
   // "Kiriman WSR". Staf toko memilih barang rotasi di PDA lalu menyiapkannya
   // sebagai kiriman — stoknya belum pindah. Gudang butuh daftar barangnya dalam
   // bentuk yang bisa dibawa keliling rak, jadi bot memantau tabel wsr_batches
