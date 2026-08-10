@@ -42,6 +42,23 @@ const pollIntervalSeconds = z.preprocess(
   z.coerce.number().int().positive()
 );
 
+/**
+ * Angka bulat positif dengan nilai bawaan yang benar-benar terpakai.
+ *
+ * JANGAN pakai `pollIntervalSeconds.default(n)`: preprocess-nya sudah mengubah
+ * undefined jadi 10 sebelum `.default()` sempat jalan, jadi angka bawaan yang
+ * ditulis di sebelahnya tidak pernah berlaku dan nilainya diam-diam jadi 10.
+ */
+const positiveIntWithDefault = (fallback: number) =>
+  z.preprocess(
+    (value) => {
+      if (value === undefined) return fallback;
+      if (typeof value === "string" && value.trim() === "") return fallback;
+      return value;
+    },
+    z.coerce.number().int().positive()
+  );
+
 const localPort = z.preprocess(
   (value) => {
     if (value === undefined) {
@@ -112,9 +129,13 @@ const envSchema = z.object({
   MACHITAN_ECOMMERCE_PICK_REQUEST_CHANNEL_ID: optionalString.default("1501899831268868106"),
   MACHITAN_ECOMMERCE_PICK_REQUEST_POLL_ENABLED: optionalBoolean,
   MACHITAN_ECOMMERCE_PICK_REQUEST_NOTIFY_EXISTING: optionalBoolean,
-  MACHITAN_ECOMMERCE_PICK_REQUEST_POLL_INTERVAL_SECONDS: pollIntervalSeconds.default(15),
-  MACHITAN_ECOMMERCE_PICK_REQUEST_POLL_LIMIT: pollIntervalSeconds.default(50),
+  MACHITAN_ECOMMERCE_PICK_REQUEST_POLL_INTERVAL_SECONDS: positiveIntWithDefault(15),
+  MACHITAN_ECOMMERCE_PICK_REQUEST_POLL_LIMIT: positiveIntWithDefault(50),
   MACHITAN_ECOMMERCE_PICK_REQUEST_SEEN_STORE_PATH: optionalString.default("data/machitan-ecommerce-pick-requests-seen.json"),
+  // Berapa lama pick e-commerce boleh belum ada buktinya sebelum dilaporkan.
+  // PDA menyimpan bukti yang gagal kirim dan mencoba lagi, jadi jangan terlalu
+  // pendek — laporan yang ternyata keburu terkirim sendiri cuma jadi berisik.
+  MACHITAN_ECOMMERCE_PICK_REQUEST_GRACE_MINUTES: positiveIntWithDefault(20),
   // Channel tujuan export Absen Arrival (RES/CONV xlsx). Default = channel machitan update.
   MACHITAN_ABSEN_CHANNEL_ID: optionalString.default("1501899831268868106"),
   // Bukti foto paket pickup toko diterima. Default di kode (bukan env server) —

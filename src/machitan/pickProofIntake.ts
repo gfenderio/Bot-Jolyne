@@ -6,6 +6,7 @@ import { isAuthorizedMachitanIntake } from "./intakeAuth.js";
 import { fitImageToLimit } from "./imageFit.js";
 import { fetchOrderNotes, joinOrderNotes } from "./orderNotes.js";
 import { orderLink } from "../services/kyouLinks.js";
+import { deriveProofKey, isPosted, markFailed, markPosted, markReceived, messageKey } from "./proofDelivery.js";
 
 const ECOM_PICK_PROOF_CHANNEL_ID = "1390221553333043200";
 const SHOPEE_MENTION = "<@804685637252939788>";
@@ -89,6 +90,10 @@ export async function handleMachitanPickProof(
     return sendJson(response, 401, { error: "Unauthorized", ok: false });
   }
 
+  // Dipegang di luar try supaya kegagalan tak terduga pun tercatat di buku
+  // pengiriman — tanpa itu, "yang mana yang hilang" cuma bisa dijawab dari log.
+  let failureKey: string | null = null;
+
   try {
     const bodyStr = await readRequestBody(request);
     const body = JSON.parse(bodyStr);
@@ -144,6 +149,33 @@ export async function handleMachitanPickProof(
     const actorName = String(isPackProof ? (body.packer ?? body.picker ?? "-") : (body.picker ?? body.packer ?? "-"));
     const picker = actorName;
     const titlePrefix = isPackProof ? (isBypass ? "📦 Pack Proof Bypass" : "📦 Pack Proof") : "📸 Pick Proof";
+
+    // Identitas kiriman, dipakai penyaring kembar. PDA menyimpan bukti yang gagal
+    // kirim lalu mengirimnya ulang; tanpa ini, kiriman yang sebenarnya sampai tapi
+    // jawabannya hilang akan diposting dua kali.
+    const proofItemIds: string[] = Array.isArray(body.items) && body.items.length > 0
+      ? body.items.map((item: any) => String(item?.itemId ?? item?.id ?? "-"))
+      : Array.isArray(body.itemIds)
+      ? body.itemIds.map((id: unknown) => String(id))
+      : [];
+    // Pasangan invoice+barang: dipakai pengawas bukti untuk menjawab
+    // "pick ini sudah ada buktinya belum" tanpa salah menjodohkan order.
+    const proofPairs: string[] = Array.isArray(body.items)
+      ? body.items.map((item: any, index: number) => {
+          const raw = item?.invoiceNumber ?? item?.invoice_number ?? item?.orderId
+            ?? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-";
+          return `${splitOrderDescription(raw).orderId}|${String(item?.itemId ?? item?.id ?? "-")}`;
+        })
+      : [];
+    const submitKey = deriveProofKey({
+      clientSubmitId: body.clientSubmitId ?? body.client_submit_id,
+      proofType,
+      picker,
+      submittedAt: body.submittedAt ?? body.submitted_at,
+      orderIds: cleanOrderIdsArr,
+      itemIds: proofItemIds
+    });
+    failureKey = submitKey;
     // Multi-foto: images[] (PDA ≥1.4.5), fallback imageBase64 tunggal (PDA lama).
     const imagesBase64: string[] = Array.isArray(body.images) && body.images.length > 0
       ? body.images.map(String).filter(Boolean)
@@ -217,6 +249,10 @@ export async function handleMachitanPickProof(
       return sendJson(response, 200, { message: "Pick log saved (no Discord embed)", ok: true, logOnly: true });
     }
 
+    // Dicatat SEBELUM diposting. Dulu bukti baru dicatat setelah Discord berhasil,
+    // jadi kiriman yang gagal tidak meninggalkan jejak apa pun di server.
+    await markReceived(submitKey, { proofType, orderIds: cleanOrderIdsArr, itemIds: proofItemIds, pairs: proofPairs });
+
     const requestedChannelId = body.channelId ?? body.channel_id ?? body.targetChannelId ?? body.target_channel_id;
     const targetChannelId = requestedChannelId ? String(requestedChannelId) : env.MACHITAN_PICK_PROOF_CHANNEL_ID;
     const itemSummary = Array.isArray(body.itemSummary)
@@ -258,7 +294,20 @@ export async function handleMachitanPickProof(
       }
 
       const imageBuffer = imageBuffers[0] ?? Buffer.alloc(0);
+      // Satu barang = satu pesan, jadi penandanya pun per barang. Kalau Discord
+      // menolak di barang ketiga, dua yang pertama tidak diposting ulang saat PDA
+      // mengirim ulang kirimannya.
+      const postedIndices = new Set<number>();
+      let postedExtraPhotos = false;
+      let skippedCount = 0;
+      const failures: string[] = [];
+
       for (const { item, index } of ecommerceRows) {
+        const rowKey = submitKey ? messageKey(submitKey, `item${index}`) : null;
+        if (await isPosted(rowKey)) {
+          skippedCount++;
+          continue;
+        }
         const rawOrderId = String(item?.invoiceNumber ?? item?.invoice_number ?? item?.orderId ?? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-");
         const { orderId, description } = splitOrderDescription(rawOrderId);
         const itemId = String(item?.itemId ?? item?.id ?? "-");
@@ -288,11 +337,26 @@ export async function handleMachitanPickProof(
         if (url) embed.setURL(url);
         if (body.submittedAt) embed.setFooter({ text: String(body.submittedAt) });
 
-        await channel.send({
-          content: mentionForEcommerce(channelName),
-          embeds: [embed],
-          files: [attachment]
-        });
+        try {
+          await channel.send({
+            content: mentionForEcommerce(channelName),
+            embeds: [embed],
+            files: [attachment]
+          });
+          await markPosted(rowKey, {
+            proofType,
+            orderIds: [orderId],
+            itemIds: [itemId],
+            pairs: [`${orderId}|${itemId}`]
+          });
+          postedIndices.add(index);
+        } catch (err) {
+          // Satu barang gagal tidak boleh membatalkan barang lain yang masih
+          // antre di kiriman yang sama.
+          await markFailed(rowKey, err);
+          failures.push(`#${orderId} item ${itemId}: ${err instanceof Error ? err.message : String(err)}`);
+          console.error(`Gagal posting bukti pick e-com #${orderId} item ${itemId}:`, err);
+        }
       }
 
       // Foto tambahan (multi-foto) cukup dikirim sekali, bukan diulang per item.
@@ -301,11 +365,33 @@ export async function handleMachitanPickProof(
           new AttachmentBuilder(buf, { name: `ecom_pick_proof_extra_${i + 2}.jpg` })
         );
         for (let i = 0; i < extraAttachments.length; i += 10) {
-          await channel.send({
-            content: i === 0 ? `📷 Foto tambahan (Order #${orderTitleStr})` : undefined,
-            files: extraAttachments.slice(i, i + 10)
-          });
+          const extraKey = submitKey ? messageKey(submitKey, `extra${i}`) : null;
+          if (await isPosted(extraKey)) continue;
+          try {
+            await channel.send({
+              content: i === 0 ? `📷 Foto tambahan (Order #${orderTitleStr})` : undefined,
+              files: extraAttachments.slice(i, i + 10)
+            });
+            await markPosted(extraKey, { proofType, orderIds: cleanOrderIdsArr, itemIds: proofItemIds, pairs: proofPairs });
+            postedExtraPhotos = true;
+          } catch (err) {
+            await markFailed(extraKey, err);
+            failures.push(`foto tambahan: ${err instanceof Error ? err.message : String(err)}`);
+            console.error("Gagal posting foto tambahan bukti pick e-com:", err);
+          }
         }
+      }
+
+      // Kiriman ulang yang semua barangnya sudah pernah masuk: jangan dicatat
+      // dua kali di laporan harian, dan jangan diposting ulang.
+      if (postedIndices.size === 0 && !postedExtraPhotos && failures.length === 0) {
+        return sendJson(response, 200, {
+          message: "E-commerce pick proof sudah pernah masuk Discord, tidak diposting ulang",
+          ok: true,
+          duplicate: true,
+          channelId: ECOM_PICK_PROOF_CHANNEL_ID,
+          skipped: skippedCount
+        });
       }
 
       // Save to local store for daily excel export
@@ -314,7 +400,9 @@ export async function handleMachitanPickProof(
         channelId: ECOM_PICK_PROOF_CHANNEL_ID,
         orderIds: Array.isArray(body.orderIds) ? body.orderIds.map(String) : [String(body.orderIds)],
         actor: picker,
-        items: ecommerceRows.map(({ item, index }: any) => {
+        // Hanya barang yang benar-benar masuk Discord kali ini — supaya kiriman
+        // ulang tidak menghitung barang yang sama dua kali di laporan harian.
+        items: ecommerceRows.filter(({ index }: any) => postedIndices.has(index)).map(({ item, index }: any) => {
            const rawOrderId = String(item?.invoiceNumber ?? item?.invoice_number ?? item?.orderId ?? (Array.isArray(body.orderIds) ? body.orderIds[index] : body.orderIds) ?? "-");
            const { orderId, description } = splitOrderDescription(rawOrderId);
            return {
@@ -335,11 +423,24 @@ export async function handleMachitanPickProof(
         proofType: String(body.proofType ?? body.type ?? "ECOM_PHYSICAL_PICK_PROOF"),
       }).catch(err => console.error("Failed to save e-com proof to store", err));
 
+      // Ada yang gagal → jawab gagal supaya PDA menahan kirimannya dan mencoba
+      // lagi. Yang sudah masuk tidak akan diposting ulang (penyaring kembar).
+      if (failures.length > 0) {
+        return sendJson(response, 502, {
+          error: `Sebagian bukti gagal masuk Discord: ${failures.slice(0, 3).join("; ")}`,
+          ok: false,
+          channelId: ECOM_PICK_PROOF_CHANNEL_ID,
+          posted: postedIndices.size,
+          failed: failures.length
+        });
+      }
+
       return sendJson(response, 200, {
         message: "E-commerce pick proof received and sent to Discord",
         ok: true,
         channelId: ECOM_PICK_PROOF_CHANNEL_ID,
-        count: ecommerceRows.length
+        count: postedIndices.size,
+        skipped: skippedCount
       });
     }
 
@@ -409,13 +510,39 @@ export async function handleMachitanPickProof(
     for (let i = 0; i < attachments.length; i += 10) {
       fileChunks.push(attachments.slice(i, i + 10));
     }
-    await channel.send({
-      content: mentionContent ? mentionContent : undefined,
-      embeds: [embed],
-      files: fileChunks[0]
-    });
+
+    // Pesan utama dan tiap rombongan foto tambahan punya penanda sendiri: kalau
+    // pesan utama sudah masuk tapi foto tambahannya belum, kiriman ulang cuma
+    // melanjutkan sisanya — bukan memposting ulang embed yang sudah ada.
+    const mainKey = submitKey ? messageKey(submitKey, "main") : null;
+    const proofMeta = { proofType, orderIds: cleanOrderIdsArr, itemIds: proofItemIds, pairs: proofPairs };
+    let postedAnything = false;
+
+    if (!(await isPosted(mainKey))) {
+      await channel.send({
+        content: mentionContent ? mentionContent : undefined,
+        embeds: [embed],
+        files: fileChunks[0]
+      });
+      await markPosted(mainKey, proofMeta);
+      postedAnything = true;
+    }
+
     for (let i = 1; i < fileChunks.length; i++) {
+      const chunkKey = submitKey ? messageKey(submitKey, `chunk${i}`) : null;
+      if (await isPosted(chunkKey)) continue;
       await channel.send({ files: fileChunks[i] });
+      await markPosted(chunkKey, proofMeta);
+      postedAnything = true;
+    }
+
+    if (!postedAnything) {
+      return sendJson(response, 200, {
+        message: "Proof sudah pernah masuk Discord, tidak diposting ulang",
+        ok: true,
+        duplicate: true,
+        channelId: targetChannelId
+      });
     }
 
     // Save to local store for daily excel export
@@ -466,6 +593,7 @@ export async function handleMachitanPickProof(
     sendJson(response, 200, { message: "Photo received and sent to Discord", ok: true, channelId: targetChannelId });
   } catch (error) {
     console.error("Machitan Pick Proof Intake Error:", error);
+    await markFailed(failureKey, error);
     if (error instanceof PayloadTooLargeError) {
       return sendJson(response, 413, { error: error.message, ok: false });
     }
