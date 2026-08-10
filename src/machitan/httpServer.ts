@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { Client } from "discord.js";
 import { env } from "../config/env.js";
 import { handleMachitanPickProof } from "./pickProofIntake.js";
+import { handleMachitanShipping } from "./shippingIntake.js";
 import { handleWsInboxIntake } from "./wsInboxIntake.js";
 import { handleAbsenRequest } from "./absenIntake.js";
 import { handleMachitanPickupProof } from "./pickupProofIntake.js";
@@ -51,6 +52,21 @@ export function startMachitanHttpServer(client: Client<true>) {
         console.error("Gagal memproses Machitan pickup-proof", error);
         if (!response.headersSent) {
           sendJson(response, 500, { ok: false, error: "Internal server error handling pickup proof" });
+        }
+      });
+      return;
+    }
+
+    // Bukti kirim dari layar Shipping Out. Handler-nya (shippingIntake.ts) sudah
+    // lama ada tapi TIDAK PERNAH dipasang di sini, jadi setiap kiriman dari PDA
+    // dijawab 404 "Not found" — orang gudang melihatnya sebagai "gagal kirim"
+    // setelah datanya terlanjur dibereskan di server. Diverifikasi 10 Agu 2026:
+    // /machitan/pick-proof menjawab 400 (hidup), /machitan/shipping 404 (mati).
+    if (pathname === "/machitan/shipping") {
+      handleMachitanShipping(request, response, client).catch((error) => {
+        console.error("Gagal memproses Machitan shipping", error);
+        if (!response.headersSent) {
+          sendJson(response, 500, { ok: false, error: "Internal server error handling shipping proof" });
         }
       });
       return;
