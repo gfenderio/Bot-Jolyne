@@ -4,6 +4,7 @@ import { env } from "../config/env.js";
 import { handleMachitanPickProof } from "./pickProofIntake.js";
 import { handleMachitanShipping } from "./shippingIntake.js";
 import { handleWsInboxIntake } from "./wsInboxIntake.js";
+import { handleOpnameKorSweepIntake } from "./opnameKorSweepIntake.js";
 import { handleAbsenRequest } from "./absenIntake.js";
 import { handleMachitanPickupProof } from "./pickupProofIntake.js";
 import { handleArrivalProof } from "./arrivalProofIntake.js";
@@ -77,6 +78,16 @@ export function startMachitanHttpServer(client: Client<true>) {
         console.error("Gagal memproses Machitan WS inbox", error);
         if (!response.headersSent) {
           sendJson(response, 500, { ok: false, error: "Internal server error handling WS Inbox request" });
+        }
+      });
+      return;
+    }
+
+    if (pathname === "/machitan/opname-kor-sweep") {
+      handleOpnameKorSweepIntake(request, response, client).catch((error) => {
+        console.error("Gagal memproses laporan sapuan KOR opname", error);
+        if (!response.headersSent) {
+          sendJson(response, 500, { ok: false, error: "Internal server error handling opname KOR sweep" });
         }
       });
       return;
