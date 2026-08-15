@@ -48,10 +48,28 @@ type SweptItem = {
   counted_at?: string | null;
 };
 
+/**
+ * Kelebihan hitungan yang belum dijelaskan. Ini TIDAK pernah disapu — menambah
+ * stok dari nol bukan wewenang lantai gudang — jadi baris di sini murni laporan
+ * supaya ada yang memutuskan, bukan catatan sesuatu yang sudah terjadi.
+ */
+type SurplusItem = {
+  item_id?: string;
+  item_name?: string | null;
+  source?: string;
+  system_stock?: number;
+  counted_stock?: number;
+  surplus?: number;
+  kor_tersedia?: number;
+  admin_name?: string | null;
+  counted_at?: string | null;
+};
+
 export function buildOpnameKorSweepWorkbook(
   items: SweptItem[],
   needsHuman: string[],
   sweptAt: string,
+  surplus: SurplusItem[] = [],
 ): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook();
 
@@ -95,6 +113,41 @@ export function buildOpnameKorSweepWorkbook(
     for (const note of needsHuman) manual.addRow({ note });
   }
 
+  if (surplus.length > 0) {
+    const lebih = workbook.addWorksheet("Kelebihan Belum Dijelaskan");
+    lebih.columns = [
+      { header: "Item ID", key: "itemId", width: 12 },
+      { header: "Nama Barang", key: "name", width: 46 },
+      { header: "Gudang", key: "source", width: 14 },
+      { header: "Stok Sistem", key: "system", width: 13 },
+      { header: "Hasil Hitung", key: "counted", width: 13 },
+      { header: "Lebih", key: "surplus", width: 10 },
+      // Pembeda yang menentukan tindakannya: kalau KOR ada isinya, kelebihan ini
+      // sebenarnya bisa ditutup lewat PDA dan cuma terlewat. Kalau nol, barangnya
+      // memang tidak tercatat di mana pun — itu tidak bisa diselesaikan dengan
+      // transfer, harus diputuskan orang.
+      { header: "Isi KOR", key: "kor", width: 10 },
+      { header: "Dihitung Oleh", key: "by", width: 22 },
+      { header: "Waktu Hitung", key: "at", width: 20 },
+    ];
+    lebih.getRow(1).font = { bold: true };
+    lebih.views = [{ state: "frozen", ySplit: 1 }];
+
+    for (const it of surplus) {
+      lebih.addRow({
+        itemId: it.item_id ?? "-",
+        name: it.item_name ?? "-",
+        source: it.source ?? "-",
+        system: Number(it.system_stock ?? 0),
+        counted: Number(it.counted_stock ?? 0),
+        surplus: Number(it.surplus ?? 0),
+        kor: Number(it.kor_tersedia ?? 0),
+        by: it.admin_name ?? "-",
+        at: it.counted_at ?? "-",
+      });
+    }
+  }
+
   const info = workbook.addWorksheet("Info");
   info.columns = [
     { header: "Keterangan", key: "k", width: 28 },
@@ -105,6 +158,7 @@ export function buildOpnameKorSweepWorkbook(
   info.addRow({ k: "Barang masuk KOR", v: items.length });
   info.addRow({ k: "Total unit", v: items.reduce((sum, it) => sum + Number(it.qty_to_kor ?? 0), 0) });
   info.addRow({ k: "Perlu diputuskan manusia", v: needsHuman.length });
+  info.addRow({ k: "Kelebihan belum dijelaskan", v: surplus.length });
 
   return workbook;
 }
@@ -125,17 +179,18 @@ export async function handleOpnameKorSweepIntake(
 
     const items: SweptItem[] = Array.isArray(body.items) ? body.items : [];
     const needsHuman: string[] = Array.isArray(body.needs_human) ? body.needs_human.map(String) : [];
+    const surplus: SurplusItem[] = Array.isArray(body.surplus) ? body.surplus : [];
     const sweptAt = String(body.swept_at ?? new Date().toISOString());
     const totalUnits = Number(body.total_units ?? items.reduce((s, it) => s + Number(it.qty_to_kor ?? 0), 0));
 
     // Sapuan yang tidak menemukan apa-apa TIDAK dilaporkan. Lampiran kosong tiap
     // malam melatih orang mengabaikan laporan ini, dan yang penting justru malam
     // ketika isinya tidak kosong.
-    if (items.length === 0 && needsHuman.length === 0) {
+    if (items.length === 0 && needsHuman.length === 0 && surplus.length === 0) {
       return sendJson(response, 200, { message: "Tidak ada yang dilaporkan", ok: true });
     }
 
-    const workbook = buildOpnameKorSweepWorkbook(items, needsHuman, sweptAt);
+    const workbook = buildOpnameKorSweepWorkbook(items, needsHuman, sweptAt, surplus);
     const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
 
     const tanggal = sweptAt.slice(0, 10);
@@ -149,6 +204,9 @@ export async function handleOpnameKorSweepIntake(
           `**${items.length}** barang, **${totalUnits}** unit dipindah ke kantong KOR gudangnya.`,
           needsHuman.length > 0
             ? `**${needsHuman.length}** barang perlu diputuskan manusia — unit hilangnya ada di kantong reservasi oripa, jadi tidak disentuh.`
+            : null,
+          surplus.length > 0
+            ? `**${surplus.length}** kelebihan hitungan belum dijelaskan — dilaporkan saja, stoknya tidak ditambah.`
             : null,
         ]
           .filter(Boolean)
