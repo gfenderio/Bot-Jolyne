@@ -174,8 +174,13 @@ const envSchema = z.object({
   ORIPA_LIVE_STORE_PATH: optionalString.default("data/oripa-live-sessions.json"),
   ORIPA_LIVE_RECAP_USER_IDS: optionalStringList.default(["419213146209779713"]),
   GEMINI_API_KEY: optionalString,
-  BAITO_REXY_USER_ID: optionalString.default("593313231137931264"),
-  BAITO_AZIS_USER_ID: optionalString.default("286790867329613824"),
+  // Daftar baito yang dikirimi form absensi tiap pagi. Isi lewat .env dipisah
+  // koma kalau ada orang baru, supaya tidak perlu ubah kode lagi.
+  BAITO_USER_IDS: optionalStringList.default([
+    "593313231137931264", // Rexy
+    "286790867329613824", // Azis
+    "915811508561272894"  // Farel
+  ]),
   BAITO_ATTENDANCE_CHANNEL_ID: optionalString.default("1457554536934936769"),
   // Digest harian "order belum diproses > N hari" di fulfillment kyou.id.
   FULFILLMENT_STALE_ENABLED: optionalBoolean,

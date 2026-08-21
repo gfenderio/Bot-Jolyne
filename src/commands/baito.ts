@@ -6,9 +6,8 @@ import type { SlashCommand } from "../types/command.js";
 
 const ALLOWED_USERS = [
   "419213146209779713", // ID Anda
-  env.BAITO_REXY_USER_ID,
-  env.BAITO_AZIS_USER_ID
-].filter(Boolean) as string[];
+  ...(env.BAITO_USER_IDS ?? [])
+];
 
 export const command: SlashCommand = {
   data: new SlashCommandBuilder()

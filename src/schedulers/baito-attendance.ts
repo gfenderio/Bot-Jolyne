@@ -9,7 +9,7 @@ import {
 } from "discord.js";
 import { env } from "../config/env.js";
 
-const baitoIds = [env.BAITO_REXY_USER_ID, env.BAITO_AZIS_USER_ID].filter(Boolean) as string[];
+const baitoIds = env.BAITO_USER_IDS ?? [];
 
 export async function sendBaitoAttendanceForm(client: Client, userId: string) {
   const user = await client.users.fetch(userId).catch(() => null);
@@ -54,7 +54,7 @@ async function hasAttendedTodayViaChannel(client: Client, userId: string): Promi
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel || !channel.isTextBased() || !('messages' in channel)) return false;
 
-  const messages = await (channel as TextChannel).messages.fetch({ limit: 20 });
+  const messages = await (channel as TextChannel).messages.fetch({ limit: 50 });
 
   const nowJakarta = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }));
   const todayStr = `${nowJakarta.getFullYear()}-${String(nowJakarta.getMonth() + 1).padStart(2, "0")}-${String(nowJakarta.getDate()).padStart(2, "0")}`;
@@ -81,9 +81,12 @@ export function startBaitoAttendanceScheduler(client: Client) {
     }
   }, { timezone: "Asia/Jakarta" });
 
-  // Reminder: setiap 30 menit mulai dari 09:30
+  // Reminder: setiap 30 menit mulai 09:30, berhenti di 11:30.
   cron.schedule("30 9 * * 1-6", () => sendReminders(client), { timezone: "Asia/Jakarta" });
-  cron.schedule("0,30 10-17 * * 1-6", () => sendReminders(client), { timezone: "Asia/Jakarta" });
+  cron.schedule("0,30 10-11 * * 1-6", () => sendReminders(client), { timezone: "Asia/Jakarta" });
+
+  // Jam 12:00 batas terakhir: yang belum isi diumumkan ke channel absensi.
+  cron.schedule("0 12 * * 1-6", () => reportNoResponse(client), { timezone: "Asia/Jakarta" });
 }
 
 async function sendReminders(client: Client) {
@@ -98,3 +101,38 @@ async function sendReminders(client: Client) {
   }
 }
 
+/**
+ * Jam 12:00 WIB: kirim satu embed berisi siapa saja yang sampai batas waktu
+ * belum mengisi form. Kalau semua sudah isi, tidak ada yang dikirim.
+ *
+ * Embed ini sengaja TANPA footer "UID: ..." supaya tidak ikut terbaca sebagai
+ * bukti kehadiran oleh hasAttendedTodayViaChannel().
+ */
+async function reportNoResponse(client: Client) {
+  const channelId = env.BAITO_ATTENDANCE_CHANNEL_ID;
+  if (!channelId) return;
+
+  const belumIsi: string[] = [];
+  for (const userId of baitoIds) {
+    const alreadySubmitted = await hasAttendedTodayViaChannel(client, userId).catch(() => false);
+    if (!alreadySubmitted) belumIsi.push(userId);
+  }
+
+  if (belumIsi.length === 0) return;
+
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel || !channel.isTextBased() || !("send" in channel)) return;
+
+  const embed = new EmbedBuilder()
+    .setTitle("⏰ Tidak Ada Respons Absensi")
+    .setDescription(
+      "Sampai batas waktu **12:00 WIB** orang berikut belum mengisi form kehadiran:\n\n" +
+      belumIsi.map(id => `• <@${id}>`).join("\n")
+    )
+    .setColor(0xffa500)
+    .setTimestamp();
+
+  await (channel as TextChannel).send({ embeds: [embed] }).catch(err =>
+    console.error("Gagal kirim laporan absensi tidak ada respons", err)
+  );
+}
