@@ -19,6 +19,13 @@ import {
   TRIAGE_SELECT_PREFIX,
   TRIAGE_MODAL_PREFIX
 } from "../handlers/pickTriage.js";
+import {
+  handleCostumeLoanButton,
+  handleCostumeLoanRejectModal,
+  COSTUME_APPROVE_PREFIX,
+  COSTUME_REJECT_PREFIX,
+  COSTUME_REJECT_MODAL_PREFIX
+} from "../forms/costumeLoanDecision.js";
 
 /**
  * Handler triase dibungkus: kalau melempar, Discord tidak pernah dijawab dan
@@ -56,6 +63,11 @@ export async function handleInteractionCreate(interaction: Interaction) {
   if (interaction.isModalSubmit()) {
     if (interaction.customId.startsWith(TRIAGE_MODAL_PREFIX)) {
       await runTriage(interaction, () => handlePickTriageModal(interaction));
+      return;
+    }
+
+    if (interaction.customId.startsWith(COSTUME_REJECT_MODAL_PREFIX)) {
+      await handleCostumeLoanRejectModal(interaction);
       return;
     }
 
@@ -100,6 +112,14 @@ export async function handleInteractionCreate(interaction: Interaction) {
   if (interaction.isButton()) {
     if (interaction.customId === "baito_btn_in" || interaction.customId === "baito_btn_out") {
       await handleBaitoButton(interaction);
+      return;
+    }
+
+    if (
+      interaction.customId.startsWith(COSTUME_APPROVE_PREFIX) ||
+      interaction.customId.startsWith(COSTUME_REJECT_PREFIX)
+    ) {
+      await handleCostumeLoanButton(interaction);
       return;
     }
     // Deliveree buttons removed

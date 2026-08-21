@@ -3,6 +3,7 @@ import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Client, EmbedBuilder, TextChannel } from "discord.js";
 import { env } from "../config/env.js";
+import { decisionButtons } from "./costumeLoanDecision.js";
 
 /**
  * POST /forms/costume-loan — pengajuan pinjam costume staf Kyou.
@@ -234,7 +235,10 @@ export async function handleCostumeLoanIntake(
     return;
   }
 
-  await (channel as TextChannel).send({ embeds: [buildCostumeLoanEmbed(answers, responseId)] });
+  await (channel as TextChannel).send({
+    embeds: [buildCostumeLoanEmbed(answers, responseId)],
+    components: [decisionButtons(responseId)]
+  });
   if (responseId) rememberSeen(responseId);
 
   console.log(`[costume-loan] pengajuan diposting${responseId ? ` (${responseId})` : ""}.`);
