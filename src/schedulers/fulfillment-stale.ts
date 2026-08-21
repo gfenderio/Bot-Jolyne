@@ -45,6 +45,12 @@ const MAX_FIELD_CHARS = 1000; // batas aman < 1024 (limit Discord)
 // yang paling lama saja + ringkasan sisanya, sekaligus jaga limit embed
 // (max 25 field / 6000 char).
 const MAX_ORDERS_SHOWN = 40;
+// Discord menolak seluruh pesan kalau embed lewat 6000 karakter atau 25 field.
+// 40 baris order saja sudah bisa tembus 6000, jadi jumlah yang ditampilkan
+// dikecilkan otomatis sampai muat — lebih baik daftarnya terpotong daripada
+// digest-nya gagal terkirim justru saat order nyangkutnya banyak.
+const MAX_EMBED_CHARS = 5800; // sisakan ruang aman dari limit 6000
+const MAX_EMBED_FIELDS = 25;
 
 function metabaseConfig(): MetabaseConfig | null {
   if (!env.METABASE_URL || !env.METABASE_EMAIL || !env.METABASE_PASSWORD) {
@@ -150,10 +156,23 @@ function chunkLines(lines: string[]): string[] {
   return chunks;
 }
 
-export function buildDigestEmbed(
+/** Ukuran embed menurut hitungan Discord: judul + deskripsi + footer + semua field. */
+function embedSize(embed: EmbedBuilder): number {
+  const data = embed.data;
+  const fields = data.fields ?? [];
+  return (
+    (data.title?.length ?? 0) +
+    (data.description?.length ?? 0) +
+    (data.footer?.text?.length ?? 0) +
+    fields.reduce((total, f) => total + f.name.length + f.value.length, 0)
+  );
+}
+
+function buildDigestEmbedWithLimit(
   orders: StaleOrder[],
   thresholdDays: number,
-  maxDays: number
+  maxDays: number,
+  ordersShown: number
 ): EmbedBuilder {
   const jakartaNow = new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });
   const window = `${thresholdDays}-${maxDays} hari`;
@@ -168,7 +187,7 @@ export function buildDigestEmbed(
 
   // Urut paling lama dulu, lalu batasi jumlah yang ditampilkan.
   const sorted = [...orders].sort((a, b) => b.days - a.days);
-  const shown = sorted.slice(0, MAX_ORDERS_SHOWN);
+  const shown = sorted.slice(0, ordersShown);
   const overflow = orders.length - shown.length;
 
   const embed = new EmbedBuilder()
@@ -192,6 +211,30 @@ export function buildDigestEmbed(
         : `${meta.emoji} ${meta.label} (lanjutan)`;
       embed.addFields({ name, value: chunk });
     });
+  }
+
+  return embed;
+}
+
+/**
+ * Bangun embed digest, kecilkan daftarnya kalau kepanjangan buat Discord.
+ * Baris tiap order panjangnya berbeda-beda (nama barang, user, kurir), jadi
+ * batas amannya tidak bisa ditebak dari jumlah order — dicoba lalu dikurangi.
+ */
+export function buildDigestEmbed(
+  orders: StaleOrder[],
+  thresholdDays: number,
+  maxDays: number
+): EmbedBuilder {
+  let ordersShown = Math.min(MAX_ORDERS_SHOWN, orders.length);
+  let embed = buildDigestEmbedWithLimit(orders, thresholdDays, maxDays, ordersShown);
+
+  while (
+    ordersShown > 1 &&
+    (embedSize(embed) > MAX_EMBED_CHARS || (embed.data.fields?.length ?? 0) > MAX_EMBED_FIELDS)
+  ) {
+    ordersShown -= 1;
+    embed = buildDigestEmbedWithLimit(orders, thresholdDays, maxDays, ordersShown);
   }
 
   return embed;
