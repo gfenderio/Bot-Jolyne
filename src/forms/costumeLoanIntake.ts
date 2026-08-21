@@ -122,7 +122,7 @@ export function buildCostumeLoanEmbed(answers: NormalizedAnswer[], responseId: s
 
   const nama = known.get("Nama") || "Tanpa nama";
   const embed = new EmbedBuilder()
-    .setTitle(`👗 Pinjam Costume — ${truncate(nama, 200)}`)
+    .setTitle(`🎭 Pinjam Costume — ${truncate(nama, 200)}`)
     .setColor(EMBED_COLOR)
     .setTimestamp();
 

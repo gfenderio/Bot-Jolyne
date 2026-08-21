@@ -5,7 +5,7 @@ import { buildDecidedEmbed, decisionButtons } from "./costumeLoanDecision.js";
 
 function pengajuan() {
   return new EmbedBuilder()
-    .setTitle("👗 Pinjam Costume — Gilang")
+    .setTitle("🎭 Pinjam Costume — Gilang")
     .addFields(
       { name: "Divisi", value: "Ops Div - Tech & OPTR Div", inline: true },
       { name: "Tanggal pinjam", value: "28/08/2026", inline: true }
@@ -38,7 +38,7 @@ test("ditolak: alasannya ikut tercatat di embed", () => {
 
 test("isi pengajuan aslinya tidak hilang setelah diputuskan", () => {
   const embed = buildDecidedEmbed(pengajuan(), { disetujui: true, olehId: "1", alasan: null });
-  assert.equal(embed.data.title, "👗 Pinjam Costume — Gilang");
+  assert.equal(embed.data.title, "🎭 Pinjam Costume — Gilang");
   assert.equal(nilai(embed, "Divisi"), "Ops Div - Tech & OPTR Div");
   assert.equal(nilai(embed, "Tanggal pinjam"), "28/08/2026");
   assert.equal(embed.data.footer?.text, "ID tanggapan: row-2");
