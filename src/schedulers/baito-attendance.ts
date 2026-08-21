@@ -28,7 +28,15 @@ export async function sendBaitoAttendanceForm(client: Client, userId: string) {
     )
     .setColor(0x2b2d31);
 
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+  await user.send({ embeds: [embed], components: [attendanceButtons()] });
+}
+
+/**
+ * Tombol jawaban absensi. Dipakai form pagi DAN pengingat, dengan customId yang
+ * sama supaya penanganannya cuma satu (lihat handlers/baitoAttendance.ts).
+ */
+function attendanceButtons() {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId("baito_btn_in")
       .setLabel("Masuk")
@@ -38,8 +46,6 @@ export async function sendBaitoAttendanceForm(client: Client, userId: string) {
       .setLabel("Tidak Masuk")
       .setStyle(ButtonStyle.Danger)
   );
-
-  await user.send({ embeds: [embed], components: [row] });
 }
 
 /**
@@ -89,13 +95,23 @@ export function startBaitoAttendanceScheduler(client: Client) {
   cron.schedule("0 12 * * 1-6", () => reportNoResponse(client), { timezone: "Asia/Jakarta" });
 }
 
+/**
+ * Pengingat membawa tombolnya sendiri, bukan menyuruh "cek form di atas".
+ * Form pagi cuma dikirim sekali jam 09:00, jadi siapa pun yang belum punya
+ * form di DM-nya — baito yang baru ditambahkan tengah hari, atau semua orang
+ * kalau bot kebetulan redeploy setelah jam 09:00 — tetap bisa absen langsung
+ * dari pengingat ini.
+ */
 async function sendReminders(client: Client) {
   for (const userId of baitoIds) {
     const alreadySubmitted = await hasAttendedTodayViaChannel(client, userId);
     if (!alreadySubmitted) {
       const user = await client.users.fetch(userId).catch(() => null);
       if (user) {
-        await user.send("⚠️ **Ping!** Kamu belum isi kehadiran hari ini loh, yuk isi sekarang! Cek form di atas ya.").catch(() => null);
+        await user.send({
+          content: "⚠️ **Ping!** Kamu belum isi kehadiran hari ini loh, yuk isi sekarang lewat tombol di bawah.",
+          components: [attendanceButtons()]
+        }).catch(() => null);
       }
     }
   }
