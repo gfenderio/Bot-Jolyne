@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Client } from "discord.js";
+import { handleCostumeLoanIntake } from "../forms/costumeLoanIntake.js";
 import { env } from "../config/env.js";
 import { handleMachitanPickProof } from "./pickProofIntake.js";
 import { handleMachitanShipping } from "./shippingIntake.js";
@@ -88,6 +89,19 @@ export function startMachitanHttpServer(client: Client<true>) {
         console.error("Gagal memproses laporan sapuan KOR opname", error);
         if (!response.headersSent) {
           sendJson(response, 500, { ok: false, error: "Internal server error handling opname KOR sweep" });
+        }
+      });
+      return;
+    }
+
+    // Pengajuan pinjam costume dari Google Form (lewat Apps Script di
+    // spreadsheet tanggapan). Bukan machitan, tapi menumpang server HTTP yang
+    // sama supaya tidak ada port kedua yang harus dibuka.
+    if (pathname === "/forms/costume-loan") {
+      handleCostumeLoanIntake(request, response, client).catch((error) => {
+        console.error("Gagal memproses pengajuan pinjam costume", error);
+        if (!response.headersSent) {
+          sendJson(response, 500, { ok: false, error: "Internal server error handling costume loan" });
         }
       });
       return;

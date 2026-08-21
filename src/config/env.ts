@@ -182,6 +182,11 @@ const envSchema = z.object({
     "915811508561272894"  // Farel
   ]),
   BAITO_ATTENDANCE_CHANNEL_ID: optionalString.default("1457554536934936769"),
+  // Pengajuan pinjam costume staf Kyou: Google Form -> Apps Script -> bot.
+  // Tokennya sendiri, TIDAK menumpang MACHITAN_INTAKE_TOKENS — token PDA gudang
+  // tidak perlu ikut tertanam di script yang bisa dilihat editor spreadsheet.
+  COSTUME_LOAN_CHANNEL_ID: optionalString.default("1540207172074606623"),
+  COSTUME_LOAN_INTAKE_TOKEN: optionalString,
   // Digest harian "order belum diproses > N hari" di fulfillment kyou.id.
   FULFILLMENT_STALE_ENABLED: optionalBoolean,
   // Kirim digest sekali langsung saat bot start (selain jadwal harian 09:00).
