@@ -28,6 +28,20 @@ const REQUEST_TIMEOUT_MS = 5000;
 const MAX_ORDER_IDS = 50;
 
 /**
+ * TIDAK DIPANGGIL SIAPA PUN HARI INI — sengaja, dan sengaja tidak dihapus.
+ *
+ * Rutenya (`/admin/pda/orders/notes`) tidak pernah naik ke produksi; ia masih
+ * duduk di branch hanayo `fix/pack-proof-order-notes`. Selama itu, memanggilnya
+ * dari bukti pick cuma menghasilkan 404 dan satu baris error per order, lalu
+ * jatuh ke catatan kiriman PDA — hasil yang sama persis, dengan log yang penuh.
+ * Jadi pemanggilannya dilepas di pickProofIntake.ts.
+ *
+ * Berkas ini ditinggalkan utuh karena yang kurang cuma rutenya: begitu branch
+ * hanayo itu naik, menghidupkannya kembali satu baris import. Tesnya ikut
+ * dipertahankan supaya bentuk jawabannya tetap terjaga sampai saat itu.
+ */
+
+/**
  * Catatan pembeli & admin diambil langsung dari kyou.id saat proof mau diposting,
  * bukan dari salinan yang dititipkan PDA. PDA memotret catatan saat order di-scan,
  * jadi catatan yang admin tulis setelah itu tidak pernah ikut. Order e-commerce

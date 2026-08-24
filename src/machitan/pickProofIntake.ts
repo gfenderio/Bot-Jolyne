@@ -4,7 +4,6 @@ import { env } from "../config/env.js";
 import { addMachitanProof } from "./proofStore.js";
 import { isAuthorizedMachitanIntake } from "./intakeAuth.js";
 import { fitImageToLimit } from "./imageFit.js";
-import { fetchOrderNotes, joinOrderNotes } from "./orderNotes.js";
 import { orderLink } from "../services/kyouLinks.js";
 import { deriveProofKey, isPosted, markFailed, markPosted, markReceived, messageKey } from "./proofDelivery.js";
 
@@ -119,18 +118,26 @@ export async function handleMachitanPickProof(
     const orderFieldStr = orderIdsStr.length > 1000
       ? `${orderCount} order:\n${orderIdsStr.slice(0, 980)}…`
       : orderIdsStr;
-    // Catatan diambil ulang dari kyou.id supaya yang tampil selalu terbaru. PDA cuma
-    // dipakai sebagai cadangan: PDA lama (<= v1.4.0) tidak mengirim catatan sama sekali,
-    // dan order e-commerce tidak ada di tabel orders. body.notes SENGAJA tidak dipakai
-    // sebagai cadangan — itu catatan yang diketik packer, bukan catatan pembeli.
-    const notesLookup = await fetchOrderNotes(cleanOrderIdsArr);
-    const userNotesRaw = notesLookup.authoritative
-      ? joinOrderNotes(cleanOrderIdsArr, (n) => n.userNotes, notesLookup)
-      : body.userNotes ?? body.user_notes;
+    /* Catatan dipakai APA ADANYA dari kiriman PDA.
+     *
+     * Sebelumnya bukti pick lebih dulu menanyakan catatan terbaru ke kyou.id,
+     * supaya catatan yang ditulis admin SESUDAH barang di-scan ikut tampil.
+     * Rutenya tidak pernah naik ke produksi — masih duduk di branch hanayo
+     * `fix/pack-proof-order-notes` — jadi tiap bukti pick memanggil alamat yang
+     * menjawab 404, mencatat error di log, lalu jatuh ke catatan PDA yang
+     * sekarang dipakai langsung. Delapan baris error per rombongan bukti untuk
+     * hasil yang sama persis.
+     *
+     * Bedanya cuma satu keadaan: catatan yang diubah admin di sela scan dan
+     * posting tidak ikut. Kalau nanti jeda itu terasa, yang dihidupkan lagi
+     * bukan panggilan ini — melainkan rutenya di hanayo lebih dulu.
+     *
+     * body.notes SENGAJA tidak dipakai sebagai cadangan: itu catatan yang
+     * diketik packer, bukan catatan pembeli, dan ia punya kolomnya sendiri di
+     * bawah. */
+    const userNotesRaw = body.userNotes ?? body.user_notes;
     const userNotes = userNotesRaw ? String(userNotesRaw) : "-";
-    const adminNotesRaw = notesLookup.authoritative
-      ? joinOrderNotes(cleanOrderIdsArr, (n) => n.adminNotes, notesLookup)
-      : body.adminNotes ?? body.admin_notes;
+    const adminNotesRaw = body.adminNotes ?? body.admin_notes;
     const adminNotes = adminNotesRaw ? String(adminNotesRaw) : "-";
     // Catatan yang diketik packer/picker di PDA. Dulu bocor ke kolom "User Notes"
     // lewat fallback, sekarang punya kolom sendiri supaya tidak hilang.
