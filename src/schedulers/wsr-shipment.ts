@@ -59,6 +59,28 @@ interface ShipmentItem {
   error: string;
 }
 
+/*
+DUA JALAN MENGERJAKAN, dan pesannya harus menyebut dua-duanya.
+
+Sampai Agustus 2026 kiriman ini cuma bisa dikerjakan dari PDA, jadi pengumumannya
+menulis "semuanya di PDA". Sekarang layar Kiriman ada juga di team.kyou.id, dan
+ia membaca tabel `wsr_batches` yang SAMA — yang dicentang di satu sisi langsung
+terlihat di sisi lain. Pesan yang cuma menyebut PDA menyuruh orang yang sedang
+duduk di depan komputer mengambil HP untuk pekerjaan yang ada di layarnya.
+
+Alamatnya ditulis utuh, bukan "buka team.kyou.id lalu cari sendiri": yang membaca
+pesan ini sedang berdiri di depan rak, bukan sedang menjelajah menu. Dibungkus
+kurung siku supaya Discord tidak menempelkan pratinjau tautan di tiap pengumuman.
+
+NAMA YANG DIBACA ORANG "Stock Rotation", bukan "WSR" (permintaan Gilang, 26 Agu
+2026). Kode kirimannya sendiri TETAP `WSR-UNIT-ID`: itu penanda yang sama persis
+dipakai PDA, team.kyou.id, dan kolom Batch tiket gudang — menggantinya berarti
+dua nama untuk satu kiriman, dan yang mencarinya di dua layar tidak menemukan
+apa-apa.
+*/
+const WEB_NAMA = "team.kyou.id";
+const WEB_GUDANG = "<https://team.kyou.id/warehouse/rotasi-stok>";
+
 /** Arah internal → kalimat yang dimengerti orang gudang. */
 const ARAH: Record<string, string> = {
   request: "Gudang → Toko (isi toko)",
@@ -282,17 +304,18 @@ function openingEmbed(shipment: ShipmentRow, items: ShipmentItem[]): EmbedBuilde
   const sudahBeres = shipment.status === "done" || shipment.status === "cancelled";
   return new EmbedBuilder()
     .setColor(sudahBeres ? 0x9e9e9e : 0x00897b)
-    .setTitle(`📦 ${code} — Kiriman WSR #${shipment.id}${sudahBeres ? " (sudah dikerjakan)" : ""}`)
+    .setTitle(`📦 ${code} — Stock Rotation #${shipment.id}${sudahBeres ? " (sudah dikerjakan)" : ""}`)
     .setDescription(
       `${ARAH[shipment.direction] ?? shipment.direction}\n\n` +
         `**${shipment.totalItems} barang · ${shipment.totalQty} pcs**\n${rincian}\n\n` +
         `Diminta oleh **${shipment.createdBy}** dari **${shipment.unit}**.\n\n` +
-        `**Cara mengerjakan — semuanya di PDA, tidak perlu tiket:**\n` +
-        `1. Buka menu **Kiriman**, cari **${code}**.\n` +
-        `2. Siapkan barangnya sesuai daftar **di PDA** — sudah urut rak dan selalu kondisi terbaru. **Centang** tiap barang yang sudah diambil dari rak.\n` +
+        `**Cara mengerjakan — di PDA atau di ${WEB_NAMA}, tidak perlu tiket:**\n` +
+        `1. Buka menu **Kiriman**, cari **${code}**. Di web: ${WEB_GUDANG}\n` +
+        `2. Siapkan barangnya sesuai daftarnya — sudah urut rak dan selalu kondisi terbaru. **Centang** tiap barang yang sudah diambil dari rak.\n` +
         `3. Tekan **Pindahkan N barang** — yang berpindah HANYA yang kamu centang; sisanya tetap menunggu di kiriman ini.\n\n` +
         `Stok **belum** berpindah sampai langkah 3. Siapa yang mencentang dan siapa ` +
-        `yang memindahkan tercatat otomatis.`
+        `yang memindahkan tercatat otomatis.\n` +
+        `PDA dan web membaca kiriman yang SAMA — dicentang di satu sisi langsung terlihat di sisi lain.`
     )
     .setFooter({ text: `Dibuat ${shipment.createdAt} WIB` })
     .setTimestamp();
@@ -312,8 +335,9 @@ function reminderEmbed(shipment: ShipmentRow, jam: number): EmbedBuilder {
         `stoknya masih belum berpindah.\n\n` +
         `${shipment.totalItems} barang · ${shipment.totalQty} pcs · ` +
         `${ARAH[shipment.direction] ?? shipment.direction}\n\n` +
-        `Buka menu **Kiriman** di PDA. Kalau barangnya memang tidak bisa dikirim, ` +
-        `batalkan kirimannya dari sana biar tidak menggantung.`
+        `Buka menu **Kiriman** — di PDA, atau di ${WEB_NAMA}: ${WEB_GUDANG}\n` +
+        `Kalau barangnya memang tidak bisa dikirim, batalkan kirimannya dari sana ` +
+        `biar tidak menggantung.`
     )
     .setFooter({ text: `Dibuat ${shipment.createdAt} WIB` })
     .setTimestamp();
