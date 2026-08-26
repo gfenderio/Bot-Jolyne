@@ -301,21 +301,48 @@ function openingEmbed(shipment: ShipmentRow, items: ShipmentItem[]): EmbedBuilde
   const rincian = [...perTujuan.entries()].map(([t, q]) => `**${t}** ${q} pcs`).join(" · ");
 
   const code = shipmentCode(shipment);
-  const sudahBeres = shipment.status === "done" || shipment.status === "cancelled";
-  return new EmbedBuilder()
-    .setColor(sudahBeres ? 0x9e9e9e : 0x00897b)
-    .setTitle(`📦 ${code} — Stock Rotation #${shipment.id}${sudahBeres ? " (sudah dikerjakan)" : ""}`)
-    .setDescription(
-      `${ARAH[shipment.direction] ?? shipment.direction}\n\n` +
-        `**${shipment.totalItems} barang · ${shipment.totalQty} pcs**\n${rincian}\n\n` +
-        `Diminta oleh **${shipment.createdBy}** dari **${shipment.unit}**.\n\n` +
-        `**Cara mengerjakan — di PDA atau di ${WEB_NAMA}, tidak perlu tiket:**\n` +
+  /*
+    TIGA KEADAAN, BUKAN DUA — dan bedanya bukan soal rapi.
+
+    Kiriman yang saat diumumkan sudah selesai (atau dibatalkan) tetap dikabarkan,
+    biar ada jejak "kiriman ini pernah dibuat". Tapi isinya dulu sama persis
+    dengan kiriman yang menunggu: tiga langkah cara mengerjakan, lengkap dengan
+    "Stok belum berpindah sampai langkah 3" — kalimat yang JUSTRU TERBALIK untuk
+    kiriman yang stoknya sudah pindah. Orang gudang yang membacanya berangkat ke
+    rak untuk pekerjaan yang sudah tidak ada.
+
+    Dan "dibatalkan" dipisah dari "sudah dikerjakan": dua-duanya berarti tidak
+    ada yang perlu disiapkan, tapi yang satu barangnya sampai dan yang satu
+    tidak. Menyebut kiriman batal sebagai "sudah dikerjakan" itu salah kabar,
+    bukan singkatan.
+  */
+  const dibatalkan = shipment.status === "cancelled";
+  const sudahBeres = shipment.status === "done" || dibatalkan;
+  const penutup = dibatalkan
+    ? `Kiriman ini **dibatalkan** — tidak ada yang perlu disiapkan. Diumumkan ` +
+      `supaya ada jejak bahwa kirimannya pernah dibuat.`
+    : sudahBeres
+      ? `Kiriman ini **sudah dikerjakan** — stoknya sudah berpindah, tidak ada ` +
+        `yang perlu disiapkan lagi. Rinciannya di menu **Kiriman**, di PDA atau ` +
+        `di ${WEB_NAMA}: ${WEB_GUDANG}`
+      : `**Cara mengerjakan — di PDA atau di ${WEB_NAMA}, tidak perlu tiket:**\n` +
         `1. Buka menu **Kiriman**, cari **${code}**. Di web: ${WEB_GUDANG}\n` +
         `2. Siapkan barangnya sesuai daftarnya — sudah urut rak dan selalu kondisi terbaru. **Centang** tiap barang yang sudah diambil dari rak.\n` +
         `3. Tekan **Pindahkan N barang** — yang berpindah HANYA yang kamu centang; sisanya tetap menunggu di kiriman ini.\n\n` +
         `Stok **belum** berpindah sampai langkah 3. Siapa yang mencentang dan siapa ` +
         `yang memindahkan tercatat otomatis.\n` +
-        `PDA dan web membaca kiriman yang SAMA — dicentang di satu sisi langsung terlihat di sisi lain.`
+        `PDA dan web membaca kiriman yang SAMA — dicentang di satu sisi langsung terlihat di sisi lain.`;
+  return new EmbedBuilder()
+    .setColor(sudahBeres ? 0x9e9e9e : 0x00897b)
+    .setTitle(
+      `📦 ${code} — Stock Rotation #${shipment.id}` +
+        (dibatalkan ? " (dibatalkan)" : sudahBeres ? " (sudah dikerjakan)" : "")
+    )
+    .setDescription(
+      `${ARAH[shipment.direction] ?? shipment.direction}\n\n` +
+        `**${shipment.totalItems} barang · ${shipment.totalQty} pcs**\n${rincian}\n\n` +
+        `Diminta oleh **${shipment.createdBy}** dari **${shipment.unit}**.\n\n` +
+        penutup
     )
     .setFooter({ text: `Dibuat ${shipment.createdAt} WIB` })
     .setTimestamp();
