@@ -110,9 +110,30 @@ const batchSelect = `
  * Yang menentukan perlu-tidaknya orang di-tag adalah status kiriman SAAT
  * diumumkan, bukan apakah dia masuk daftar ini (lihat pemanggilnya).
  */
-const newShipmentsQuery = (sejakId: number) => `
+/*
+WATERMARK BUKAN LAGI SATU-SATUNYA PENJAGA, dan itu memperbaiki lubang yang sudah
+menelan pengumuman.
+
+Store watermark hidup di berkas biasa tanpa volume persisten (lihat
+wsrShipmentStore.ts): tiap redeploy ia hilang, lalu dipatok ulang ke id
+TERTINGGI saat itu supaya riwayat lama tidak diblast. Konsekuensinya yang tidak
+disadari: kiriman yang dibuat tepat sebelum redeploy — atau selagi bot mati —
+ikut terlewat, DIAM-DIAM dan selamanya. Tidak ada error, tidak ada log; cuma
+channel yang sepi.
+
+Terjadi 26 Agu 2026: WSR-ALPHA-9 dan -10 ada di wsr_batches berstatus pending,
+tapi pesan terakhir di channel tanggal 19 Agustus.
+
+Sekarang daftar calonnya = yang lebih baru dari watermark ATAU yang dibuat dalam
+`jamTengok` terakhir. Yang menjaga supaya tidak dobel bukan watermark, melainkan
+ISI CHANNEL ITU SENDIRI: kode kiriman yang sudah pernah diumumkan dibaca dari
+pesan yang ada di sana (lihat kodeSudahDiumumkan). Watermark tetap dipakai —
+ia yang membuat putaran biasa tidak perlu menyisir apa pun — tapi kehilangannya
+tidak lagi berarti kehilangan pengumuman.
+*/
+const newShipmentsQuery = (sejakId: number, batasWib: string) => `
   ${batchSelect}
-  WHERE b.id > ${sejakId}
+  WHERE b.id > ${sejakId} OR b.created_at >= '${batasWib}'
   ORDER BY b.id ASC
 `;
 
@@ -137,6 +158,39 @@ const staleShipmentsQuery = (batasWib: string) => `
 `;
 
 /** "YYYY-MM-DD HH:MM:SS" WIB, sekian jam ke belakang dari sekarang. */
+/**
+ * Kode kiriman yang pengumumannya SUDAH ada di channel.
+ *
+ * Dibaca dari pesan yang benar-benar terkirim, bukan dari catatan kita sendiri —
+ * dan itu seluruh gunanya: catatan bisa hilang saat redeploy, pesan di Discord
+ * tidak. Yang dihitung hanya embed pembuka (judulnya diawali 📦); laporan
+ * "selesai" dan pengingat memuat kode yang sama tapi bukan pengumuman, dan
+ * menghitungnya berarti kiriman yang keburu dikerjakan tidak pernah diumumkan.
+ *
+ * Seratus pesan terakhir sudah lebih dari cukup: channel ini isinya beberapa
+ * pesan per kiriman, dan jendela tengoknya cuma dua hari.
+ */
+async function kodeSudahDiumumkan(channel: TextChannel): Promise<Set<string>> {
+  const out = new Set<string>();
+  try {
+    const pesan = await channel.messages.fetch({ limit: 100 });
+    for (const m of pesan.values()) {
+      for (const e of m.embeds) {
+        const judul = e.title ?? "";
+        if (!judul.startsWith("📦 ")) continue;
+        const kode = judul.slice(2).trim().split(/\s+/)[0];
+        if (kode) out.add(kode);
+      }
+    }
+  } catch (err) {
+    // Gagal membaca channel BUKAN alasan untuk diam: yang terburuk dari
+    // melanjutkan adalah satu pengumuman dobel, sedangkan berhenti berarti
+    // kiriman yang tidak pernah sampai ke gudang.
+    console.error("[wsr-shipment] gagal membaca pesan channel — lanjut tanpa pengecekan dobel:", err);
+  }
+  return out;
+}
+
 function batasWaktuWib(jam: number): string {
   const wib = new Date(Date.now() - jam * 3_600_000 + 7 * 3_600_000);
   return wib.toISOString().slice(0, 19).replace("T", " ");
@@ -419,9 +473,23 @@ export async function runWsrShipmentCheck(client: Client): Promise<void> {
     return;
   }
 
-  if (maxId > sejakId) {
-    const res = await fetchNativeQueryWithPagination(config, newShipmentsQuery(sejakId));
-    const shipments = rowsToShipments(res.columns, res.rows);
+  {
+    /*
+      Dijalankan SETIAP putaran, bukan cuma waktu maxId > watermark.
+
+      Syarat lama itu masuk akal selama watermark dipercaya penuh; sekarang yang
+      dicari justru kiriman yang watermark-nya sudah telanjur melewati mereka —
+      dan untuk kiriman begitu maxId TIDAK pernah lebih besar dari watermark.
+      Ongkosnya satu query sempit tiap lima menit.
+    */
+    const res = await fetchNativeQueryWithPagination(
+      config,
+      newShipmentsQuery(sejakId, batasWaktuWib(env.WSR_SHIPMENT_LOOKBACK_HOURS))
+    );
+    const sudah = await kodeSudahDiumumkan(channel);
+    const shipments = rowsToShipments(res.columns, res.rows).filter(
+      (s) => !sudah.has(shipmentCode(s))
+    );
     if (shipments.length === 0) {
       setWatermark(maxId);
     } else {

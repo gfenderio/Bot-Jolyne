@@ -287,6 +287,15 @@ const envSchema = z.object({
   WSR_SHIPMENT_MENTION_GAMMA_LAMBDA_ID: optionalString.default("1224581529854939138"),
 
   // Pengingat susulan sekali untuk kiriman yang masih menggantung sekian jam.
+  /**
+   * Seberapa jauh ke belakang poller menengok tiap putaran, di luar watermark.
+   *
+   * Ini jaring pengaman untuk watermark yang hilang saat redeploy — bukan
+   * pengganti watermark. Dua hari cukup untuk menutup akhir pekan dan deploy
+   * beruntun, dan cukup pendek supaya kiriman lama tidak pernah terbawa. Yang
+   * menjaga tidak dobel isi channelnya sendiri, bukan angka ini.
+   */
+  WSR_SHIPMENT_LOOKBACK_HOURS: z.coerce.number().int().min(1).max(168).default(48),
   WSR_SHIPMENT_REMINDER_HOURS: z.coerce.number().int().min(1).max(168).default(24),
 
   // Catatan "barang mana yang sudah disiapkan gudang, oleh siapa" — lihat
