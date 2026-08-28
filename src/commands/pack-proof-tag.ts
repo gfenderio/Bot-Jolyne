@@ -69,7 +69,9 @@ export const command: SlashCommand = {
     // Dari yang paling lama, supaya urutan balasannya mengikuti urutan kartunya.
     for (const msg of [...messages.values()].reverse()) {
       const embed = msg.embeds[0];
-      if (!embed?.title?.startsWith("Pack Proof")) continue;
+      // Judulnya beremoji ("📦 Pack Proof: Order #..."), jadi cocokkan isinya,
+      // bukan awalannya — startsWith tidak pernah kena satu kartu pun.
+      if (!embed?.title?.includes("Pack Proof")) continue;
       if (msg.content.includes("<@")) continue;
       if (sudahDibalas.has(msg.id)) continue;
 
