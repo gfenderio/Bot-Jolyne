@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, ChannelType, type TextChannel } from "discord.js";
+import { SlashCommandBuilder, ChannelType, Collection, type Message, type TextChannel } from "discord.js";
 import type { SlashCommand } from "../types/command.js";
 import {
   inferEcommerceChannel,
@@ -52,7 +52,19 @@ export const command: SlashCommand = {
       return;
     }
 
-    const messages = await (channel as TextChannel).messages.fetch({ limit });
+    // Discord memulangkan MAKSIMAL 100 pesan sekali ambil; minta 200 langsung
+    // ditolak sebagai bentuk permintaan yang salah. Jadi diambil bertahap.
+    const messages = new Collection<string, Message>();
+    let before: string | undefined;
+    while (messages.size < limit) {
+      const batch = await (channel as TextChannel).messages.fetch({
+        limit: Math.min(100, limit - messages.size),
+        before,
+      });
+      if (batch.size === 0) break;
+      for (const [id, m] of batch) messages.set(id, m);
+      before = batch.last()?.id;
+    }
 
     // Kartu yang sudah pernah dibalas — entah oleh perintah ini sebelumnya atau
     // oleh orang — tidak ditandai lagi. Menandai dua kali bukan cuma berisik:
