@@ -18,7 +18,27 @@ function isEcommerceProofItem(item: any) {
   return origin.includes("e-com") || origin.includes("ecommerce") || origin.includes("outside");
 }
 
-function inferEcommerceChannel(orderId: string, item: any) {
+/**
+ * Order ini milik marketplace atau bukan, DILIHAT DARI NOMORNYA SAJA.
+ *
+ * Dipakai waktu daftar item tidak ada — persis keadaan kiriman ulang dari PDA,
+ * yang mengirim kartu tanpa rincian item sama sekali. Tanpa ini kartunya lolos
+ * tanpa menandai siapa pun, dan petugas e-commerce tidak pernah tahu ada
+ * paketnya yang sudah dipacking.
+ *
+ * Order internal kyou.id itu angka pendek (mis. 347419) dan sengaja TIDAK
+ * dianggap e-commerce: menandai orang untuk order yang bukan urusannya lebih
+ * buruk daripada tidak menandai sama sekali.
+ */
+export function looksLikeEcommerceOrderId(orderId: string) {
+  const clean = String(orderId ?? "").trim().replace(/^#/, "");
+  if (!clean || clean === "-") return false;
+  if (/[a-z]/i.test(clean)) return true;
+  const digits = clean.match(/\d+/)?.[0] ?? "";
+  return digits.length >= 12;
+}
+
+export function inferEcommerceChannel(orderId: string, item: any) {
   const explicit = String(item?.channel ?? item?.ecommerce ?? item?.marketplace ?? "").toLowerCase();
   if (explicit.includes("shopee")) return "Shopee";
   if (explicit.includes("tokopedia") || explicit.includes("toped")) return "Tokopedia";
@@ -30,7 +50,7 @@ function inferEcommerceChannel(orderId: string, item: any) {
   return "Shopee";
 }
 
-function mentionForEcommerce(channel: string) {
+export function mentionForEcommerce(channel: string) {
   const normalized = channel.toLowerCase();
   if (normalized.includes("shopee")) return SHOPEE_MENTION;
   if (normalized.includes("tokopedia") || normalized.includes("toped")) return TOKOPEDIA_MENTION;
@@ -505,11 +525,16 @@ export async function handleMachitanPickProof(
     }
 
     let mentionContent = "";
-    if (isPackProof && ecommerceRows.length > 0) {
-      const ecomItem = ecommerceRows[0].item;
+    if (isPackProof) {
+      const ecomItem = ecommerceRows[0]?.item ?? null;
       const orderId = String(ecomItem?.invoiceNumber ?? ecomItem?.invoice_number ?? ecomItem?.orderId ?? (Array.isArray(body.orderIds) ? body.orderIds[0] : body.orderIds) ?? "-");
-      const channelName = inferEcommerceChannel(orderId, ecomItem);
-      mentionContent = mentionForEcommerce(channelName);
+
+      // Daftar item KOSONG bukan berarti bukan order e-commerce — kiriman ulang
+      // dari PDA memang tidak membawa rinciannya. Nomor ordernya masih ada, dan
+      // itu cukup untuk tahu ini Shopee atau Tokopedia.
+      if (ecomItem || looksLikeEcommerceOrderId(orderId)) {
+        mentionContent = mentionForEcommerce(inferEcommerceChannel(orderId, ecomItem));
+      }
     }
 
     // Discord max 10 file per pesan — chunk kalau lebih (jaga-jaga).

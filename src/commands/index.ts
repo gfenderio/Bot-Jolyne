@@ -7,6 +7,7 @@ import { command as whoami } from "./whoami.js";
 import { command as task } from "./task.js";
 import { command as opname } from "./opname.js";
 import { command as baito } from "./baito.js";
+import { command as packProofTag } from "./pack-proof-tag.js";
 import { command as oripaLive } from "./oripa-live.js";
 import { command as oripaLiveRecap } from "./oripa-live-recap.js";
 
@@ -21,6 +22,7 @@ for (const command of [
   task,
   opname,
   baito,
+  packProofTag,
   oripaLive,
   oripaLiveRecap
 ]) {
