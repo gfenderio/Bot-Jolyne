@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { EmbedBuilder, type Client, type Message, type TextChannel } from "discord.js";
 import { isAuthorizedMachitanIntake } from "./intakeAuth.js";
 import { findProofMessage } from "./proofDelivery.js";
-import { inferEcommerceChannel, mentionForEcommerce } from "./pickProofIntake.js";
+import { mentionForEcommerce } from "./pickProofIntake.js";
 import { orderLink } from "../services/kyouLinks.js";
 
 /**
@@ -182,8 +182,16 @@ export async function handleMachitanPickCancel(
     // Admin marketplace yang bersangkutan ikut dipanggil, sama seperti kartu
     // picknya. Yang perlu tahu barang batal diambil justru orang yang sama
     // dengan yang tadi diberi tahu barangnya sudah diambil.
-    const marketplace = String(body.channel ?? "") || inferEcommerceChannel(orderId, body);
-    const mention = mentionForEcommerce(marketplace) || undefined;
+    //
+    // TIDAK ADA TEBAKAN DI SINI, dan itu disengaja. inferEcommerceChannel()
+    // yang dipakai jalur pick JATUH KE "Shopee" kalau tidak ada petunjuk —
+    // aman di sana karena ia cuma dipanggil untuk baris yang sudah pasti
+    // e-commerce. Di jalur batal, yang masuk bisa pick reguler, B2B, atau
+    // UREQ, dan tebakan itu akan memanggil admin Shopee untuk barang yang
+    // tidak ada hubungannya dengan Shopee. Salah panggil orang lebih buruk
+    // daripada tidak memanggil siapa-siapa, jadi tanpa keterangan channel
+    // dari PDA, kartunya dikirim tanpa mention.
+    const mention = mentionForEcommerce(String(body.channel ?? "")) || undefined;
 
     // Dua jalur mencari kartu aslinya: catatan messageId dulu (murah), lalu
     // sisir riwayat channel (mahal tapi tidak bergantung pada `data/` yang
