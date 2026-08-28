@@ -203,7 +203,13 @@ export async function handleOpnameKorSweepIntake(
           `Sapuan **${sweptAt}**`,
           `**${items.length}** barang, **${totalUnits}** unit dipindah ke kantong KOR gudangnya.`,
           needsHuman.length > 0
-            ? `**${needsHuman.length}** barang perlu diputuskan manusia — unit hilangnya ada di kantong reservasi oripa, jadi tidak disentuh.`
+            // Sebabnya TIDAK diketahui di sini. Yang diperiksa hanayo cuma
+            // "kekurangan lebih besar dari isi baris gudang" — bisa karena
+            // sisanya duduk di kantong reservasi oripa, bisa juga karena stok
+            // bergerak antara saat dihitung dan saat disapu jam 2 pagi.
+            // Menyebut satu sebab untuk semuanya membuat orang mencari ke
+            // tempat yang salah; alasan per barang ada di berkas Excel-nya.
+            ? `**${needsHuman.length}** barang tidak disapu — kekurangannya lebih besar dari isi baris gudangnya. Rinciannya di berkas.`
             : null,
           surplus.length > 0
             ? `**${surplus.length}** kelebihan hitungan belum dijelaskan — dilaporkan saja, stoknya tidak ditambah.`
