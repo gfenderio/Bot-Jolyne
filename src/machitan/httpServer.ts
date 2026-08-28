@@ -3,6 +3,7 @@ import type { Client } from "discord.js";
 import { handleCostumeLoanIntake } from "../forms/costumeLoanIntake.js";
 import { env } from "../config/env.js";
 import { handleMachitanPickProof } from "./pickProofIntake.js";
+import { handleMachitanPickCancel } from "./pickCancelIntake.js";
 import { handleMachitanShipping } from "./shippingIntake.js";
 import { handleWsInboxIntake } from "./wsInboxIntake.js";
 import { handleOpnameKorSweepIntake } from "./opnameKorSweepIntake.js";
@@ -44,6 +45,19 @@ export function startMachitanHttpServer(client: Client<true>) {
         console.error("Gagal memproses Machitan pick-proof", error);
         if (!response.headersSent) {
           sendJson(response, 500, { ok: false, error: "Internal server error handling Machitan request" });
+        }
+      });
+      return;
+    }
+
+    // Batal pick dari PDA. Kartunya MEMBALAS kartu pick aslinya kalau catatan
+    // pesannya masih ada; kalau tidak, dikirim berdiri sendiri. Lihat
+    // pickCancelIntake.ts soal kenapa dibalas, bukan dihapus.
+    if (pathname === "/machitan/pick-cancel") {
+      handleMachitanPickCancel(request, response, client).catch((error) => {
+        console.error("Gagal memproses Machitan pick-cancel", error);
+        if (!response.headersSent) {
+          sendJson(response, 500, { ok: false, error: "Internal server error handling pick cancel" });
         }
       });
       return;

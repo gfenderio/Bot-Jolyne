@@ -28,6 +28,18 @@ export type ProofDeliveryRecord = {
   receivedAt: string;
   postedAt: string | null;
   error?: string;
+  /**
+   * Pesan Discord hasil posting bukti ini. Disimpan supaya kartu BATAL PICK
+   * bisa membalas kartu aslinya, bukan berdiri sendiri di tengah channel —
+   * kartu batal yang tidak bertaut membuat orang yang menemukan kartu hijau
+   * lama tetap mengira barangnya sudah diambil.
+   *
+   * Boleh kosong, dan itu keadaan normal: catatan ini tinggal di `data/` yang
+   * hilang tiap redeploy, dan retensinya cuma 14 hari. Yang membaca WAJIB
+   * punya jalan lain kalau tidak ketemu — lihat pickCancelIntake.
+   */
+  channelId?: string;
+  messageId?: string;
 };
 
 const STORE_PATH = path.join(process.cwd(), "data", "machitan-proof-delivery.json");
@@ -125,6 +137,8 @@ export type ProofDeliveryMeta = {
   orderIds: string[];
   itemIds: string[];
   pairs?: string[];
+  channelId?: string;
+  messageId?: string;
 };
 
 export function markReceived(key: string | null, meta: ProofDeliveryMeta): Promise<void> {
@@ -164,6 +178,8 @@ export function markPosted(key: string | null, meta?: ProofDeliveryMeta): Promis
       orderIds: meta?.orderIds ?? existing?.orderIds ?? [],
       itemIds: meta?.itemIds ?? existing?.itemIds ?? [],
       pairs: meta?.pairs ?? existing?.pairs,
+      channelId: meta?.channelId ?? existing?.channelId,
+      messageId: meta?.messageId ?? existing?.messageId,
       receivedAt: existing?.receivedAt ?? new Date().toISOString(),
       postedAt: new Date().toISOString()
     });
@@ -217,6 +233,38 @@ export async function hasProofFor(invoiceNumber: string, itemId: string): Promis
     if (record.orderIds.includes(invoice) && record.itemIds.includes(item)) return true;
   }
   return false;
+}
+
+/**
+ * Pesan Discord milik satu pasangan invoice|item, kalau catatannya masih ada.
+ *
+ * Dipakai kartu BATAL PICK untuk membalas kartu aslinya. Memulangkan null itu
+ * hasil yang WAJAR, bukan galat: catatan ini tinggal di `data/` yang hilang tiap
+ * kali bot di-redeploy, dan umurnya dipangkas 14 hari. Pemanggil harus tetap
+ * bisa bekerja tanpa jawabannya.
+ */
+export async function findProofMessage(
+  invoiceNumber: string,
+  itemId: string,
+): Promise<{ channelId: string; messageId: string } | null> {
+  const invoice = invoiceNumber.trim();
+  const item = itemId.trim();
+  if (!invoice || !item) return null;
+
+  const map = await load();
+  const pair = `${invoice}|${item}`;
+  // Yang TERBARU dipakai kalau satu barang pernah dipick lebih dari sekali:
+  // yang dibatalkan orang selalu pick terakhirnya, bukan yang berbulan lalu.
+  let best: ProofDeliveryRecord | null = null;
+  for (const record of map.values()) {
+    if (!record.postedAt || !record.messageId || !record.channelId) continue;
+    const cocok = record.pairs?.length
+      ? record.pairs.includes(pair)
+      : record.orderIds.includes(invoice) && record.itemIds.includes(item);
+    if (!cocok) continue;
+    if (!best || record.postedAt > best.postedAt!) best = record;
+  }
+  return best ? { channelId: best.channelId!, messageId: best.messageId! } : null;
 }
 
 /** Buang catatan lama supaya berkasnya tidak tumbuh selamanya. */

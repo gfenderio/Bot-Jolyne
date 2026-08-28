@@ -365,7 +365,9 @@ export async function handleMachitanPickProof(
         if (body.submittedAt) embed.setFooter({ text: String(body.submittedAt) });
 
         try {
-          await channel.send({
+          // Pesannya disimpan, bukan dibuang: kartu BATAL PICK nanti membalas
+          // pesan INI supaya kedua kartu bertaut. Lihat findProofMessage().
+          const sent = await channel.send({
             content: mentionForEcommerce(channelName),
             embeds: [embed],
             files: [attachment]
@@ -374,7 +376,9 @@ export async function handleMachitanPickProof(
             proofType,
             orderIds: [orderId],
             itemIds: [itemId],
-            pairs: [`${orderId}|${itemId}`]
+            pairs: [`${orderId}|${itemId}`],
+            channelId: sent.channelId,
+            messageId: sent.id
           });
           postedIndices.add(index);
         } catch (err) {
