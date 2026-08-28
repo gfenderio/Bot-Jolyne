@@ -1,7 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { EmbedBuilder, type Client, type TextChannel } from "discord.js";
+import { EmbedBuilder, type Client, type Message, type TextChannel } from "discord.js";
 import { isAuthorizedMachitanIntake } from "./intakeAuth.js";
 import { findProofMessage } from "./proofDelivery.js";
+import { inferEcommerceChannel, mentionForEcommerce } from "./pickProofIntake.js";
 import { orderLink } from "../services/kyouLinks.js";
 
 /**
@@ -57,6 +58,67 @@ function jeda(pickedAtIso: string | undefined, cancelledAt: Date): string | null
   const jam = Math.floor(menit / 60);
   const sisaMenit = menit % 60;
   return sisaMenit === 0 ? `${jam} jam` : `${jam} jam ${sisaMenit} menit`;
+}
+
+/** Order id dari field embed, yang isinya bisa berupa markdown link. */
+function orderIdDariField(value: string): string {
+  const link = value.match(/^\[([^\]]+)\]/);
+  return (link ? link[1] : value).trim().replace(/^#/, "");
+}
+
+const SISIR_MAKS = 300;
+
+/**
+ * Cari kartu pick aslinya dengan menyisir riwayat channel.
+ *
+ * JALUR CADANGAN, dan bukan cadangan yang jarang terpakai: catatan messageId
+ * tinggal di `data/` yang HILANG tiap kali bot di-redeploy, dan kartu yang
+ * diposting sebelum fitur ini ada tidak pernah punya catatannya sama sekali.
+ * Tanpa sisiran ini, hampir semua kartu batal akan berdiri sendiri — persis
+ * keadaan yang mau dihilangkan.
+ *
+ * Dicocokkan lewat DUA kolom sekaligus, Order ID dan Items. Order ID saja tidak
+ * cukup: satu order marketplace bisa berisi beberapa barang, dan tiap barang
+ * punya kartunya sendiri — membalas yang pertama ketemu berarti menuduh barang
+ * yang salah.
+ *
+ * Discord memulangkan maksimal 100 pesan sekali ambil, jadi diambil bertahap.
+ */
+async function sisirKartuPick(
+  channel: TextChannel,
+  orderId: string,
+  itemId: string,
+): Promise<Message | null> {
+  if (!orderId || orderId === "-" || !itemId || itemId === "-") return null;
+
+  let before: string | undefined;
+  let terbaca = 0;
+  while (terbaca < SISIR_MAKS) {
+    const batch = await channel.messages.fetch({
+      limit: Math.min(100, SISIR_MAKS - terbaca),
+      before,
+    });
+    if (batch.size === 0) return null;
+    terbaca += batch.size;
+    before = batch.last()?.id;
+
+    for (const pesan of batch.values()) {
+      const embed = pesan.embeds[0];
+      if (!embed) continue;
+      // Kartu batal juga memuat kedua kolom itu — melewatinya supaya
+      // pembatalan kedua tidak membalas pembatalan pertama.
+      if (embed.title?.startsWith("BATAL PICK")) continue;
+
+      const kolomOrder = embed.fields.find((f) => f.name === "Order ID");
+      if (!kolomOrder || orderIdDariField(kolomOrder.value) !== orderId) continue;
+
+      const kolomItem = embed.fields.find((f) => f.name === "Items");
+      if (!kolomItem || !kolomItem.value.includes(`Item: #${itemId}`)) continue;
+
+      return pesan;
+    }
+  }
+  return null;
 }
 
 export async function handleMachitanPickCancel(
@@ -117,26 +179,51 @@ export async function handleMachitanPickCancel(
     // keterangan, bukan data yang perlu disalin orang.
     if (selisih) embed.setFooter({ text: `Dipick lalu dibatalkan berselang ${selisih}` });
 
-    const asal = await findProofMessage(orderId, itemId);
-    let tertaut = false;
+    // Admin marketplace yang bersangkutan ikut dipanggil, sama seperti kartu
+    // picknya. Yang perlu tahu barang batal diambil justru orang yang sama
+    // dengan yang tadi diberi tahu barangnya sudah diambil.
+    const marketplace = String(body.channel ?? "") || inferEcommerceChannel(orderId, body);
+    const mention = mentionForEcommerce(marketplace) || undefined;
 
-    if (asal) {
+    // Dua jalur mencari kartu aslinya: catatan messageId dulu (murah), lalu
+    // sisir riwayat channel (mahal tapi tidak bergantung pada `data/` yang
+    // hilang tiap redeploy).
+    let asalPesan: Message | null = null;
+
+    const tercatat = await findProofMessage(orderId, itemId);
+    if (tercatat) {
       try {
-        const asalChannel = await client.channels.fetch(asal.channelId);
+        const asalChannel = await client.channels.fetch(tercatat.channelId);
         if (asalChannel?.isTextBased()) {
-          const pesan = await (asalChannel as TextChannel).messages.fetch(asal.messageId);
-          await pesan.reply({ embeds: [embed] });
-          tertaut = true;
+          asalPesan = await (asalChannel as TextChannel).messages.fetch(tercatat.messageId);
         }
+      } catch (err) {
+        console.warn(`Kartu pick #${orderId} item ${itemId} tidak terbaca dari catatan:`, err);
+      }
+    }
+
+    if (!asalPesan) {
+      try {
+        asalPesan = await sisirKartuPick(channel as TextChannel, orderId, itemId);
+      } catch (err) {
+        console.warn(`Sisiran kartu pick #${orderId} item ${itemId} gagal:`, err);
+      }
+    }
+
+    let tertaut = false;
+    if (asalPesan) {
+      try {
+        await asalPesan.reply({ content: mention, embeds: [embed] });
+        tertaut = true;
       } catch (err) {
         // Pesannya sudah dihapus orang, atau bot kehilangan aksesnya. Bukan
         // alasan menahan kabarnya — jatuh ke kartu berdiri sendiri di bawah.
-        console.warn(`Kartu pick asal #${orderId} item ${itemId} tidak bisa dibalas:`, err);
+        console.warn(`Kartu pick #${orderId} item ${itemId} tidak bisa dibalas:`, err);
       }
     }
 
     if (!tertaut) {
-      await (channel as TextChannel).send({ embeds: [embed] });
+      await (channel as TextChannel).send({ content: mention, embeds: [embed] });
     }
 
     return sendJson(response, 200, { ok: true, linked: tertaut });
