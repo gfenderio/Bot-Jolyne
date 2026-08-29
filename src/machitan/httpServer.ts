@@ -6,6 +6,7 @@ import { handleMachitanPickProof } from "./pickProofIntake.js";
 import { handleMachitanPickCancel } from "./pickCancelIntake.js";
 import { handleMachitanShipping } from "./shippingIntake.js";
 import { handleWsInboxIntake } from "./wsInboxIntake.js";
+import { handleWsrShipmentPush } from "./wsrShipmentIntake.js";
 import { handleOpnameKorSweepIntake } from "./opnameKorSweepIntake.js";
 import { handleAbsenRequest } from "./absenIntake.js";
 import { handleMachitanPickupProof } from "./pickupProofIntake.js";
@@ -93,6 +94,19 @@ export function startMachitanHttpServer(client: Client<true>) {
         console.error("Gagal memproses Machitan WS inbox", error);
         if (!response.headersSent) {
           sendJson(response, 500, { ok: false, error: "Internal server error handling WS Inbox request" });
+        }
+      });
+      return;
+    }
+
+    // Kiriman Rotasi Stok yang baru dibuat dari team.kyou.id. Bukan machitan,
+    // tapi menumpang server yang sama — lihat wsrShipmentIntake.ts soal kenapa
+    // didorong, padahal pollernya sudah ada.
+    if (pathname === "/kakera/wsr-shipment") {
+      handleWsrShipmentPush(request, response, client).catch((error) => {
+        console.error("Gagal mengumumkan kiriman WSR dorongan kakera", error);
+        if (!response.headersSent) {
+          sendJson(response, 500, { ok: false, error: "Internal server error handling WSR shipment push" });
         }
       });
       return;

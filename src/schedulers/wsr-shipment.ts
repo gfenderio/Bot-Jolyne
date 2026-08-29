@@ -503,6 +503,68 @@ async function laporkanSelesai(config: MetabaseConfig, channel: TextChannel): Pr
   }
 }
 
+/** Satu kiriman, dicari langsung dari id-nya. Dipakai jalur dorongan kakera. */
+const shipmentByIdQuery = (id: number) => `
+  ${batchSelect}
+  WHERE b.id = ${id}
+`;
+
+/**
+ * Umumkan SATU kiriman sekarang juga — dipanggil kakera begitu tombol Kirim
+ * ditekan, lewat POST /kakera/wsr-shipment.
+ *
+ * KENAPA DIDORONG, BUKAN DITUNGGU. Poller ini menengok tiap lima menit, dan itu
+ * memang cukup untuk pengingat. Tapi orang toko menekan Kirim lalu langsung
+ * membuka Discord untuk memastikan gudang tahu — dan channel yang masih sepi
+ * terbaca sebagai "kirimannya gagal", bukan "sebentar lagi". Dilaporkan Gilang
+ * 29 Agu 2026: WSR-ALPHA-12 dibuat 16:29, pengumumannya sampai 16:32.
+ *
+ * POLLER-NYA TIDAK DIMATIKAN, dan itu penting. Dorongan bisa gagal — kakera
+ * mati, jaringannya putus, bot-nya sedang deploy — dan yang menambal itu justru
+ * putaran lima menitan yang sama. Yang menjaga tidak dobel bukan urutan
+ * keduanya, melainkan ISI CHANNEL: kode yang sudah diumumkan dibaca dari pesan
+ * yang benar-benar ada di sana (lihat kodeSudahDiumumkan).
+ *
+ * Isinya dibaca ULANG dari database, bukan diambil dari badan permintaan.
+ * Kakera cuma menyebut id; nama barang, rak, dan jumlahnya tetap datang dari
+ * sumber yang sama dengan pengumuman biasa, jadi tidak ada dua bentuk pesan
+ * untuk satu kejadian.
+ */
+export async function umumkanKirimanSekarang(
+  client: Client,
+  batchId: number
+): Promise<"terkirim" | "sudah-ada" | "tidak-ketemu" | "belum-siap"> {
+  const config = metabaseConfig();
+  if (!config) {
+    console.warn("[wsr-shipment] dorongan kakera datang tapi Metabase belum dikonfigurasi.");
+    return "belum-siap";
+  }
+
+  const channel = (await client.channels
+    .fetch(env.WSR_SHIPMENT_CHANNEL_ID)
+    .catch(() => null)) as TextChannel | null;
+  if (!channel?.isTextBased()) {
+    console.error(`[wsr-shipment] channel ${env.WSR_SHIPMENT_CHANNEL_ID} tidak ketemu — dorongan dilewat.`);
+    return "belum-siap";
+  }
+
+  const res = await fetchNativeQueryWithPagination(config, shipmentByIdQuery(batchId));
+  const shipment = rowsToShipments(res.columns, res.rows)[0];
+  if (!shipment) return "tidak-ketemu";
+
+  const sudah = await kodeSudahDiumumkan(channel);
+  if (sudah.has(shipmentCode(shipment))) return "sudah-ada";
+
+  const items = (await fetchItems(config, [shipment.id])).get(shipment.id) ?? [];
+  const perluDikerjakan = shipment.status === "pending" || shipment.status === "running";
+  await channel.send({
+    content: perluDikerjakan ? mention(shipment, channel) : undefined,
+    embeds: [openingEmbed(shipment, items)]
+  });
+  console.log(`[wsr-shipment] ${shipmentCode(shipment)} diumumkan seketika (dorongan kakera).`);
+  return "terkirim";
+}
+
 export async function runWsrShipmentCheck(client: Client): Promise<void> {
   const config = metabaseConfig();
   if (!config) {
