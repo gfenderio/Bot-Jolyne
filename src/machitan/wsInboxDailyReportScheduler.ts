@@ -50,10 +50,10 @@ export function buildWsInboxSheet(workbook: ExcelJS.Workbook, proofs: WsInboxPro
     { header: "Admin",         key: "actor",       width: 22 },
     { header: "Item ID",       key: "itemId",      width: 11 },
     { header: "Nama Barang",   key: "productName", width: 46 },
-    { header: "Qty Sistem",    key: "expectedQty", width: 12 },
-    { header: "Qty Fisik",     key: "actualQty",   width: 12 },
+    { header: "Tercatat",      key: "expectedQty", width: 12 },
+    { header: "Hasil Hitung",  key: "actualQty",   width: 13 },
     { header: "Selisih",       key: "selisih",       width: 10 },
-    { header: "Tipe",          key: "tipe",        width: 18 },
+    { header: "Hasil",         key: "tipe",        width: 20 },
     { header: "Catatan",       key: "notes",       width: 28 },
   ];
 
@@ -68,18 +68,21 @@ export function buildWsInboxSheet(workbook: ExcelJS.Workbook, proofs: WsInboxPro
     const { tanggal, jam } = jakartaDateParts(p.timestamp);
     for (const it of p.items) {
       const isKor = it.selisih !== 0;
-      let tipeStr = "Opname Normal";
-      let tipeColor = "FFE8F5E9"; // green
-      
+      // Label baris menyebut APA YANG TERJADI, bukan nama kantongnya.
+      // "KOR (Minus)" dan "KOR (Plus)" cuma bisa dibaca orang yang sudah tahu
+      // isi sistemnya; yang membaca rekap ini orang gudang dan orang kantor.
+      let tipeStr = "Cocok";
+      let tipeColor = "FFE8F5E9"; // hijau
+
       if (isKor && p.isPartial) {
-         tipeStr = "Partial / Pending";
-         tipeColor = "FFFFF3E0"; // orange
+         tipeStr = "Belum selesai";
+         tipeColor = "FFFFF3E0"; // oranye
       } else if (isKor && it.selisih < 0) {
-         tipeStr = "KOR (Minus)";
-         tipeColor = "FFFFEBEE"; // light red
+         tipeStr = "Kurang — masuk KOR";
+         tipeColor = "FFFFEBEE"; // merah muda
       } else if (isKor && it.selisih > 0) {
-         tipeStr = "KOR (Plus)";
-         tipeColor = "FFE3F2FD"; // light blue
+         tipeStr = "Lebih";
+         tipeColor = "FFE3F2FD"; // biru muda
       }
 
       const row = sheet.addRow({
@@ -226,24 +229,36 @@ export async function executeWsInboxDailyReport(client: Client<true>) {
 
     const totalKorItems = missingItems + surplusItems;
 
-    let dangerText = "";
+    // Ditulis ulang 31 Agu 2026. Versi lamanya berbunyi "KOR WH ZERO DETECTED"
+    // dan "Top 3 Selisih Ekstrem" — campur Inggris, huruf besar semua, dan
+    // menyebut nama kantong yang cuma dimengerti orang yang membangun
+    // sistemnya. Rekap ini dibaca orang gudang; kalimatnya harus menyebut apa
+    // yang terjadi dan apa yang perlu dilakukan.
+    let rincian = "";
     if (totalKorItems === 0) {
-      dangerText = "Tidak ada selisih hari ini! Luar biasa! 🎉";
+      rincian = "Semua barang yang dihitung hari ini cocok dengan catatan. \u{1F389}";
     } else {
-      dangerText = `* 📉 **Barang Hilang:** ${missingItems} SKU (Total -${missingQty} pcs)\n* 📈 **Barang Lebih:** ${surplusItems} SKU (Total +${surplusQty} pcs)\n\n**🚨 Top 3 Selisih Ekstrem:**\n`;
-      top3.forEach((kor, idx) => {
-        const typeStr = kor.selisih < 0 ? "(Hilang)" : "(Lebih)";
-        dangerText += `${idx + 1}. *${kor.name.substring(0,40)}* ➔ **${kor.selisih > 0 ? '+'+kor.selisih : kor.selisih} pcs ${typeStr}** *(Admin: ${kor.actor})*\n`;
-      });
+      rincian =
+        `* **Kurang:** ${missingItems} barang (${missingQty} pcs) \u2014 selisihnya sudah dipindah ke KOR gudangnya.\n` +
+        `* **Lebih:** ${surplusItems} barang (${surplusQty} pcs) \u2014 perlu dicek asalnya.\n`;
+      if (top3.length > 0) {
+        rincian += `\n**Selisih terbesar hari ini:**\n`;
+        top3.forEach((kor, idx) => {
+          const kata = kor.selisih < 0 ? "kurang" : "lebih";
+          rincian += `${idx + 1}. *${kor.name.substring(0, 40)}* \u2192 **${Math.abs(kor.selisih)} pcs ${kata}** *(dihitung ${kor.actor})*\n`;
+        });
+      }
     }
 
     const embed = new EmbedBuilder()
       .setColor(totalKorItems > 0 ? 0xD32F2F : 0x388E3C)
-      .setTitle(`[Rekap WS Inbox PDA] - ${todayStr}`)
-      .setDescription(`✅ **Mulus:** ${totalSuccess} SKU (+${totalSuccessQty} pcs) masuk rak aman.\n\n` + 
-                      (totalKorItems > 0 ? `⚠️ **LAPORAN SELISIH (KOR WH)**\n${dangerText}` : `✅ **KOR WH ZERO DETECTED**\n${dangerText}`) +
-                      `\n\n*File Excel terlampir berisi rincian item-per-item untuk audit.*`)
-      .setFooter({ text: `Generated ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB` })
+      .setTitle(`Hasil hitung barang masuk \u2014 ${todayStr}`)
+      .setDescription(
+        `**${totalSuccess} barang** (${totalSuccessQty} pcs) masuk rak tanpa selisih.\n\n` +
+        (totalKorItems > 0 ? `**Yang selisih**\n${rincian}` : rincian) +
+        `\n\n*Rincian per barang ada di berkas terlampir.*`,
+      )
+      .setFooter({ text: `Dibuat ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })} WIB` })
       .setTimestamp();
 
     await (channel as TextChannel).send({ embeds: [embed], files: [attachment] });

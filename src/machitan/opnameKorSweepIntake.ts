@@ -19,6 +19,26 @@ import { isAuthorizedMachitanIntake } from "./intakeAuth.js";
 
 const TARGET_CHANNEL_ID = "1501899831268868106"; // channel pick pack / machitan update
 
+const BULAN = [
+  "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+  "Juli", "Agustus", "September", "Oktober", "November", "Desember",
+];
+
+/**
+ * "2026-08-31 02:00:13" jadi "31 Agustus 2026, 02:00".
+ *
+ * Hanayo mengirim waktu Jakarta apa adanya, jadi teksnya dipotong langsung
+ * tanpa lewat Date — membungkusnya jadi Date akan menggesernya tujuh jam dan
+ * laporan jam 2 pagi terbaca sebagai kemarin sore.
+ */
+function waktuManusiawi(sweptAt: string): string {
+  const cocok = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(sweptAt);
+  if (!cocok) return sweptAt;
+  const [, tahun, bulan, tanggal, jam, menit] = cocok;
+  const namaBulan = BULAN[Number(bulan) - 1] ?? bulan;
+  return `${Number(tanggal)} ${namaBulan} ${tahun}, ${jam}:${menit}`;
+}
+
 function sendJson(response: ServerResponse, statusCode: number, payload: unknown) {
   response.writeHead(statusCode, { "Content-Type": "application/json" });
   response.end(`${JSON.stringify(payload)}\n`);
@@ -73,12 +93,12 @@ export function buildOpnameKorSweepWorkbook(
 ): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook();
 
-  const sheet = workbook.addWorksheet("Masuk KOR");
+  const sheet = workbook.addWorksheet("Pindah ke KOR");
   sheet.columns = [
     { header: "Item ID", key: "itemId", width: 12 },
     { header: "Nama Barang", key: "name", width: 46 },
     { header: "Gudang", key: "source", width: 14 },
-    { header: "Kantong KOR", key: "kor", width: 18 },
+    { header: "KOR Tujuan", key: "kor", width: 18 },
     { header: "Stok Sistem", key: "system", width: 13 },
     { header: "Hasil Hitung", key: "counted", width: 13 },
     { header: "Masuk KOR", key: "qty", width: 12 },
@@ -107,14 +127,14 @@ export function buildOpnameKorSweepWorkbook(
   // Sheet kedua hanya dibuat kalau memang ada isinya, supaya lampiran yang
   // bersih tidak menyisakan tab kosong yang bikin orang mengira ada masalah.
   if (needsHuman.length > 0) {
-    const manual = workbook.addWorksheet("Perlu Diputuskan Manusia");
+    const manual = workbook.addWorksheet("Tidak Bisa Dipindah");
     manual.columns = [{ header: "Keterangan", key: "note", width: 90 }];
     manual.getRow(1).font = { bold: true };
     for (const note of needsHuman) manual.addRow({ note });
   }
 
   if (surplus.length > 0) {
-    const lebih = workbook.addWorksheet("Kelebihan Belum Dijelaskan");
+    const lebih = workbook.addWorksheet("Hitungan Lebih");
     lebih.columns = [
       { header: "Item ID", key: "itemId", width: 12 },
       { header: "Nama Barang", key: "name", width: 46 },
@@ -154,11 +174,11 @@ export function buildOpnameKorSweepWorkbook(
     { header: "Nilai", key: "v", width: 50 },
   ];
   info.getRow(1).font = { bold: true };
-  info.addRow({ k: "Waktu sapuan", v: sweptAt });
-  info.addRow({ k: "Barang masuk KOR", v: items.length });
+  info.addRow({ k: "Waktu pemeriksaan", v: sweptAt });
+  info.addRow({ k: "Barang pindah ke KOR", v: items.length });
   info.addRow({ k: "Total unit", v: items.reduce((sum, it) => sum + Number(it.qty_to_kor ?? 0), 0) });
-  info.addRow({ k: "Perlu diputuskan manusia", v: needsHuman.length });
-  info.addRow({ k: "Kelebihan belum dijelaskan", v: surplus.length });
+  info.addRow({ k: "Tidak bisa dipindah", v: needsHuman.length });
+  info.addRow({ k: "Hitungan lebih", v: surplus.length });
 
   return workbook;
 }
@@ -196,29 +216,56 @@ export async function handleOpnameKorSweepIntake(
     const tanggal = sweptAt.slice(0, 10);
     const attachment = new AttachmentBuilder(buffer, { name: `opname-kor-${tanggal}.xlsx` });
 
+    // Dikelompokkan menurut SIAPA YANG HARUS BERTINDAK, bukan menurut apa yang
+    // dikerjakan robot. Versi lamanya melaporkan tiga angka mentah dengan
+    // bahasa mesin ("tidak disapu", "belum dijelaskan", "isi baris gudangnya"),
+    // dan yang paling perlu ditindaklanjuti justru ditaruh paling bawah dengan
+    // kalimat paling samar. Orang gudang membacanya tanpa tahu mana yang
+    // urusannya dan mana yang bukan.
+    //
+    // Kolom kor_tersedia yang memisahkan dua golongan yang kelihatannya sama:
+    // kelebihan yang barangnya ADA di KOR gudang itu bisa dibereskan petugas
+    // sendiri lewat PDA, sedangkan yang KOR-nya kosong memang tidak punya asal
+    // di mana pun dan harus diputuskan orang kantor.
+    const lebihAdaDiKor = surplus.filter((it) => Number(it.kor_tersedia ?? 0) > 0);
+    const lebihTanpaAsal = surplus.filter((it) => Number(it.kor_tersedia ?? 0) <= 0);
+    const perluDicek = needsHuman.length + surplus.length;
+
     const embed = new EmbedBuilder()
-      .setTitle("Selisih Opname Masuk KOR")
+      .setTitle(
+        perluDicek > 0
+          ? `Hasil hitung stok semalam — ${perluDicek} barang perlu dicek`
+          : "Hasil hitung stok semalam",
+      )
       .setDescription(
         [
-          `Sapuan **${sweptAt}**`,
-          `**${items.length}** barang, **${totalUnits}** unit dipindah ke kantong KOR gudangnya.`,
+          waktuManusiawi(sweptAt),
+          "",
+          items.length > 0
+            ? `**${items.length} barang** (${totalUnits} unit) hasil hitungnya kurang dan sudah dipindah ke KOR gudangnya. Tidak perlu ditindaklanjuti.`
+            : "Tidak ada stok yang berpindah semalam.",
           needsHuman.length > 0
             // Sebabnya TIDAK diketahui di sini. Yang diperiksa hanayo cuma
             // "kekurangan lebih besar dari isi baris gudang" — bisa karena
             // sisanya duduk di kantong reservasi oripa, bisa juga karena stok
-            // bergerak antara saat dihitung dan saat disapu jam 2 pagi.
+            // bergerak antara saat dihitung dan saat diperiksa jam 2 pagi.
             // Menyebut satu sebab untuk semuanya membuat orang mencari ke
             // tempat yang salah; alasan per barang ada di berkas Excel-nya.
-            ? `**${needsHuman.length}** barang tidak disapu — kekurangannya lebih besar dari isi baris gudangnya. Rinciannya di berkas.`
+            ? `**${needsHuman.length} barang** hasil hitungnya kurang, tapi kurangnya lebih banyak daripada stok yang tercatat di gudang itu. Bisa jadi barangnya sedang dipesan orang lain, bisa juga stoknya bergerak setelah dihitung. Alasan per barang ada di berkas.`
             : null,
-          surplus.length > 0
-            ? `**${surplus.length}** kelebihan hitungan belum dijelaskan — dilaporkan saja, stoknya tidak ditambah.`
+          lebihAdaDiKor.length > 0
+            ? `**${lebihAdaDiKor.length} barang** hasil hitungnya lebih, dan barangnya ada di KOR gudang itu. Bisa dibereskan sendiri: scan ulang barangnya di menu Opname, lalu ambil dari KOR.`
             : null,
+          lebihTanpaAsal.length > 0
+            ? `**${lebihTanpaAsal.length} barang** hasil hitungnya lebih dan belum ketahuan asalnya. Stoknya sengaja belum ditambah — menunggu keputusan orang kantor.`
+            : null,
+          "",
+          "Daftar lengkapnya ada di berkas terlampir.",
         ]
-          .filter(Boolean)
+          .filter((baris) => baris !== null)
           .join("\n"),
       )
-      .setColor(needsHuman.length > 0 ? 0xd9ac5c : 0x1f6f5c)
+      .setColor(needsHuman.length > 0 || lebihTanpaAsal.length > 0 ? 0xd9ac5c : 0x1f6f5c)
       .setTimestamp(new Date());
 
     const channel = await client.channels.fetch(TARGET_CHANNEL_ID);
