@@ -260,7 +260,8 @@ export async function handleOpnameKorSweepIntake(
             ? `**${lebihTanpaAsal.length} barang** hasil hitungnya lebih dan belum ketahuan asalnya. Stoknya sengaja belum ditambah — menunggu keputusan orang kantor.`
             : null,
           "",
-          "Daftar lengkapnya ada di berkas terlampir.",
+          "Isi KOR tiap gudang bisa ditengok kapan saja di https://team.kyou.id/warehouse/kor",
+          "Daftar lengkap malam ini ada di berkas terlampir.",
         ]
           .filter((baris) => baris !== null)
           .join("\n"),
