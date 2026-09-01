@@ -19,6 +19,39 @@ import { isAuthorizedMachitanIntake } from "./intakeAuth.js";
 
 const TARGET_CHANNEL_ID = "1501899831268868106"; // channel pick pack / machitan update
 
+/**
+ * Hasil penyisir pending WS, dititipkan hanayo di kiriman yang sama.
+ *
+ * Tidak menambah kartu kedua: dua kartu berturut-turut tiap malam membuat yang
+ * kedua terlewat dibaca. Isinya masuk ke Excel yang memang sudah jadi tempat
+ * rincian, dan kartunya cuma menyebut jumlahnya.
+ */
+type WsSisir = {
+  sisir_at?: string;
+  ditutup?: WsDitutup[];
+  nyangkut?: WsNyangkut[];
+};
+
+type WsDitutup = {
+  item_id?: string;
+  nama?: string;
+  source?: string;
+  rak?: string;
+  hitungan?: number;
+  seharusnya?: number;
+  selisih?: number;
+  oleh?: string;
+};
+
+type WsNyangkut = {
+  item_id?: string;
+  nama?: string;
+  source?: string;
+  sebab?: string;
+  umur_hari?: number;
+  oleh?: string;
+};
+
 const BULAN = [
   "Januari", "Februari", "Maret", "April", "Mei", "Juni",
   "Juli", "Agustus", "September", "Oktober", "November", "Desember",
@@ -90,6 +123,7 @@ export function buildOpnameKorSweepWorkbook(
   needsHuman: string[],
   sweptAt: string,
   surplus: SurplusItem[] = [],
+  ws: WsSisir | null = null,
 ): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook();
 
@@ -168,6 +202,63 @@ export function buildOpnameKorSweepWorkbook(
     }
   }
 
+  const wsDitutup = ws?.ditutup ?? [];
+  const wsNyangkut = ws?.nyangkut ?? [];
+
+  if (wsDitutup.length > 0) {
+    const tutup = workbook.addWorksheet("WS Pending Ditutup");
+    tutup.columns = [
+      { header: "Item ID", key: "itemId", width: 12 },
+      { header: "Nama Barang", key: "name", width: 46 },
+      { header: "Gudang", key: "source", width: 14 },
+      { header: "Rak", key: "rak", width: 14 },
+      { header: "Stok Sistem", key: "system", width: 13 },
+      { header: "Hasil Hitung", key: "counted", width: 13 },
+      { header: "Selisih", key: "delta", width: 10 },
+      { header: "Dihitung Oleh", key: "by", width: 22 },
+    ];
+    tutup.getRow(1).font = { bold: true };
+    tutup.views = [{ state: "frozen", ySplit: 1 }];
+    for (const it of wsDitutup) {
+      tutup.addRow({
+        itemId: it.item_id ?? "-",
+        name: it.nama ?? "-",
+        source: it.source ?? "-",
+        rak: it.rak ?? "-",
+        system: Number(it.seharusnya ?? 0),
+        counted: Number(it.hitungan ?? 0),
+        delta: Number(it.selisih ?? 0),
+        by: it.oleh ?? "-",
+      });
+    }
+  }
+
+  if (wsNyangkut.length > 0) {
+    // Sheet yang paling perlu dibaca orang: barang di sini TIDAK bisa
+    // diselesaikan mesin dan akan menggantung sampai ada yang mengerjakannya.
+    const nyangkut = workbook.addWorksheet("WS Pending Nyangkut");
+    nyangkut.columns = [
+      { header: "Item ID", key: "itemId", width: 12 },
+      { header: "Nama Barang", key: "name", width: 46 },
+      { header: "Gudang", key: "source", width: 14 },
+      { header: "Kenapa belum ditutup", key: "sebab", width: 30 },
+      { header: "Sudah menggantung (hari)", key: "umur", width: 24 },
+      { header: "Terakhir Dikerjakan", key: "by", width: 22 },
+    ];
+    nyangkut.getRow(1).font = { bold: true };
+    nyangkut.views = [{ state: "frozen", ySplit: 1 }];
+    for (const it of wsNyangkut) {
+      nyangkut.addRow({
+        itemId: it.item_id ?? "-",
+        name: it.nama ?? "-",
+        source: it.source ?? "-",
+        sebab: it.sebab ?? "-",
+        umur: Number(it.umur_hari ?? 0),
+        by: it.oleh ?? "-",
+      });
+    }
+  }
+
   const info = workbook.addWorksheet("Info");
   info.columns = [
     { header: "Keterangan", key: "k", width: 28 },
@@ -179,6 +270,8 @@ export function buildOpnameKorSweepWorkbook(
   info.addRow({ k: "Total unit", v: items.reduce((sum, it) => sum + Number(it.qty_to_kor ?? 0), 0) });
   info.addRow({ k: "Tidak bisa dipindah", v: needsHuman.length });
   info.addRow({ k: "Hitungan lebih", v: surplus.length });
+  info.addRow({ k: "WS pending ditutup", v: wsDitutup.length });
+  info.addRow({ k: "WS pending nyangkut", v: wsNyangkut.length });
 
   return workbook;
 }
@@ -201,16 +294,22 @@ export async function handleOpnameKorSweepIntake(
     const needsHuman: string[] = Array.isArray(body.needs_human) ? body.needs_human.map(String) : [];
     const surplus: SurplusItem[] = Array.isArray(body.surplus) ? body.surplus : [];
     const sweptAt = String(body.swept_at ?? new Date().toISOString());
+    const ws: WsSisir | null = body.ws ?? null;
+    const wsDitutup = ws?.ditutup ?? [];
+    const wsNyangkut = ws?.nyangkut ?? [];
     const totalUnits = Number(body.total_units ?? items.reduce((s, it) => s + Number(it.qty_to_kor ?? 0), 0));
 
     // Sapuan yang tidak menemukan apa-apa TIDAK dilaporkan. Lampiran kosong tiap
     // malam melatih orang mengabaikan laporan ini, dan yang penting justru malam
     // ketika isinya tidak kosong.
-    if (items.length === 0 && needsHuman.length === 0 && surplus.length === 0) {
+    if (
+      items.length === 0 && needsHuman.length === 0 && surplus.length === 0
+      && wsDitutup.length === 0 && wsNyangkut.length === 0
+    ) {
       return sendJson(response, 200, { message: "Tidak ada yang dilaporkan", ok: true });
     }
 
-    const workbook = buildOpnameKorSweepWorkbook(items, needsHuman, sweptAt, surplus);
+    const workbook = buildOpnameKorSweepWorkbook(items, needsHuman, sweptAt, surplus, ws);
     const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
 
     const tanggal = sweptAt.slice(0, 10);
@@ -259,6 +358,12 @@ export async function handleOpnameKorSweepIntake(
           lebihTanpaAsal.length > 0
             ? `**${lebihTanpaAsal.length} barang** hasil hitungnya lebih dan belum ketahuan asalnya. Stoknya sengaja belum ditambah — menunggu keputusan orang kantor.`
             : null,
+          wsDitutup.length > 0
+            ? `**${wsDitutup.length} barang WS** yang tertinggal di Pending ditutup otomatis; selisihnya lewat KOR seperti penutupan biasa.`
+            : null,
+          wsNyangkut.length > 0
+            ? `**${wsNyangkut.length} barang WS** masih menggantung di Pending dan tidak bisa ditutup sendiri — raknya kosong, belum dihitung, atau sedang dipegang orang. Daftarnya di berkas.`
+            : null,
           "",
           "Isi KOR tiap gudang bisa ditengok kapan saja di https://team.kyou.id/warehouse/kor",
           "Daftar lengkap malam ini ada di berkas terlampir.",
@@ -266,7 +371,11 @@ export async function handleOpnameKorSweepIntake(
           .filter((baris) => baris !== null)
           .join("\n"),
       )
-      .setColor(needsHuman.length > 0 || lebihTanpaAsal.length > 0 ? 0xd9ac5c : 0x1f6f5c)
+      .setColor(
+        needsHuman.length > 0 || lebihTanpaAsal.length > 0 || wsNyangkut.length > 0
+          ? 0xd9ac5c
+          : 0x1f6f5c,
+      )
       .setTimestamp(new Date());
 
     const channel = await client.channels.fetch(TARGET_CHANNEL_ID);
