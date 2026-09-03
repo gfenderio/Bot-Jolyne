@@ -234,12 +234,25 @@ function splitQuery(sejak: string, sampai: string, klik: PrintClick[]): string {
     JOIN item_sources s ON s.name      = oi.source
     LEFT JOIN districts d ON d.district_id = s.district_id
     WHERE o.status = 'paid'
-      -- SEMUA gudang, bukan cuma yang jauh. Barang tanpa pack group (PO/UREQ,
-      -- source kosong) tetap terlewat: sebenarnya barang begitu ikut label
-      -- Group 1, tapi jumlahnya kecil (47 baris dalam 30 hari) dan menambalnya
-      -- butuh meniru aturan PO/UREQ dari Order::itemsForPackGroup. Akibatnya
-      -- cuma satu: berat & isi label Bekasi yang ditampilkan bisa kurang dari
-      -- yang benar-benar tercetak kalau ordernya memuat barang PO/UREQ.
+      -- SEMUA gudang, bukan cuma yang jauh.
+      --
+      -- BARANG PO/UREQ TIDAK IKUT DI SINI, DAN ITU TERBUKTI TIDAK JADI MASALAH.
+      -- Keduanya tidak punya pack group: barang PO source-nya kosong, dan UREQ
+      -- bukan baris order_items sama sekali (tabel order_bo). kyou.id
+      -- mencetak keduanya di label group 1 (Order::itemsForPackGroup), jadi
+      -- dulu diduga berat & isi label Bekasi yang ditampilkan bisa kurang dari
+      -- label aslinya. DIUKUR 7 AGU 2026 lewat Metabase, dugaan itu KOSONG:
+      --
+      --   251 order terpisah yang dicetak dalam 90 hari  -> 0 memuat PO/UREQ
+      --   diperluas ke 400 hari tanpa syarat cetak        -> 0
+      --   13.196 order ber-PO dalam 120 hari              -> SEMUA grup gudang = 0
+      --
+      -- Sebabnya: order berisi barang PO tidak pernah dicampur dengan barang
+      -- bergudang, jadi ordernya tidak pernah lolos syarat "terpisah" di bawah.
+      -- Tambalannya sempat ditulis penuh (meniru aturan PO/UREQ, terbukti jalan
+      -- di prod) lalu DIBUANG karena tidak akan pernah menyalakan angka apa pun.
+      -- Baru perlu dibangkitkan lagi kalau kyou.id mulai membolehkan barang PO
+      -- satu order dengan barang gudang — ukur ulang tiga angka di atas dulu.
       AND s.pack_group_id IS NOT NULL
       AND EXISTS (
         SELECT 1 FROM admin_logs al
