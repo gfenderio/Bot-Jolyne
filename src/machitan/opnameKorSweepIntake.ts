@@ -64,6 +64,20 @@ const BULAN = [
  * tanpa lewat Date — membungkusnya jadi Date akan menggesernya tujuh jam dan
  * laporan jam 2 pagi terbaca sebagai kemarin sore.
  */
+/**
+ * Umur baris paling tua, dalam hari. null kalau hanayo belum mengirim `umur_hari`
+ * — versi lamanya memang tidak punya kolom itu, dan angka karangan lebih buruk
+ * daripada kalimat tanpa angka.
+ */
+function umurTertua(items: SweptItem[]): number | null {
+  let tertua: number | null = null;
+  for (const it of items) {
+    const n = Number((it as { umur_hari?: unknown }).umur_hari);
+    if (Number.isFinite(n) && (tertua === null || n > tertua)) tertua = n;
+  }
+  return tertua;
+}
+
 function waktuManusiawi(sweptAt: string): string {
   const cocok = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(sweptAt);
   if (!cocok) return sweptAt;
@@ -298,6 +312,21 @@ export async function handleOpnameKorSweepIntake(
     const wsDitutup = ws?.ditutup ?? [];
     const wsNyangkut = ws?.nyangkut ?? [];
     const totalUnits = Number(body.total_units ?? items.reduce((s, it) => s + Number(it.qty_to_kor ?? 0), 0));
+    /*
+     * MODE "TERTAHAN" — sejak 3 Sep 2026, hanayo tidak lagi memindahkan selisih
+     * kurang ke KOR sendiri (keputusan Gilang sesudah sesi WSR Re:try dengan tim
+     * toko). Sapuan malam berubah jadi laporan: "ini yang masih menggantung, dan
+     * sudah berapa lama".
+     *
+     * Kalimatnya WAJIB ikut berubah. Laporan yang menyebut "sudah dipindah ke
+     * KOR" padahal tidak ada yang pindah membuat orang gudang berhenti mencari
+     * barang yang sebenarnya masih di rak mereka — kerusakan yang lebih besar
+     * daripada laporan yang tidak terkirim sama sekali.
+     *
+     * Payload lama (tanpa `mode`) tetap dibaca sebagai "pindah", jadi bot ini
+     * boleh tayang lebih dulu daripada hanayo tanpa mengubah apa pun.
+     */
+    const tertahan = String(body.mode ?? "pindah") === "tertahan";
 
     // Sapuan yang tidak menemukan apa-apa TIDAK dilaporkan. Lampiran kosong tiap
     // malam melatih orang mengabaikan laporan ini, dan yang penting justru malam
@@ -334,15 +363,24 @@ export async function handleOpnameKorSweepIntake(
       .setTitle(
         perluDicek > 0
           ? `Hasil hitung stok semalam — ${perluDicek} barang perlu dicek`
-          : "Hasil hitung stok semalam",
+          : tertahan && items.length > 0
+            ? `Hasil hitung stok semalam — ${items.length} barang masih menggantung`
+            : "Hasil hitung stok semalam",
       )
       .setDescription(
         [
           waktuManusiawi(sweptAt),
           "",
           items.length > 0
-            ? `**${items.length} barang** (${totalUnits} unit) hasil hitungnya kurang dan sudah dipindah ke KOR gudangnya. Tidak perlu ditindaklanjuti.`
-            : "Tidak ada stok yang berpindah semalam.",
+            ? tertahan
+              // Umur diambil dari baris paling tua: satu barang yang menggantung
+              // tiga minggu jauh lebih penting daripada dua puluh barang yang
+              // baru semalam, dan rata-rata akan menyembunyikannya.
+              ? `**${items.length} barang** hasil hitungnya kurang dan **masih menggantung** — belum ada yang menyatakan ketemu atau hilang${umurTertua(items) !== null ? `, yang terlama sudah **${umurTertua(items)} hari**` : ""}. Stoknya sengaja TIDAK dipindah ke KOR.`
+              : `**${items.length} barang** (${totalUnits} unit) hasil hitungnya kurang dan sudah dipindah ke KOR gudangnya. Tidak perlu ditindaklanjuti.`
+            : tertahan
+              ? "Tidak ada hitungan yang menggantung semalam."
+              : "Tidak ada stok yang berpindah semalam.",
           needsHuman.length > 0
             // Sebabnya TIDAK diketahui di sini. Yang diperiksa hanayo cuma
             // "kekurangan lebih besar dari isi baris gudang" — bisa karena
