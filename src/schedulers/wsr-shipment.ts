@@ -370,16 +370,72 @@ function reminderEmbed(shipment: ShipmentRow, jam: number): EmbedBuilder {
     .setTimestamp();
 }
 
+/** Gudang Surabaya, dari env. Sisanya dianggap Bekasi. */
+function gudangSurabaya(): Set<string> {
+  return new Set(
+    env.WSR_SHIPMENT_SURABAYA_SOURCES.split(",")
+      .map((x) => x.trim().toUpperCase())
+      .filter(Boolean)
+  );
+}
+
 /**
- * Tag per unit. Unit-nya cuma tiga (lihat PdaController: GAMMA_LAMBDA, ALPHA,
- * BETA), dan GAMMA_LAMBDA — toko Gamma minta barang ke gudang Lambda, dua-duanya
- * Surabaya — dikerjakan orang Surabaya. Menepuk pundak orang gudang default
- * (Bekasi) untuk kiriman itu cuma bikin tag-nya berhenti dipercaya.
+ * Gudang mana yang benar-benar mengerjakan kiriman ini.
+ *
+ * Arah `request` (Gudang → Toko): yang mengambil barang dari rak adalah gudang
+ * ASAL. Arah `return`/`event`: yang menerima dan merapikan adalah gudang TUJUAN.
+ * Di dua-duanya, yang perlu ditepuk pundaknya adalah sisi gudangnya - channel
+ * ini memang channel orang gudang.
  */
-function mentionIdUntuk(unit: string): string {
-  const khusus =
-    unit.trim().toUpperCase() === "GAMMA_LAMBDA" ? env.WSR_SHIPMENT_MENTION_GAMMA_LAMBDA_ID : undefined;
-  return (khusus?.trim() || env.WSR_SHIPMENT_MENTION_USER_ID?.trim()) ?? "";
+function gudangPengerja(shipment: ShipmentRow, items: ShipmentItem[]): string[] {
+  const ambilAsal = shipment.direction === "request";
+  const nama = items.map((i) => (ambilAsal ? i.source : i.destination));
+  return [...new Set(nama.map((x) => (x ?? "").trim().toUpperCase()).filter(Boolean))];
+}
+
+/**
+ * Tag untuk satu kiriman, dibaca dari GUDANG YANG DIPAKAI - bukan dari nama
+ * unitnya.
+ *
+ * DULU DARI NAMA UNIT, DAN ITU SALAH SEBAGIAN. Unit "GAMMA_LAMBDA" selalu
+ * menandai orang Surabaya, padahal unit yang sama juga dipakai saat toko Gamma
+ * minta barang ke Omega/SS - dua gudang Bekasi. Kiriman itu menepuk pundak orang
+ * Surabaya yang tidak bisa mengerjakannya, dan orang Bekasi yang seharusnya
+ * mengerjakan tidak pernah tahu. Sejak 3 Sep 2026 yang dibaca gudangnya.
+ *
+ * Kiriman yang gudangnya bercampur dua kota menandai KEDUANYA. Memilih salah
+ * satu berarti separuh barangnya tidak ada yang tahu.
+ *
+ * Peran inbound/outbound ikut kalau env-nya diisi (perannya dibuat Sopmod).
+ * Selama kosong, hasilnya persis seperti sebelumnya.
+ */
+function mentionIdsUntuk(shipment: ShipmentRow, items: ShipmentItem[]): string[] {
+  const surabaya = gudangSurabaya();
+  const pengerja = gudangPengerja(shipment, items);
+
+  const idSurabaya =
+    env.WSR_SHIPMENT_MENTION_SURABAYA_ID?.trim() || env.WSR_SHIPMENT_MENTION_GAMMA_LAMBDA_ID?.trim() || "";
+  const idBekasi = env.WSR_SHIPMENT_MENTION_USER_ID?.trim() ?? "";
+
+  const ids: string[] = [];
+  if (pengerja.length === 0) {
+    // Rincian barangnya tidak terbaca (query gagal, atau kirimannya kosong).
+    // Jatuh balik ke aturan lama berdasar nama unit: lebih baik menandai
+    // menurut tebakan lama daripada tidak menandai siapa pun.
+    const lama = shipment.unit.trim().toUpperCase() === "GAMMA_LAMBDA" ? idSurabaya : idBekasi;
+    if (lama) ids.push(lama);
+  } else {
+    if (pengerja.some((g) => surabaya.has(g)) && idSurabaya) ids.push(idSurabaya);
+    if (pengerja.some((g) => !surabaya.has(g)) && idBekasi) ids.push(idBekasi);
+  }
+
+  const peran =
+    shipment.direction === "request"
+      ? env.WSR_SHIPMENT_MENTION_OUTBOUND_ID?.trim()
+      : env.WSR_SHIPMENT_MENTION_INBOUND_ID?.trim();
+  if (peran) ids.push(peran);
+
+  return [...new Set(ids)];
 }
 
 /**
@@ -389,10 +445,10 @@ function mentionIdUntuk(unit: string): string {
  * role (`<@&id>`) atau orang (`<@id>`), dan salah bentuk bikin tag-nya tampil
  * sebagai teks mentah tanpa notifikasi ke siapa pun.
  */
-function mention(shipment: ShipmentRow, channel: TextChannel): string {
-  const id = mentionIdUntuk(shipment.unit);
-  if (!id) return "";
-  return channel.guild?.roles.cache.has(id) ? `<@&${id}> ` : `<@${id}> `;
+function mention(shipment: ShipmentRow, channel: TextChannel, items: ShipmentItem[] = []): string {
+  const ids = mentionIdsUntuk(shipment, items);
+  if (ids.length === 0) return "";
+  return ids.map((id) => (channel.guild?.roles.cache.has(id) ? `<@&${id}> ` : `<@${id}> `)).join("");
 }
 
 /**
@@ -409,10 +465,17 @@ async function kirimPengingat(config: MetabaseConfig, channel: TextChannel): Pro
   const belum = stale.filter((s) => !sudah.has(s.id));
   if (belum.length === 0) return;
 
+  // Rincian barangnya ikut ditarik HANYA untuk yang benar-benar diingatkan
+  // (biasanya segelintir). Tanpa ini pengingatnya menandai kota yang berbeda
+  // dari pengumuman aslinya, dan yang ditepuk pundaknya jadi dua orang yang
+  // sama-sama merasa bukan bagiannya.
+  const rincian = await fetchItems(config, belum.map((s) => s.id)).catch(() => new Map<number, ShipmentItem[]>());
+
   const terkirim: number[] = [];
   for (const shipment of belum) {
     try {
-      await channel.send({ content: mention(shipment, channel), embeds: [reminderEmbed(shipment, jam)] });
+      const items = rincian.get(shipment.id) ?? [];
+      await channel.send({ content: mention(shipment, channel, items), embeds: [reminderEmbed(shipment, jam)] });
       terkirim.push(shipment.id);
     } catch (err) {
       console.error(`[wsr-shipment] gagal kirim pengingat #${shipment.id}:`, err);
@@ -621,7 +684,7 @@ export async function runWsrShipmentCheck(client: Client): Promise<void> {
           // berhenti dipercaya.
           const perluDikerjakan = shipment.status === "pending" || shipment.status === "running";
           await channel.send({
-            content: perluDikerjakan ? mention(shipment, channel) : undefined,
+            content: perluDikerjakan ? mention(shipment, channel, items) : undefined,
             embeds: [openingEmbed(shipment, items)]
           });
           terkirim++;
@@ -641,6 +704,42 @@ export async function runWsrShipmentCheck(client: Client): Promise<void> {
   // yang sudah lama diam itulah yang perlu diingatkan.
   await kirimPengingat(config, channel);
   await laporkanSelesai(config, channel);
+}
+
+/**
+ * Kirim ULANG pengumuman satu kiriman — dipakai manual, bukan oleh poller, saat
+ * pengumuman aslinya sudah telanjur terkirim dengan isi yang salah (mis. tag-nya
+ * menepuk pundak orang yang bukan kotanya). Watermark tidak disentuh, jadi ini
+ * tidak mengubah apa pun yang dipantau poller.
+ *
+ * `selaluTag` untuk mengetes tag pada kiriman yang sudah beres; tanpa itu aturan
+ * normal yang berlaku (yang sudah selesai tidak di-tag).
+ */
+export async function kirimUlangPengumuman(
+  client: Client,
+  batchId: number,
+  opsi: { selaluTag?: boolean } = {}
+): Promise<void> {
+  const config = metabaseConfig();
+  if (!config) throw new Error("Metabase belum dikonfigurasi.");
+
+  const res = await fetchNativeQueryWithPagination(config, `${batchSelect} WHERE b.id = ${batchId}`);
+  const shipment = rowsToShipments(res.columns, res.rows)[0];
+  if (!shipment) throw new Error(`Kiriman #${batchId} tidak ada di wsr_batches.`);
+
+  const channel = (await client.channels.fetch(env.WSR_SHIPMENT_CHANNEL_ID).catch(() => null)) as TextChannel | null;
+  if (!channel?.isTextBased()) throw new Error(`Channel ${env.WSR_SHIPMENT_CHANNEL_ID} tidak ketemu.`);
+  // Dipanggil dari skrip sekali jalan: role belum tentu sempat masuk cache
+  // seperti di bot yang sudah lama hidup, jadi ditarik dulu.
+  await channel.guild.roles.fetch();
+
+  const items = (await fetchItems(config, [shipment.id])).get(shipment.id) ?? [];
+  const perluDikerjakan = shipment.status === "pending" || shipment.status === "running";
+  await channel.send({
+    content: perluDikerjakan || opsi.selaluTag ? mention(shipment, channel, items) : undefined,
+    embeds: [openingEmbed(shipment, items)]
+  });
+  console.log(`[wsr-shipment] pengumuman ${shipmentCode(shipment)} dikirim ulang (status ${shipment.status}).`);
 }
 
 export function startWsrShipmentScheduler(client: Client): void {

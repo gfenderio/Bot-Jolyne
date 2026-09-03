@@ -286,6 +286,40 @@ const envSchema = z.object({
   // Kosongkan → balik memakai tag default di atas.
   WSR_SHIPMENT_MENTION_GAMMA_LAMBDA_ID: optionalString.default("1224581529854939138"),
 
+  /**
+   * Tag orang Surabaya. Isinya SAMA dengan GAMMA_LAMBDA_ID di atas dan memang
+   * disengaja: sejak 3 Sep 2026 kotanya dibaca dari gudang yang benar-benar
+   * dipakai kirimannya, bukan dari nama unitnya, jadi nama "GAMMA_LAMBDA"
+   * berhenti menggambarkan apa yang dipilih. Yang lama dibiarkan hidup supaya
+   * env yang sudah diisi di server tidak mendadak kosong.
+   *
+   * Kenapa perlu dibaca dari gudangnya: unit GAMMA_LAMBDA juga dipakai saat
+   * toko Gamma minta barang ke Omega/SS yang ada di Bekasi. Dulu kiriman itu
+   * ikut menepuk pundak orang Surabaya, dan orang Surabaya tidak bisa
+   * mengerjakannya.
+   */
+  WSR_SHIPMENT_MENTION_SURABAYA_ID: optionalString.default(""),
+
+  /**
+   * Gudang yang ada di Surabaya, dipisah koma. Sisanya dianggap Bekasi.
+   *
+   * Ditulis sebagai daftar, bukan dibaca dari districts di basis data: yang
+   * menentukan siapa yang di-tag adalah siapa yang MENGERJAKAN, dan itu urusan
+   * pembagian kerja tim - bisa berubah tanpa alamat gudangnya ikut berubah.
+   */
+  WSR_SHIPMENT_SURABAYA_SOURCES: optionalString.default("LAMBDA,GAMMA"),
+
+  /**
+   * Peran (role) Discord untuk barang MASUK dan barang KELUAR.
+   *
+   * Sengaja KOSONG sampai Sopmod membuat perannya. Selama kosong, tidak ada
+   * tambahan tag sama sekali dan perilakunya persis seperti sebelumnya - lebih
+   * baik begitu daripada menebak id peran yang belum ada dan menghasilkan tag
+   * yang tampil sebagai teks mentah tanpa memberi tahu siapa pun.
+   */
+  WSR_SHIPMENT_MENTION_OUTBOUND_ID: optionalString.default(""),
+  WSR_SHIPMENT_MENTION_INBOUND_ID: optionalString.default(""),
+
   // Pengingat susulan sekali untuk kiriman yang masih menggantung sekian jam.
   /**
    * Seberapa jauh ke belakang poller menengok tiap putaran, di luar watermark.
