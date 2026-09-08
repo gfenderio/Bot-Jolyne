@@ -320,6 +320,29 @@ const envSchema = z.object({
   WSR_SHIPMENT_MENTION_OUTBOUND_ID: optionalString.default(""),
   WSR_SHIPMENT_MENTION_INBOUND_ID: optionalString.default(""),
 
+  /**
+   * Peran toko, ditag KALAU yang mengerjakan kiriman itu tokonya sendiri.
+   *
+   * Kiriman antar toko — Beta minta barang yang ada di Alpha — yang mengambilnya
+   * dari rak orang toko Alpha, bukan orang gudang. Tag gudang di atas tetap
+   * jalan apa adanya dan TIDAK diganti: yang ini menambah, bukan menggantikan,
+   * karena satu kiriman bisa mencampur barang dari toko dan dari gudang
+   * sekaligus.
+   *
+   * Isinya id PERAN, bukan id orang. Peran bertahan waktu orangnya berganti
+   * shift atau keluar; id orang berhenti berarti diam-diam. Bentuk tag-nya
+   * sendiri ditentukan saat kirim (lihat `mention`), jadi salah isi tidak
+   * membuat tag tampil sebagai teks mentah — ia cuma menandai orang, bukan
+   * peran.
+   *
+   * Sengaja KOSONG sampai id perannya diisi. Selama kosong perilakunya persis
+   * seperti sebelumnya: lebih baik tidak menandai siapa-siapa daripada menebak
+   * id peran yang belum tentu ada.
+   */
+  WSR_SHIPMENT_MENTION_TOKO_ALPHA_ID: optionalString.default(""),
+  WSR_SHIPMENT_MENTION_TOKO_BETA_ID: optionalString.default(""),
+  WSR_SHIPMENT_MENTION_TOKO_GAMMA_ID: optionalString.default(""),
+
   // Pengingat susulan sekali untuk kiriman yang masih menggantung sekian jam.
   /**
    * Seberapa jauh ke belakang poller menengok tiap putaran, di luar watermark.

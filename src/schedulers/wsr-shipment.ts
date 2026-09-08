@@ -79,7 +79,10 @@ dua nama untuk satu kiriman, dan yang mencarinya di dua layar tidak menemukan
 apa-apa.
 */
 const WEB_NAMA = "team.kyou.id";
-const WEB_GUDANG = "<https://team.kyou.id/warehouse/rotasi-stok>";
+// Alamat layar kerja gudang. Sempat tertulis /warehouse/rotasi-stok — alamat
+// yang tidak pernah ada, jadi tiap orang yang menekannya mendarat di halaman
+// kosong lalu menyimpulkan kirimannya belum masuk.
+const WEB_GUDANG = "<https://team.kyou.id/warehouse/stock-rotation>";
 
 /** Arah internal → kalimat yang dimengerti orang gudang. */
 const ARAH: Record<string, string> = {
@@ -409,6 +412,19 @@ function gudangPengerja(shipment: ShipmentRow, items: ShipmentItem[]): string[] 
  * Peran inbound/outbound ikut kalau env-nya diisi (perannya dibuat Sopmod).
  * Selama kosong, hasilnya persis seperti sebelumnya.
  */
+/**
+ * Peran Discord tiap toko, dibaca saat dipakai — bukan dibekukan saat modul
+ * dimuat, supaya env yang diisi belakangan langsung berlaku tanpa deploy ulang.
+ *
+ * Cuma toko. Gudang (Omega, SS, Sigma, OP, Lambda) tetap memakai tag Bekasi /
+ * Surabaya yang sudah ada, dan itu sengaja tidak disentuh.
+ */
+const PERAN_TOKO: Record<string, () => string> = {
+  ALPHA: () => env.WSR_SHIPMENT_MENTION_TOKO_ALPHA_ID?.trim() ?? "",
+  BETA: () => env.WSR_SHIPMENT_MENTION_TOKO_BETA_ID?.trim() ?? "",
+  GAMMA: () => env.WSR_SHIPMENT_MENTION_TOKO_GAMMA_ID?.trim() ?? "",
+};
+
 function mentionIdsUntuk(shipment: ShipmentRow, items: ShipmentItem[]): string[] {
   const surabaya = gudangSurabaya();
   const pengerja = gudangPengerja(shipment, items);
@@ -434,6 +450,22 @@ function mentionIdsUntuk(shipment: ShipmentRow, items: ShipmentItem[]): string[]
       ? env.WSR_SHIPMENT_MENTION_OUTBOUND_ID?.trim()
       : env.WSR_SHIPMENT_MENTION_INBOUND_ID?.trim();
   if (peran) ids.push(peran);
+
+  /*
+    Kalau yang mengerjakan tokonya sendiri, peran tokonya ikut ditag.
+
+    Kiriman antar toko — Beta minta barang yang ada di Alpha — yang mengambilnya
+    dari rak orang toko Alpha. Tag gudang di atas tidak diganti, cuma ditambah:
+    satu kiriman bisa mencampur barang dari toko DAN dari gudang, dan memilih
+    salah satu berarti separuhnya tidak ada yang tahu.
+
+    Yang ditag PERAN, bukan orang. Peran bertahan waktu orangnya ganti shift
+    atau keluar; id orang berhenti berarti tanpa ada yang sadar.
+  */
+  for (const g of pengerja) {
+    const idToko = PERAN_TOKO[g]?.();
+    if (idToko) ids.push(idToko);
+  }
 
   return [...new Set(ids)];
 }
