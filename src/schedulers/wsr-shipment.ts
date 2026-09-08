@@ -425,7 +425,47 @@ const PERAN_TOKO: Record<string, () => string> = {
   GAMMA: () => env.WSR_SHIPMENT_MENTION_TOKO_GAMMA_ID?.trim() ?? "",
 };
 
-function mentionIdsUntuk(shipment: ShipmentRow, items: ShipmentItem[]): string[] {
+/**
+ * Ubah isi env peran toko jadi id yang bisa ditag.
+ *
+ * Isinya boleh id (deretan angka) atau NAMA peran. Nama dicari di daftar peran
+ * server, tanpa peduli besar-kecil huruf dan spasi berlebih — nama yang diketik
+ * orang jarang persis sama dengan yang tersimpan.
+ *
+ * Tidak ketemu = kembalikan kosong, bukan menebak. Tag yang menunjuk id karangan
+ * tampil sebagai teks mentah tanpa memberi tahu siapa pun, dan itu lebih buruk
+ * daripada tidak menandai sama sekali karena kelihatan seolah sudah bekerja.
+ */
+/*
+  Pastikan daftar peran server sudah terbaca.
+
+  Pencarian peran — baik menurut nama maupun untuk menentukan bentuk tag-nya —
+  membaca cache, dan cache itu TIDAK dijamin terisi di jalur biasa: ia diisi
+  saat bot menyambung, dan sambungan yang baru pulih setelah putus bisa
+  meninggalkannya kosong. Cache kosong berarti tag-nya diam-diam hilang, dan
+  kegagalannya tidak muncul di mana pun.
+
+  Sekali per pengiriman, dan cuma kalau cache-nya memang kosong. Gagalnya
+  ditelan: tag yang hilang tidak boleh menahan pengumuman kirimannya.
+*/
+async function siapkanPeran(channel: TextChannel): Promise<void> {
+  try {
+    if ((channel.guild?.roles.cache.size ?? 0) === 0) await channel.guild?.roles.fetch();
+  } catch {
+    // sengaja diam — lihat catatan di atas
+  }
+}
+
+function idPeran(isi: string, channel: TextChannel): string {
+  const v = isi.trim();
+  if (!v) return "";
+  if (/^\d+$/.test(v)) return v;
+  const cari = v.toLowerCase();
+  const peran = channel.guild?.roles.cache.find((r) => r.name.trim().toLowerCase() === cari);
+  return peran?.id ?? "";
+}
+
+function mentionIdsUntuk(shipment: ShipmentRow, items: ShipmentItem[], channel: TextChannel): string[] {
   const surabaya = gudangSurabaya();
   const pengerja = gudangPengerja(shipment, items);
 
@@ -463,7 +503,9 @@ function mentionIdsUntuk(shipment: ShipmentRow, items: ShipmentItem[]): string[]
     atau keluar; id orang berhenti berarti tanpa ada yang sadar.
   */
   for (const g of pengerja) {
-    const idToko = PERAN_TOKO[g]?.();
+    const isi = PERAN_TOKO[g]?.();
+    if (!isi) continue;
+    const idToko = idPeran(isi, channel);
     if (idToko) ids.push(idToko);
   }
 
@@ -478,7 +520,7 @@ function mentionIdsUntuk(shipment: ShipmentRow, items: ShipmentItem[]): string[]
  * sebagai teks mentah tanpa notifikasi ke siapa pun.
  */
 function mention(shipment: ShipmentRow, channel: TextChannel, items: ShipmentItem[] = []): string {
-  const ids = mentionIdsUntuk(shipment, items);
+  const ids = mentionIdsUntuk(shipment, items, channel);
   if (ids.length === 0) return "";
   return ids.map((id) => (channel.guild?.roles.cache.has(id) ? `<@&${id}> ` : `<@${id}> `)).join("");
 }
@@ -507,6 +549,7 @@ async function kirimPengingat(config: MetabaseConfig, channel: TextChannel): Pro
   for (const shipment of belum) {
     try {
       const items = rincian.get(shipment.id) ?? [];
+      await siapkanPeran(channel);
       await channel.send({ content: mention(shipment, channel, items), embeds: [reminderEmbed(shipment, jam)] });
       terkirim.push(shipment.id);
     } catch (err) {
@@ -652,6 +695,7 @@ export async function umumkanKirimanSekarang(
 
   const items = (await fetchItems(config, [shipment.id])).get(shipment.id) ?? [];
   const perluDikerjakan = shipment.status === "pending" || shipment.status === "running";
+  await siapkanPeran(channel);
   await channel.send({
     content: perluDikerjakan ? mention(shipment, channel) : undefined,
     embeds: [openingEmbed(shipment, items)]
@@ -715,6 +759,7 @@ export async function runWsrShipmentCheck(client: Client): Promise<void> {
           // pundak orang untuk kerjaan yang sudah beres cuma bikin tag-nya
           // berhenti dipercaya.
           const perluDikerjakan = shipment.status === "pending" || shipment.status === "running";
+          await siapkanPeran(channel);
           await channel.send({
             content: perluDikerjakan ? mention(shipment, channel, items) : undefined,
             embeds: [openingEmbed(shipment, items)]

@@ -335,13 +335,19 @@ const envSchema = z.object({
    * membuat tag tampil sebagai teks mentah — ia cuma menandai orang, bukan
    * peran.
    *
-   * Sengaja KOSONG sampai id perannya diisi. Selama kosong perilakunya persis
-   * seperti sebelumnya: lebih baik tidak menandai siapa-siapa daripada menebak
-   * id peran yang belum tentu ada.
+   * BOLEH ID, BOLEH NAMA PERAN, dan bawaannya nama. Mengambil id peran dari
+   * Discord perlu Developer Mode atau trik garis miring terbalik, dan keduanya
+   * gagal di tangan orang yang seharusnya cuma memakai bot ini. Namanya sendiri
+   * kelihatan di layar siapa pun. Jadi bot yang mencarinya sendiri saat kirim —
+   * satu pencarian di daftar peran server, bukan tebakan.
+   *
+   * Kalau perannya diganti nama, tag-nya berhenti dan TIDAK ada yang rusak: ia
+   * cuma tidak menandai siapa pun, sama seperti waktu env-nya kosong. Isi
+   * dengan id kalau nama perannya sering berubah.
    */
-  WSR_SHIPMENT_MENTION_TOKO_ALPHA_ID: optionalString.default(""),
-  WSR_SHIPMENT_MENTION_TOKO_BETA_ID: optionalString.default(""),
-  WSR_SHIPMENT_MENTION_TOKO_GAMMA_ID: optionalString.default(""),
+  WSR_SHIPMENT_MENTION_TOKO_ALPHA_ID: optionalString.default("Team Alpha Store"),
+  WSR_SHIPMENT_MENTION_TOKO_BETA_ID: optionalString.default("Team Beta Store"),
+  WSR_SHIPMENT_MENTION_TOKO_GAMMA_ID: optionalString.default("Team Gamma Store"),
 
   // Pengingat susulan sekali untuk kiriman yang masih menggantung sekian jam.
   /**
