@@ -127,7 +127,18 @@ type SurplusItem = {
   system_stock?: number;
   counted_stock?: number;
   surplus?: number;
+  /** Isi kantong KOR gudang yang menghitung — cuma ini yang bisa diambil sendiri. */
   kor_tersedia?: number;
+  /**
+   * Isi kantong KOR gudang LAIN, dan nama kantongnya.
+   *
+   * Dulu dua-duanya dijumlah jadi satu angka `kor_tersedia`, dan kartunya bilang
+   * "ada di KOR gudang itu" untuk barang yang unitnya duduk di KOR global —
+   * petugasnya berdiri di depan kantong kosong. Dipisah supaya kalimatnya bisa
+   * menyebut kantong yang benar.
+   */
+  kor_lain?: number;
+  kor_lain_kantong?: string;
   admin_name?: string | null;
   counted_at?: string | null;
 };
@@ -195,6 +206,10 @@ export function buildOpnameKorSweepWorkbook(
       // memang tidak tercatat di mana pun — itu tidak bisa diselesaikan dengan
       // transfer, harus diputuskan orang.
       { header: "Isi KOR", key: "kor", width: 10 },
+      // Kantong gudang lain ditulis lengkap dengan namanya. Barang yang
+      // ketemunya di KOR global tetap bisa dibereskan, cuma bukan oleh gudang
+      // yang menghitung — dan tanpa nama kantongnya tidak ada yang tahu ke mana.
+      { header: "Ada di KOR Lain", key: "korLain", width: 24 },
       { header: "Dihitung Oleh", key: "by", width: 22 },
       { header: "Waktu Hitung", key: "at", width: 20 },
     ];
@@ -210,6 +225,7 @@ export function buildOpnameKorSweepWorkbook(
         counted: Number(it.counted_stock ?? 0),
         surplus: Number(it.surplus ?? 0),
         kor: Number(it.kor_tersedia ?? 0),
+        korLain: it.kor_lain_kantong ?? "-",
         by: it.admin_name ?? "-",
         at: it.counted_at ?? "-",
       });
@@ -356,7 +372,15 @@ export async function handleOpnameKorSweepIntake(
     // sendiri lewat PDA, sedangkan yang KOR-nya kosong memang tidak punya asal
     // di mana pun dan harus diputuskan orang kantor.
     const lebihAdaDiKor = surplus.filter((it) => Number(it.kor_tersedia ?? 0) > 0);
-    const lebihTanpaAsal = surplus.filter((it) => Number(it.kor_tersedia ?? 0) <= 0);
+    // Golongan tengah: barangnya ADA di kantong KOR, tapi bukan kantong gudang
+    // yang menghitung. Bukan pekerjaan petugas lantai dan bukan pula perkara
+    // yang buntu — cuma perlu orang yang memegang kantong itu.
+    const lebihDiKorLain = surplus.filter(
+      (it) => Number(it.kor_tersedia ?? 0) <= 0 && Number(it.kor_lain ?? 0) > 0,
+    );
+    const lebihTanpaAsal = surplus.filter(
+      (it) => Number(it.kor_tersedia ?? 0) <= 0 && Number(it.kor_lain ?? 0) <= 0,
+    );
     const perluDicek = needsHuman.length + surplus.length;
 
     const embed = new EmbedBuilder()
@@ -383,15 +407,22 @@ export async function handleOpnameKorSweepIntake(
               : "Tidak ada stok yang berpindah semalam.",
           needsHuman.length > 0
             // Sebabnya TIDAK diketahui di sini. Yang diperiksa hanayo cuma
-            // "kekurangan lebih besar dari isi baris gudang" — bisa karena
-            // sisanya duduk di kantong reservasi oripa, bisa juga karena stok
-            // bergerak antara saat dihitung dan saat diperiksa jam 2 pagi.
-            // Menyebut satu sebab untuk semuanya membuat orang mencari ke
-            // tempat yang salah; alasan per barang ada di berkas Excel-nya.
-            ? `**${needsHuman.length} barang** hasil hitungnya kurang, tapi kurangnya lebih banyak daripada stok yang tercatat di gudang itu. Bisa jadi barangnya sedang dipesan orang lain, bisa juga stoknya bergerak setelah dihitung. Alasan per barang ada di berkas.`
+            // "kekurangan lebih besar dari isi baris gudang", dan itu bisa lahir
+            // dari beberapa keadaan yang berbeda: unitnya duduk di kantong
+            // reservasi, stoknya bergerak sesudah dihitung, atau gudangnya sudah
+            // ditutup dan isinya dipulangkan — yang terakhir inilah yang menahan
+            // 17 barang AFA ID 2026 selama 24 malam.
+            //
+            // Jadi kartunya BERHENTI menebak. Kalimat lamanya menyebut dua sebab
+            // seolah cuma ada dua, dan orang gudang mencari ke tempat yang salah
+            // lebih dulu sebelum tahu tebakannya meleset.
+            ? `**${needsHuman.length} barang** hasil hitungnya kurang, tapi kurangnya lebih banyak daripada stok yang tercatat di gudang itu, jadi tidak bisa dipindah otomatis. Sebabnya beda-beda per barang dan perlu ditengok satu per satu — rinciannya di berkas.`
             : null,
           lebihAdaDiKor.length > 0
             ? `**${lebihAdaDiKor.length} barang** hasil hitungnya lebih, dan barangnya ada di KOR gudang itu. Bisa dibereskan sendiri: scan ulang barangnya di menu Opname, lalu ambil dari KOR.`
+            : null,
+          lebihDiKorLain.length > 0
+            ? `**${lebihDiKorLain.length} barang** hasil hitungnya lebih, dan barangnya ada di kantong KOR gudang lain — bukan kantong gudang yang menghitung. Nama kantongnya ada di berkas.`
             : null,
           lebihTanpaAsal.length > 0
             ? `**${lebihTanpaAsal.length} barang** hasil hitungnya lebih dan belum ketahuan asalnya. Stoknya sengaja belum ditambah — menunggu keputusan orang kantor.`
