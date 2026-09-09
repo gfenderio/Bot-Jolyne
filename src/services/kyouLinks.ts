@@ -1,11 +1,20 @@
 /**
- * Link balik ke panel admin kyou.id. Dipakai supaya tiap order id yang muncul di
+ * Link balik ke halaman order. Dipakai supaya tiap order id yang muncul di
  * Discord bisa langsung diklik ke halaman ordernya, tanpa copy-paste nomor.
  *
- *   https://old.kyou.id/admin/order/362826
+ *   https://team.kyou.id/order/362826
+ *
+ * PINDAH DARI old.kyou.id (9 Sep 2026, permintaan Gilang). Detail order sudah
+ * hidup di team.kyou.id dan di situlah orang mengerjakan ordernya sekarang;
+ * mengirim mereka ke panel lama berarti satu lompatan tambahan tiap kali.
+ * Nomor lama tetap mendarat benar — /orders/<nomor> di team.kyou.id
+ * dialihkan ke /order/<nomor>.
+ *
+ * CUMA halaman order yang pindah. Link CETAK LABEL di bawah tetap ke
+ * old.kyou.id, karena yang menerbitkan labelnya memang masih halaman itu.
  */
 
-const ADMIN_ORDER_BASE = "https://old.kyou.id/admin/order";
+const ADMIN_ORDER_BASE = "https://team.kyou.id/order";
 
 /**
  * URL halaman order, atau null kalau nilainya bukan satu order id yang wajar

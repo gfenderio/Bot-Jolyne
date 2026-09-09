@@ -413,7 +413,11 @@ export function openingEmbed(shipment: ShipmentRow, items: ShipmentItem[]): Embe
     .setDescription(
       `${directionSentence(shipment, asal, tujuan)}\n` +
         (rute ? `${rute}\n` : "") +
-        `\n**${shipment.totalItems} barang · ${shipment.totalQty} pcs**\n${rincian}\n\n` +
+        // Kiriman yang rincian barangnya gagal dibaca tidak meninggalkan baris
+        // kosong menganga di tengah pesan — yang hilang cuma rinciannya.
+        `\n**${shipment.totalItems} barang · ${shipment.totalQty} pcs**\n` +
+        (rincian ? `${rincian}\n` : "") +
+        `\n` +
         `Diminta oleh **${shipment.createdBy}** dari **${shipment.unit}**.\n\n` +
         penutup
     )
