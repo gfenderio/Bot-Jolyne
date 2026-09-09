@@ -22,15 +22,10 @@ interface WsrShipmentStore {
   lastSeenBatchId: number | null;
   /** Kiriman yang laporan "sudah dikerjakan"-nya sudah dikirim. */
   reported?: number[];
-  /**
-   * Kiriman yang sudah dapat pengingat susulan. Dicatat supaya pengingatnya
-   * SEKALI saja — poller jalan tiap 5 menit, tanpa ini gudang di-tag terus.
-   */
-  reminded: number[];
 }
 
-/** Batas daftar pengingat; kiriman lama tidak perlu diingat selamanya. */
-const MAX_REMINDED = 200;
+/** Batas daftar laporan; kiriman lama tidak perlu diingat selamanya. */
+const MAX_DIINGAT = 200;
 
 function storePath(): string {
   return env.WSR_SHIPMENT_STORE_PATH;
@@ -38,20 +33,16 @@ function storePath(): string {
 
 function readStore(): WsrShipmentStore {
   const file = storePath();
-  if (!fs.existsSync(file)) return { lastSeenBatchId: null, reminded: [], reported: [] };
+  if (!fs.existsSync(file)) return { lastSeenBatchId: null, reported: [] };
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
     const id = Number(parsed.lastSeenBatchId);
-    // `reminded` baru ada belakangan — store lama tanpa field itu tetap terbaca.
-    const reminded = Array.isArray(parsed.reminded)
-      ? parsed.reminded.map(Number).filter(Number.isFinite)
-      : [];
     const reported = Array.isArray(parsed.reported)
       ? parsed.reported.map(Number).filter(Number.isFinite)
       : [];
-    return { lastSeenBatchId: Number.isFinite(id) ? id : null, reminded, reported };
+    return { lastSeenBatchId: Number.isFinite(id) ? id : null, reported };
   } catch {
-    return { lastSeenBatchId: null, reminded: [], reported: [] };
+    return { lastSeenBatchId: null, reported: [] };
   }
 }
 
@@ -78,11 +69,6 @@ export function setWatermark(id: number): void {
   writeStore({ ...readStore(), lastSeenBatchId: id });
 }
 
-/** Kiriman mana saja yang sudah pernah diingatkan. */
-export function getReminded(): number[] {
-  return readStore().reminded;
-}
-
 /** Kiriman mana yang laporan penyelesaiannya sudah dikirim. */
 export function getReported(): number[] {
   return readStore().reported ?? [];
@@ -92,12 +78,5 @@ export function markReported(ids: number[]): void {
   if (ids.length === 0) return;
   const store = readStore();
   const gabungan = [...new Set([...(store.reported ?? []), ...ids])].sort((a, b) => a - b);
-  writeStore({ ...store, reported: gabungan.slice(-MAX_REMINDED) });
-}
-
-export function markReminded(ids: number[]): void {
-  if (ids.length === 0) return;
-  const store = readStore();
-  const gabungan = [...new Set([...store.reminded, ...ids])].sort((a, b) => a - b);
-  writeStore({ ...store, reminded: gabungan.slice(-MAX_REMINDED) });
+  writeStore({ ...store, reported: gabungan.slice(-MAX_DIINGAT) });
 }

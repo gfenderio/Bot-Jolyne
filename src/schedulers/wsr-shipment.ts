@@ -9,9 +9,7 @@ import { env } from "../config/env.js";
 import { fetchNativeQueryWithPagination, type MetabaseConfig } from "../services/metabase.js";
 import {
   getOrInitWatermark,
-  getReminded,
   getReported,
-  markReminded,
   markReported,
   setWatermark
 } from "../services/wsrShipmentStore.js";
@@ -26,10 +24,17 @@ import {
  * Kiriman dibuat anak toko di PDA, dikerjakan anak gudang di PDA juga (menu
  * Kiriman: centang barang yang sudah disiapkan, lalu Pindahkan stok).
  *
+ * Keputusan 9 Sep 2026: PENGINGAT SUSULAN DIHAPUS. Daftar "sudah diingatkan"
+ * hidup di berkas tanpa volume, jadi tiap redeploy ia hilang dan seluruh
+ * kiriman yang menggantung diingatkan ULANG — dua kali pada 9 Sep, karena
+ * proses lama dan baru sempat hidup bersamaan. Sejak ada thread per kiriman,
+ * kirimannya juga sudah punya tempatnya sendiri yang tidak tenggelam, jadi
+ * pesan susulan di channel cuma menambah kebisingan pada tag yang sama.
+ *
  * Keputusan 28 Jul: Excel DIHAPUS. Daftar barangnya sudah ada di PDA — lengkap
  * dengan urutan rak dan centang per barang — jadi berkas kedua di Discord cuma
  * jadi salinan yang bisa basi begitu ada yang dicentang. Peran Jolyne tinggal
- * dua: (1) menepuk pundak orang gudang saat ada kiriman baru & saat menggantung,
+ * dua: (1) menepuk pundak orang gudang saat ada kiriman baru,
  * (2) melapor balik setelah dikerjakan — siapa yang mengerjakan, berapa yang jadi
  * dikirim, dan berapa yang tidak (biasanya karena barangnya belum ada).
  *
@@ -165,26 +170,6 @@ tidak lagi berarti kehilangan pengumuman.
 const newShipmentsQuery = (sejakId: number, batasWib: string) => `
   ${batchSelect}
   WHERE b.id > ${sejakId} OR b.created_at >= '${batasWib}'
-  ORDER BY b.id ASC
-`;
-
-/**
- * Kiriman yang masih menunggu padahal sudah lewat sekian jam. 'running' ikut:
- * eksekusi yang mati di tengah jalan juga barang yang belum sampai tujuan.
- *
- * Batas waktunya dihitung di sini (Node), BUKAN `NOW() - INTERVAL n HOUR`.
- * Alasannya jebakan yang sudah pernah kena di fitur split-print: kolom created_at
- * ditulis Laravel dengan timezone Asia/Jakarta, sedangkan NOW() server DB belum
- * tentu WIB — selisih 7 jam bikin pengingat datang kepagian atau tak datang sama
- * sekali. Kirim tanggalnya apa adanya dalam WIB, tidak ada yang perlu ditebak.
- */
-const staleShipmentsQuery = (batasWib: string) => `
-  ${batchSelect}
-  WHERE b.status IN ('pending', 'running')
-    AND b.created_at < '${batasWib}'
-    AND NOT EXISTS (
-      SELECT 1 FROM wsr_batch_items i WHERE i.batch_id = b.id AND i.status = 'done'
-    )
   ORDER BY b.id ASC
 `;
 
@@ -436,33 +421,6 @@ export function openingEmbed(shipment: ShipmentRow, items: ShipmentItem[]): Embe
     .setTimestamp();
 }
 
-/**
- * Pengingat susulan untuk kiriman yang masih menggantung. Sekali saja per
- * kiriman (lihat markReminded) — poller jalan tiap 5 menit, tanpa itu orang
- * gudang di-tag terus-terusan dan pengingatnya jadi diabaikan.
- */
-function reminderEmbed(shipment: ShipmentRow, jam: number, items: ShipmentItem[]): EmbedBuilder {
-  const asal = qtyPerWarehouse(items, "source").map(([nama]) => nama);
-  const tujuan = qtyPerWarehouse(items, "destination").map(([nama]) => nama);
-  const rute = routeSentence(asal, tujuan);
-  return new EmbedBuilder()
-    .setColor(0xef6c00)
-    .setTitle(`⏰ ${shipmentCode(shipment)} belum dikerjakan`)
-    .setDescription(
-      `Kiriman ini dibuat **${shipment.createdBy}** lebih dari **${jam} jam** lalu dan ` +
-        `stoknya masih belum berpindah.\n\n` +
-        `${shipment.totalItems} barang · ${shipment.totalQty} pcs · ` +
-        `${directionSentence(shipment, asal, tujuan)}\n` +
-        (rute ? `${rute}\n` : "") +
-        `\n` +
-        `Buka menu **Kiriman** — di PDA, atau di ${WEB_NAMA}: ${WEB_GUDANG}\n` +
-        `Kalau barangnya memang tidak bisa dikirim, batalkan kirimannya dari sana ` +
-        `biar tidak menggantung.`
-    )
-    .setFooter({ text: `Dibuat ${shipment.createdAt} WIB` })
-    .setTimestamp();
-}
-
 /** Gudang Surabaya, dari env. Sisanya dianggap Bekasi. */
 function gudangSurabaya(): Set<string> {
   return new Set(
@@ -623,29 +581,25 @@ function mention(shipment: ShipmentRow, channel: TextChannel, items: ShipmentIte
   return ids.map((id) => (channel.guild?.roles.cache.has(id) ? `<@&${id}> ` : `<@${id}> `)).join("");
 }
 
-/**
- * Kiriman lama yang masih menggantung → satu pengingat, sekali saja.
- * Dijalankan setelah pengumuman kiriman baru, memakai koneksi Metabase yang sama.
- */
 /*
 SATU KIRIMAN, SATU THREAD (permintaan Gilang, 9 Sep 2026).
 
 Sampai sekarang tiap kiriman menaruh tiga pesan terpisah di channel yang sama:
-pengumuman, pengingat susulan, dan laporan selesainya. Untuk satu kiriman itu
-masih terbaca; untuk beberapa kiriman yang berjalan bersamaan, ketiganya
+pengumuman dan laporan selesainya. Untuk satu kiriman itu masih terbaca; untuk
+beberapa kiriman yang berjalan bersamaan, keduanya
 berselang-seling dengan kiriman lain, dan orang yang mau tahu "kiriman saya
 sampai mana" harus menyusuri channel sambil mencocokkan kodenya sendiri.
 
 THREAD-NYA DICARI DARI DISCORD, BUKAN DISIMPAN. Store bot ini hidup di berkas
 biasa tanpa volume persisten — tiap redeploy ia hilang (lihat wsrShipmentStore).
-Id thread yang disimpan di sana akan ikut hilang, dan pengingatnya diam-diam
+Id thread yang disimpan di sana akan ikut hilang, dan laporannya diam-diam
 balik lagi ke channel. Nama thread = kode kirimannya, jadi thread-nya bisa
 dikenali dari Discord sendiri, sumber yang tidak ikut hilang saat deploy.
 Cara yang sama sudah dipakai penjaga anti-dobel (kodeSudahDiumumkan).
 
 KALAU THREAD-NYA TIDAK KETEMU, pesannya tetap dikirim ke channel. Kiriman lama
-(sebelum hari ini) memang tidak punya thread, dan pengingat yang batal terkirim
-gara-gara itu jauh lebih buruk daripada pengingat yang mendarat di channel.
+(sebelum hari ini) memang tidak punya thread, dan laporan selesai yang batal
+terkirim gara-gara itu jauh lebih buruk daripada yang mendarat di channel.
 */
 
 /** Umur thread sebelum ditutup sendiri kalau tidak ada yang bicara: 7 hari. */
@@ -739,44 +693,6 @@ async function kirimPengumuman(
     // untuk menganggap pengumumannya gagal — pengumumannya sudah terkirim, dan
     // susulannya akan mendarat di channel seperti sebelum ada thread.
     console.error(`[wsr-shipment] gagal membuka thread ${code}:`, err);
-  }
-}
-
-async function kirimPengingat(config: MetabaseConfig, channel: TextChannel): Promise<void> {
-  const jam = env.WSR_SHIPMENT_REMINDER_HOURS;
-  const res = await fetchNativeQueryWithPagination(config, staleShipmentsQuery(batasWaktuWib(jam)));
-  const stale = rowsToShipments(res.columns, res.rows);
-  if (stale.length === 0) return;
-
-  const sudah = new Set(getReminded());
-  const belum = stale.filter((s) => !sudah.has(s.id));
-  if (belum.length === 0) return;
-
-  // Rincian barangnya ikut ditarik HANYA untuk yang benar-benar diingatkan
-  // (biasanya segelintir). Tanpa ini pengingatnya menandai kota yang berbeda
-  // dari pengumuman aslinya, dan yang ditepuk pundaknya jadi dua orang yang
-  // sama-sama merasa bukan bagiannya.
-  const rincian = await fetchItems(config, belum.map((s) => s.id)).catch(() => new Map<number, ShipmentItem[]>());
-
-  const peta = await petaThreadKiriman(channel);
-  const terkirim: number[] = [];
-  for (const shipment of belum) {
-    try {
-      const items = rincian.get(shipment.id) ?? [];
-      await siapkanPeran(channel);
-      await kirimSusulan(channel, peta, shipmentCode(shipment), {
-        content: mention(shipment, channel, items),
-        embeds: [reminderEmbed(shipment, jam, items)]
-      });
-      terkirim.push(shipment.id);
-    } catch (err) {
-      console.error(`[wsr-shipment] gagal kirim pengingat #${shipment.id}:`, err);
-    }
-  }
-  // Hanya yang benar-benar terkirim yang ditandai — yang gagal dicoba lagi nanti.
-  markReminded(terkirim);
-  if (terkirim.length > 0) {
-    console.log(`[wsr-shipment] ${terkirim.length} pengingat kiriman menggantung dikirim.`);
   }
 }
 
@@ -985,9 +901,8 @@ export async function runWsrShipmentCheck(client: Client): Promise<void> {
     }
   }
 
-  // Selalu dijalankan, termasuk saat tidak ada kiriman baru — justru kiriman
-  // yang sudah lama diam itulah yang perlu diingatkan.
-  await kirimPengingat(config, channel);
+  // Selalu dijalankan, termasuk saat tidak ada kiriman baru: kiriman bisa
+  // selesai dikerjakan tanpa ada kiriman baru yang lahir di putaran yang sama.
   await laporkanSelesai(config, channel);
 }
 
