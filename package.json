@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "commands:deploy": "tsx src/deploy-commands.ts",
+    "wsr:umumkan-ulang": "tsx scripts/resend-wsr.ts",
     "deliveree:login": "tsx src/deliveree-login.ts",
     "deliveree:intake": "node dist/deliveree-intake.js",
     "deliveree:extension:pack": "node scripts/pack-deliveree-extension.js",

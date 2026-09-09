@@ -1,4 +1,10 @@
-import { Client, EmbedBuilder, TextChannel } from "discord.js";
+import {
+  AnyThreadChannel,
+  Client,
+  EmbedBuilder,
+  MessageCreateOptions,
+  TextChannel
+} from "discord.js";
 import { env } from "../config/env.js";
 import { fetchNativeQueryWithPagination, type MetabaseConfig } from "../services/metabase.js";
 import {
@@ -33,7 +39,7 @@ import {
  * `users` (string hanya hidup di tabel asalnya).
  */
 
-interface ShipmentRow {
+export interface ShipmentRow {
   id: number;
   unit: string;
   direction: string;
@@ -46,7 +52,7 @@ interface ShipmentRow {
   createdAt: string;
 }
 
-interface ShipmentItem {
+export interface ShipmentItem {
   batchId: number;
   itemId: string;
   name: string;
@@ -296,12 +302,90 @@ async function fetchItems(config: MetabaseConfig, batchIds: number[]): Promise<M
   return out;
 }
 
-function openingEmbed(shipment: ShipmentRow, items: ShipmentItem[]): EmbedBuilder {
-  const perTujuan = new Map<string, number>();
+/**
+ * Jumlah pcs per gudang, di sisi asal atau sisi tujuan. Urut dari yang paling
+ * banyak — yang paling banyak itu yang paling lama disiapkan orangnya.
+ */
+function qtyPerWarehouse(items: ShipmentItem[], sisi: "source" | "destination"): [string, number][] {
+  const per = new Map<string, number>();
   for (const item of items) {
-    perTujuan.set(item.destination, (perTujuan.get(item.destination) ?? 0) + item.qty);
+    const nama = (sisi === "source" ? item.source : item.destination).trim().toUpperCase();
+    if (!nama) continue;
+    per.set(nama, (per.get(nama) ?? 0) + item.qty);
   }
-  const rincian = [...perTujuan.entries()].map(([t, q]) => `**${t}** ${q} pcs`).join(" · ");
+  return [...per.entries()].sort((a, b) => b[1] - a[1]);
+}
+
+/**
+ * Toko yang dilayani unit ini. Nama unit selalu dimulai nama tokonya
+ * (`ALPHA`, `BETA`, `GAMMA_LAMBDA` → toko Gamma, gudang pasangannya Lambda).
+ */
+function storeOfUnit(unit: string): string {
+  return unit.trim().toUpperCase().split("_")[0] ?? "";
+}
+
+/**
+ * Kalimat arah — DIPERIKSA ULANG ke isi kirimannya, bukan dipercaya begitu saja
+ * dari kolom `direction`.
+ *
+ * Enum `direction` di hanayo cuma tiga (request/return/event) dan sengaja tidak
+ * ditambah. Akibatnya "Minta dari Bekasi" — Omega/SS mengirim ke GUDANG Lambda,
+ * bukan ke toko mana pun — ikut tersimpan sebagai `request`, dan arah aslinya
+ * cuma hidup di Postgres kakera yang tidak bisa dilihat dari sini. Kalimat
+ * "Gudang → Toko (isi toko)" untuk kiriman seperti itu bukan kurang tepat, tapi
+ * salah: yang menerima gudang, dan yang harus menyiapkan orang kota lain.
+ *
+ * Terjadi 8 Sep 2026 di WSR-GAMMA_LAMBDA-19 — 78 pcs dari lima gudang Bekasi
+ * ke Lambda, diumumkan sebagai "isi toko".
+ *
+ * Yang membedakannya ada di barangnya sendiri: kalau tujuannya BUKAN toko unit
+ * ini, kirimannya memang bukan pengisian toko.
+ */
+function directionSentence(shipment: ShipmentRow, asal: string[], tujuan: string[]): string {
+  const bawaan = ARAH[shipment.direction] ?? shipment.direction;
+  const toko = storeOfUnit(shipment.unit);
+  if (!toko) return bawaan;
+  if (shipment.direction === "request" && tujuan.length > 0 && !tujuan.includes(toko)) {
+    return `Gudang → Gudang (isi gudang ${tujuan.join("/")})`;
+  }
+  if (shipment.direction === "return" && asal.length > 0 && !asal.includes(toko)) {
+    return `Gudang → Gudang (pulangkan ke ${tujuan.join("/")})`;
+  }
+  return bawaan;
+}
+
+/**
+ * Rute sebenarnya, dan sekaligus cara menyebut penerimanya tanpa menepuk
+ * pundaknya: yang di-tag cuma sisi yang mengambil barang dari rak, sedangkan
+ * yang menerima perlu disebut supaya kirimannya tidak terbaca "entah ke mana".
+ */
+function routeSentence(asal: string[], tujuan: string[]): string {
+  if (asal.length === 0 || tujuan.length === 0) return "";
+  return `Diambil dari **${asal.join("/")}**, diterima **${tujuan.join("/")}**.`;
+}
+
+export function openingEmbed(shipment: ShipmentRow, items: ShipmentItem[]): EmbedBuilder {
+  const perAsal = qtyPerWarehouse(items, "source");
+  const perTujuan = qtyPerWarehouse(items, "destination");
+  const asal = perAsal.map(([nama]) => nama);
+  const tujuan = perTujuan.map(([nama]) => nama);
+
+  /*
+    DIPECAH PER ASAL kalau tujuannya cuma satu tempat.
+
+    Rinciannya dulu selalu per tujuan, dan untuk pengisian toko itu memang yang
+    dicari. Tapi untuk kiriman yang tujuannya satu gudang, barisnya jadi
+    "LAMBDA 78 pcs" — mengulang satu-satunya tujuan yang sudah disebut di
+    kalimat rutenya, dan tidak memberi tahu apa pun. Yang menentukan siapa
+    berdiri di rak mana justru ASALNYA.
+  */
+  const pecahPerAsal = tujuan.length === 1 && asal.length > 1;
+  const angka = pecahPerAsal ? perAsal : perTujuan;
+  const rincian =
+    angka.length === 0
+      ? ""
+      : `${pecahPerAsal ? "Dari" : "Untuk"} ${angka.map(([nama, qty]) => `**${nama}** ${qty} pcs`).join(" · ")}`;
+  const rute = routeSentence(asal, tujuan);
 
   const code = shipmentCode(shipment);
   /*
@@ -342,8 +426,9 @@ function openingEmbed(shipment: ShipmentRow, items: ShipmentItem[]): EmbedBuilde
         (dibatalkan ? " (dibatalkan)" : sudahBeres ? " (sudah dikerjakan)" : "")
     )
     .setDescription(
-      `${ARAH[shipment.direction] ?? shipment.direction}\n\n` +
-        `**${shipment.totalItems} barang · ${shipment.totalQty} pcs**\n${rincian}\n\n` +
+      `${directionSentence(shipment, asal, tujuan)}\n` +
+        (rute ? `${rute}\n` : "") +
+        `\n**${shipment.totalItems} barang · ${shipment.totalQty} pcs**\n${rincian}\n\n` +
         `Diminta oleh **${shipment.createdBy}** dari **${shipment.unit}**.\n\n` +
         penutup
     )
@@ -356,7 +441,10 @@ function openingEmbed(shipment: ShipmentRow, items: ShipmentItem[]): EmbedBuilde
  * kiriman (lihat markReminded) — poller jalan tiap 5 menit, tanpa itu orang
  * gudang di-tag terus-terusan dan pengingatnya jadi diabaikan.
  */
-function reminderEmbed(shipment: ShipmentRow, jam: number): EmbedBuilder {
+function reminderEmbed(shipment: ShipmentRow, jam: number, items: ShipmentItem[]): EmbedBuilder {
+  const asal = qtyPerWarehouse(items, "source").map(([nama]) => nama);
+  const tujuan = qtyPerWarehouse(items, "destination").map(([nama]) => nama);
+  const rute = routeSentence(asal, tujuan);
   return new EmbedBuilder()
     .setColor(0xef6c00)
     .setTitle(`⏰ ${shipmentCode(shipment)} belum dikerjakan`)
@@ -364,7 +452,9 @@ function reminderEmbed(shipment: ShipmentRow, jam: number): EmbedBuilder {
       `Kiriman ini dibuat **${shipment.createdBy}** lebih dari **${jam} jam** lalu dan ` +
         `stoknya masih belum berpindah.\n\n` +
         `${shipment.totalItems} barang · ${shipment.totalQty} pcs · ` +
-        `${ARAH[shipment.direction] ?? shipment.direction}\n\n` +
+        `${directionSentence(shipment, asal, tujuan)}\n` +
+        (rute ? `${rute}\n` : "") +
+        `\n` +
         `Buka menu **Kiriman** — di PDA, atau di ${WEB_NAMA}: ${WEB_GUDANG}\n` +
         `Kalau barangnya memang tidak bisa dikirim, batalkan kirimannya dari sana ` +
         `biar tidak menggantung.`
@@ -411,6 +501,14 @@ function gudangPengerja(shipment: ShipmentRow, items: ShipmentItem[]): string[] 
  *
  * Peran inbound/outbound ikut kalau env-nya diisi (perannya dibuat Sopmod).
  * Selama kosong, hasilnya persis seperti sebelumnya.
+ *
+ * `items` WAJIB diisi, dan penutup `= []` yang dulu ada di sini sengaja dicabut:
+ * jalur "umumkan seketika" memanggilnya tanpa daftar barang, jatuh ke aturan
+ * lama tanpa satu pun peringatan, dan itu membuat perbaikan 3 Sep 2026 tidak
+ * pernah benar-benar jalan — hampir semua pengumuman lahir dari jalur itu.
+ * Ketahuannya baru 9 Sep dari keluhan orang toko yang kirimannya ditepuk ke
+ * kota yang salah. Pemanggil yang tidak punya daftar barangnya harus menulis
+ * `[]` sendiri, supaya jatuhnya ke aturan lama itu disengaja.
  */
 /**
  * Peran Discord tiap toko, dibaca saat dipakai — bukan dibekukan saat modul
@@ -519,7 +617,7 @@ function mentionIdsUntuk(shipment: ShipmentRow, items: ShipmentItem[], channel: 
  * role (`<@&id>`) atau orang (`<@id>`), dan salah bentuk bikin tag-nya tampil
  * sebagai teks mentah tanpa notifikasi ke siapa pun.
  */
-function mention(shipment: ShipmentRow, channel: TextChannel, items: ShipmentItem[] = []): string {
+function mention(shipment: ShipmentRow, channel: TextChannel, items: ShipmentItem[]): string {
   const ids = mentionIdsUntuk(shipment, items, channel);
   if (ids.length === 0) return "";
   return ids.map((id) => (channel.guild?.roles.cache.has(id) ? `<@&${id}> ` : `<@${id}> `)).join("");
@@ -529,6 +627,121 @@ function mention(shipment: ShipmentRow, channel: TextChannel, items: ShipmentIte
  * Kiriman lama yang masih menggantung → satu pengingat, sekali saja.
  * Dijalankan setelah pengumuman kiriman baru, memakai koneksi Metabase yang sama.
  */
+/*
+SATU KIRIMAN, SATU THREAD (permintaan Gilang, 9 Sep 2026).
+
+Sampai sekarang tiap kiriman menaruh tiga pesan terpisah di channel yang sama:
+pengumuman, pengingat susulan, dan laporan selesainya. Untuk satu kiriman itu
+masih terbaca; untuk beberapa kiriman yang berjalan bersamaan, ketiganya
+berselang-seling dengan kiriman lain, dan orang yang mau tahu "kiriman saya
+sampai mana" harus menyusuri channel sambil mencocokkan kodenya sendiri.
+
+THREAD-NYA DICARI DARI DISCORD, BUKAN DISIMPAN. Store bot ini hidup di berkas
+biasa tanpa volume persisten — tiap redeploy ia hilang (lihat wsrShipmentStore).
+Id thread yang disimpan di sana akan ikut hilang, dan pengingatnya diam-diam
+balik lagi ke channel. Nama thread = kode kirimannya, jadi thread-nya bisa
+dikenali dari Discord sendiri, sumber yang tidak ikut hilang saat deploy.
+Cara yang sama sudah dipakai penjaga anti-dobel (kodeSudahDiumumkan).
+
+KALAU THREAD-NYA TIDAK KETEMU, pesannya tetap dikirim ke channel. Kiriman lama
+(sebelum hari ini) memang tidak punya thread, dan pengingat yang batal terkirim
+gara-gara itu jauh lebih buruk daripada pengingat yang mendarat di channel.
+*/
+
+/** Umur thread sebelum ditutup sendiri kalau tidak ada yang bicara: 7 hari. */
+const THREAD_ARSIP_MENIT = 10080;
+
+/**
+ * Thread kiriman yang sudah ada di channel ini, dikunci nama = kode kiriman.
+ * Ditarik SEKALI per putaran, bukan per kiriman: dua panggilan Discord untuk
+ * seluruh daftar, bukan dua dikali jumlah kiriman.
+ */
+async function petaThreadKiriman(channel: TextChannel): Promise<Map<string, AnyThreadChannel>> {
+  const out = new Map<string, AnyThreadChannel>();
+  const aktif = await channel.threads.fetchActive().catch(() => null);
+  for (const t of aktif?.threads.values() ?? []) {
+    if (t.name.startsWith("WSR-")) out.set(t.name, t);
+  }
+  // Yang sudah diarsipkan ikut dicari: kiriman yang selesai thread-nya ditutup,
+  // dan laporan susulan untuknya tetap harus mendarat di tempat yang sama.
+  const arsip = await channel.threads.fetchArchived({ limit: 100 }).catch(() => null);
+  for (const t of arsip?.threads.values() ?? []) {
+    if (t.name.startsWith("WSR-") && !out.has(t.name)) out.set(t.name, t);
+  }
+  return out;
+}
+
+/**
+ * Kirim satu pesan susulan ke thread kirimannya — atau ke channel kalau
+ * thread-nya tidak ada. Mengembalikan thread yang dipakai, supaya pemanggilnya
+ * bisa menutup thread yang kirimannya sudah beres.
+ */
+async function kirimSusulan(
+  channel: TextChannel,
+  peta: Map<string, AnyThreadChannel>,
+  code: string,
+  payload: MessageCreateOptions
+): Promise<AnyThreadChannel | null> {
+  const thread = peta.get(code);
+  if (!thread) {
+    await channel.send(payload);
+    return null;
+  }
+  // Thread yang sudah diarsipkan menolak pesan baru; dibuka dulu, dan yang
+  // menutupnya lagi cuma laporan selesai.
+  if (thread.archived) await thread.setArchived(false).catch(() => undefined);
+  await thread.send(payload);
+  return thread;
+}
+
+/**
+ * Pengumuman pembuka + thread-nya — SATU tempat untuk ketiga jalur yang
+ * mengumumkan (poller, dorongan kakera, kirim ulang manual).
+ *
+ * Disatukan justru karena cacat yang sedang diperbaiki: ketiganya dulu menyusun
+ * `channel.send` sendiri-sendiri, dan waktu aturan tag diperbaiki 3 Sep 2026,
+ * dua ikut diperbaiki dan satu tidak. Selama pesannya dirakit di tiga tempat,
+ * cacat seperti itu pasti lahir lagi.
+ */
+async function kirimPengumuman(
+  channel: TextChannel,
+  shipment: ShipmentRow,
+  items: ShipmentItem[],
+  opsi: { selaluTag?: boolean; threadYangAda?: Map<string, AnyThreadChannel> } = {}
+): Promise<void> {
+  // Tag ditaruh di isi pesan, bukan di embed: mention di dalam embed TIDAK
+  // memicu notifikasi Discord — orangnya tak akan tahu.
+  //
+  // Kiriman yang saat diumumkan sudah selesai/dibatalkan tetap dikabarkan (biar
+  // ada jejak "kiriman ini pernah dibuat"), tapi TANPA tag dan TANPA thread:
+  // menepuk pundak orang untuk kerjaan yang sudah beres cuma bikin tag-nya
+  // berhenti dipercaya, dan thread kosong yang langsung ditutup cuma sampah.
+  const perluDikerjakan = shipment.status === "pending" || shipment.status === "running";
+  const code = shipmentCode(shipment);
+  await siapkanPeran(channel);
+  const pesan = await channel.send({
+    content: perluDikerjakan || opsi.selaluTag ? mention(shipment, channel, items) : undefined,
+    embeds: [openingEmbed(shipment, items)]
+  });
+  if (!perluDikerjakan) return;
+
+  const peta = opsi.threadYangAda ?? (await petaThreadKiriman(channel));
+  // Kirim ulang pengumuman yang telanjur salah TIDAK membuat thread kedua
+  // dengan nama yang sama — Discord mengizinkannya, dan hasilnya dua tempat
+  // untuk satu kiriman.
+  if (peta.has(code)) return;
+
+  try {
+    const thread = await pesan.startThread({ name: code, autoArchiveDuration: THREAD_ARSIP_MENIT });
+    peta.set(code, thread);
+  } catch (err) {
+    // Gagal membuat thread (izin belum ada, Discord sedang rewel) BUKAN alasan
+    // untuk menganggap pengumumannya gagal — pengumumannya sudah terkirim, dan
+    // susulannya akan mendarat di channel seperti sebelum ada thread.
+    console.error(`[wsr-shipment] gagal membuka thread ${code}:`, err);
+  }
+}
+
 async function kirimPengingat(config: MetabaseConfig, channel: TextChannel): Promise<void> {
   const jam = env.WSR_SHIPMENT_REMINDER_HOURS;
   const res = await fetchNativeQueryWithPagination(config, staleShipmentsQuery(batasWaktuWib(jam)));
@@ -545,12 +758,16 @@ async function kirimPengingat(config: MetabaseConfig, channel: TextChannel): Pro
   // sama-sama merasa bukan bagiannya.
   const rincian = await fetchItems(config, belum.map((s) => s.id)).catch(() => new Map<number, ShipmentItem[]>());
 
+  const peta = await petaThreadKiriman(channel);
   const terkirim: number[] = [];
   for (const shipment of belum) {
     try {
       const items = rincian.get(shipment.id) ?? [];
       await siapkanPeran(channel);
-      await channel.send({ content: mention(shipment, channel, items), embeds: [reminderEmbed(shipment, jam)] });
+      await kirimSusulan(channel, peta, shipmentCode(shipment), {
+        content: mention(shipment, channel, items),
+        embeds: [reminderEmbed(shipment, jam, items)]
+      });
       terkirim.push(shipment.id);
     } catch (err) {
       console.error(`[wsr-shipment] gagal kirim pengingat #${shipment.id}:`, err);
@@ -599,6 +816,7 @@ async function laporkanSelesai(config: MetabaseConfig, channel: TextChannel): Pr
     });
   }
 
+  const peta = await petaThreadKiriman(channel);
   const terkirim: number[] = [];
   for (const shipment of belum) {
     const angka = hitung.get(shipment.id) ?? { dipindah: 0, tidak: 0 };
@@ -607,7 +825,7 @@ async function laporkanSelesai(config: MetabaseConfig, channel: TextChannel): Pr
     const utuh = shipment.status === "done";
 
     try {
-      await channel.send({
+      const thread = await kirimSusulan(channel, peta, shipmentCode(shipment), {
         embeds: [
           new EmbedBuilder()
             .setColor(utuh ? 0x2e7d32 : 0xef6c00)
@@ -628,6 +846,10 @@ async function laporkanSelesai(config: MetabaseConfig, channel: TextChannel): Pr
             .setTimestamp()
         ]
       });
+      // Kiriman ini sudah tidak menunggu apa-apa lagi, jadi thread-nya ditutup.
+      // Ditutup, BUKAN dikunci: kalau ada yang perlu ditanyakan soal barang yang
+      // tidak jadi dikirim, orangnya masih bisa membukanya dengan membalas.
+      if (thread && !thread.archived) await thread.setArchived(true).catch(() => undefined);
       terkirim.push(shipment.id);
     } catch (err) {
       console.error(`[wsr-shipment] gagal kirim laporan selesai #${shipment.id}:`, err);
@@ -694,12 +916,7 @@ export async function umumkanKirimanSekarang(
   if (sudah.has(shipmentCode(shipment))) return "sudah-ada";
 
   const items = (await fetchItems(config, [shipment.id])).get(shipment.id) ?? [];
-  const perluDikerjakan = shipment.status === "pending" || shipment.status === "running";
-  await siapkanPeran(channel);
-  await channel.send({
-    content: perluDikerjakan ? mention(shipment, channel) : undefined,
-    embeds: [openingEmbed(shipment, items)]
-  });
+  await kirimPengumuman(channel, shipment, items);
   console.log(`[wsr-shipment] ${shipmentCode(shipment)} diumumkan seketika (dorongan kakera).`);
   return "terkirim";
 }
@@ -746,24 +963,15 @@ export async function runWsrShipmentCheck(client: Client): Promise<void> {
       setWatermark(maxId);
     } else {
       const itemsByBatch = await fetchItems(config, shipments.map((s) => s.id));
+      // Daftar thread ditarik sekali untuk seluruh putaran, lalu ikut terisi
+      // sendiri tiap ada thread baru dibuka.
+      const threadYangAda = await petaThreadKiriman(channel);
 
       let terkirim = 0;
       for (const shipment of shipments) {
         try {
           const items = itemsByBatch.get(shipment.id) ?? [];
-          // Tag ditaruh di isi pesan, bukan di embed: mention di dalam embed
-          // TIDAK memicu notifikasi Discord — orangnya tak akan tahu.
-          //
-          // Kiriman yang saat diumumkan sudah selesai/dibatalkan tetap dikabarkan
-          // (biar ada jejak "kiriman ini pernah dibuat"), tapi TANPA tag: menepuk
-          // pundak orang untuk kerjaan yang sudah beres cuma bikin tag-nya
-          // berhenti dipercaya.
-          const perluDikerjakan = shipment.status === "pending" || shipment.status === "running";
-          await siapkanPeran(channel);
-          await channel.send({
-            content: perluDikerjakan ? mention(shipment, channel, items) : undefined,
-            embeds: [openingEmbed(shipment, items)]
-          });
+          await kirimPengumuman(channel, shipment, items, { threadYangAda });
           terkirim++;
         } catch (err) {
           console.error(`[wsr-shipment] gagal kirim kiriman #${shipment.id}:`, err);
@@ -811,11 +1019,7 @@ export async function kirimUlangPengumuman(
   await channel.guild.roles.fetch();
 
   const items = (await fetchItems(config, [shipment.id])).get(shipment.id) ?? [];
-  const perluDikerjakan = shipment.status === "pending" || shipment.status === "running";
-  await channel.send({
-    content: perluDikerjakan || opsi.selaluTag ? mention(shipment, channel, items) : undefined,
-    embeds: [openingEmbed(shipment, items)]
-  });
+  await kirimPengumuman(channel, shipment, items, { selaluTag: opsi.selaluTag });
   console.log(`[wsr-shipment] pengumuman ${shipmentCode(shipment)} dikirim ulang (status ${shipment.status}).`);
 }
 
