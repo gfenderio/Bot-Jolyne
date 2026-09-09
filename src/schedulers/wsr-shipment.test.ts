@@ -62,6 +62,26 @@ test("minta dari Bekasi tidak disebut isi toko, dan rinciannya per asal", () => 
   assert.match(isi, /Dari \*\*SS\*\* 42 pcs · \*\*OMEGA\*\* 16 pcs/);
 });
 
+// Orang toko yang menekan tautan gudang mendarat di daftar kiriman semua
+// tempat, tanpa satu pun tanda mana barisnya.
+test("tiap tempat dapat alamatnya sendiri — toko ke panel tokonya", () => {
+  const isi = description(shipment(), [
+    item("SS", "LAMBDA", 42),
+    item("ALPHA", "LAMBDA", 3),
+    item("BETA", "LAMBDA", 1)
+  ]);
+
+  assert.match(isi, /SS: <https:\/\/team\.kyou\.id\/warehouse\/stock-rotation>/);
+  assert.match(isi, /ALPHA: <https:\/\/team\.kyou\.id\/store\/alpha\/kiriman>/);
+  assert.match(isi, /BETA: <https:\/\/team\.kyou\.id\/store\/beta\/kiriman>/);
+});
+
+test("kiriman yang semuanya gudang tetap satu alamat", () => {
+  const isi = description(shipment(), [item("OMEGA", "LAMBDA", 5), item("SS", "LAMBDA", 2)]);
+  assert.match(isi, /OMEGA\/SS: <https:\/\/team\.kyou\.id\/warehouse\/stock-rotation>/);
+  assert.ok(!isi.includes("/store/"), "gudang tidak boleh diarahkan ke panel toko");
+});
+
 test("isi toko biasa tetap berbunyi isi toko, rinciannya per tujuan", () => {
   const isi = description(shipment({ id: 18, totalItems: 78, totalQty: 127 }), [
     item("LAMBDA", "GAMMA", 100),

@@ -90,10 +90,51 @@ dua nama untuk satu kiriman, dan yang mencarinya di dua layar tidak menemukan
 apa-apa.
 */
 const WEB_NAMA = "team.kyou.id";
+const WEB_ASAL = "https://team.kyou.id";
 // Alamat layar kerja gudang. Sempat tertulis /warehouse/rotasi-stok — alamat
 // yang tidak pernah ada, jadi tiap orang yang menekannya mendarat di halaman
 // kosong lalu menyimpulkan kirimannya belum masuk.
 const WEB_GUDANG = "<https://team.kyou.id/warehouse/stock-rotation>";
+
+/*
+ALAMATNYA IKUT TEMPATNYA (9 Sep 2026).
+
+Semua pengumuman dulu menunjuk satu alamat: layar kiriman GUDANG. Itu benar
+selama yang mengambil barang selalu orang gudang, dan berhenti benar sejak arah
+"minta" boleh mengambil dari rak toko — WSR-GAMMA_LAMBDA-19 memuat 2 barang di
+rak toko Alpha dan 1 di toko Beta. Orang toko yang menekan tautan itu mendarat
+di layar gudang: daftar kiriman semua tempat, tanpa satu pun tanda mana barisnya.
+
+Sekarang tiap tempat dapat alamatnya sendiri, dan toko punya layarnya sendiri di
+dalam panel tokonya. Nama tokonya dibaca dari PERAN_TOKO — daftar yang sama yang
+dipakai menandai orangnya, jadi tidak ada dua daftar toko yang harus sepakat.
+*/
+function alamatTempat(nama: string): string {
+  const kunci = nama.trim().toUpperCase();
+  if (kunci in PERAN_TOKO) return `<${WEB_ASAL}/store/${kunci.toLowerCase()}/kiriman>`;
+  return WEB_GUDANG;
+}
+
+/**
+ * Satu baris alamat per tempat yang harus menyiapkan barangnya.
+ *
+ * Kalau semuanya gudang — kiriman biasa — hasilnya satu baris seperti dulu.
+ * Yang bercampur toko dan gudang dapat satu baris per pihak, bukan satu alamat
+ * yang benar untuk sebagian orang saja.
+ */
+function barisAlamat(asal: string[]): string {
+  const perAlamat = new Map<string, string[]>();
+  for (const nama of asal) {
+    const alamat = alamatTempat(nama);
+    const daftar = perAlamat.get(alamat);
+    if (daftar) daftar.push(nama);
+    else perAlamat.set(alamat, [nama]);
+  }
+  if (perAlamat.size === 0) return `   ${WEB_GUDANG}`;
+  return [...perAlamat.entries()]
+    .map(([alamat, nama]) => `   ${nama.join("/")}: ${alamat}`)
+    .join("\n");
+}
 
 /** Arah internal → kalimat yang dimengerti orang gudang. */
 const ARAH: Record<string, string> = {
@@ -398,7 +439,7 @@ export function openingEmbed(shipment: ShipmentRow, items: ShipmentItem[]): Embe
         `yang perlu disiapkan lagi. Rinciannya di menu **Kiriman**, di PDA atau ` +
         `di ${WEB_NAMA}: ${WEB_GUDANG}`
       : `**Cara mengerjakan — di PDA atau di ${WEB_NAMA}, tidak perlu tiket:**\n` +
-        `1. Buka menu **Kiriman**, cari **${code}**. Di web: ${WEB_GUDANG}\n` +
+        `1. Buka menu **Kiriman**, cari **${code}**. Di web:\n${barisAlamat(asal)}\n` +
         `2. Siapkan barangnya sesuai daftarnya — sudah urut rak dan selalu kondisi terbaru. **Centang** tiap barang yang sudah diambil dari rak.\n` +
         `3. Tekan **Pindahkan N barang** — yang berpindah HANYA yang kamu centang; sisanya tetap menunggu di kiriman ini.\n\n` +
         `Stok **belum** berpindah sampai langkah 3. Siapa yang mencentang dan siapa ` +
