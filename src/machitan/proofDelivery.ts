@@ -267,6 +267,22 @@ export async function findProofMessage(
   return best ? { channelId: best.channelId!, messageId: best.messageId! } : null;
 }
 
+/**
+ * Pesan Discord yang sudah diposting oleh SATU kiriman (kunci utamanya dan semua
+ * kunci turunannya). Dipakai kiriman ulang pengganti kartu lama supaya percobaan
+ * kedua tidak menghapus kartu yang baru saja dipasang percobaan pertamanya.
+ */
+export async function messageIdsForSubmission(submitKey: string | null): Promise<Set<string>> {
+  const ids = new Set<string>();
+  if (!submitKey) return ids;
+  const map = await load();
+  for (const record of map.values()) {
+    if (!record.messageId) continue;
+    if (record.key === submitKey || record.key.startsWith(`${submitKey}#`)) ids.add(record.messageId);
+  }
+  return ids;
+}
+
 /** Buang catatan lama supaya berkasnya tidak tumbuh selamanya. */
 export async function pruneProofDelivery(): Promise<void> {
   await withLock(async () => {

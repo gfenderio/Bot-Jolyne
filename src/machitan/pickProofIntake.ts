@@ -1,11 +1,24 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { AttachmentBuilder, Client, EmbedBuilder } from "discord.js";
+import { AttachmentBuilder, Client, EmbedBuilder, type TextChannel } from "discord.js";
 import { env } from "../config/env.js";
 import { addMachitanProof } from "./proofStore.js";
 import { isAuthorizedMachitanIntake } from "./intakeAuth.js";
 import { fitImageToLimit } from "./imageFit.js";
 import { orderLink } from "../services/kyouLinks.js";
-import { deriveProofKey, isPosted, markFailed, markPosted, markReceived, messageKey } from "./proofDelivery.js";
+import { deriveProofKey, isPosted, markFailed, markPosted, markReceived, messageIdsForSubmission, messageKey } from "./proofDelivery.js";
+import {
+  chunkByBytes,
+  deleteReplacedMessages,
+  downloadProofPhotos,
+  findReplaceableProofMessages,
+  OldPhotoDownloadError,
+  parseReplaceMode,
+  replacementNote,
+  replacementWantedIds,
+  splitOrderDescription,
+  sweepCutoffMs,
+  type ReplaceMode
+} from "./proofReplacement.js";
 
 const ECOM_PICK_PROOF_CHANNEL_ID = "1390221553333043200";
 const SHOPEE_MENTION = "<@804685637252939788>";
@@ -61,16 +74,6 @@ function itemKyouUrl(itemId: string) {
   return itemId && itemId !== "-" ? `https://kyou.id/items/${encodeURIComponent(itemId)}` : undefined;
 }
 
-// Order ID marketplace kadang punya deskripsi nempel di belakang angka
-// (mis. "584653665670366416 BOX MULUS"). Pisahkan jadi order id bersih + deskripsi
-// supaya tidak ngerusak deteksi channel (tag) & tampil di kolom sendiri.
-function splitOrderDescription(raw: unknown): { orderId: string; description: string | null } {
-  const s = String(raw ?? "").trim();
-  const m = s.match(/^(\d{6,})\s+(\S.*)$/);
-  if (m) return { orderId: m[1], description: m[2].trim() };
-  return { orderId: s, description: null };
-}
-
 
 // Helper for sending JSON response
 function sendJson(response: ServerResponse, statusCode: number, payload: unknown) {
@@ -112,6 +115,8 @@ export async function handleMachitanPickProof(
   // Dipegang di luar try supaya kegagalan tak terduga pun tercatat di buku
   // pengiriman — tanpa itu, "yang mana yang hilang" cuma bisa dijawab dari log.
   let failureKey: string | null = null;
+  // Kartu yang dibuat sesudah detik ini tidak pernah dianggap "kartu lama".
+  const requestStartedAt = Date.now();
 
   try {
     const bodyStr = await readRequestBody(request);
@@ -240,6 +245,40 @@ export async function handleMachitanPickProof(
       }
     }
 
+    // Kiriman ulang dari PDA yang MENGGANTIKAN kartu lama order ini, supaya
+    // barangnya tidak terlihat dipick dua kali. Lihat proofReplacement.ts.
+    const replaceMode: ReplaceMode | null = logOnly ? null : parseReplaceMode(body.replaceOrderProof);
+    const submittedAtText = body.submittedAt ? String(body.submittedAt) : "";
+    const prepareReplacement = async (channel: TextChannel) => {
+      if (!replaceMode) return null;
+      // Kartu e-com per barang memuat nomor invoice marketplace, bukan order kyou.
+      const wantedIds = replacementWantedIds(cleanOrderIdsArr, body.items);
+      let oldMessages: Awaited<ReturnType<typeof findReplaceableProofMessages>> = [];
+      let sweepFailed = false;
+      try {
+        const ownMessageIds = await messageIdsForSubmission(submitKey);
+        oldMessages = await findReplaceableProofMessages(
+          channel,
+          wantedIds,
+          client.user.id,
+          ownMessageIds,
+          submittedAtText,
+          sweepCutoffMs(body.submittedAt, requestStartedAt)
+        );
+      } catch (err) {
+        // Riwayat channel gagal dibaca (izin, rate limit): foto baru tetap
+        // diposting, tidak ada yang dihapus.
+        console.warn("Kartu bukti lama gagal dicari, kartu baru tetap diposting:", err);
+        sweepFailed = true;
+      }
+      // Gagal unduh foto lama melempar OldPhotoDownloadError: kartu lama tidak
+      // boleh dihapus kalau fotonya tidak ikut.
+      const oldPhotos = replaceMode === "append" && oldMessages.length > 0
+        ? await Promise.all((await downloadProofPhotos(oldMessages)).map((buf) => fitImageToLimit(buf)))
+        : [];
+      return { oldMessages, oldPhotos, note: replacementNote(replaceMode, oldMessages.length, oldPhotos.length, sweepFailed) };
+    };
+
     // logOnly mode: save to store untuk daily Excel report, skip Discord embed
     if (logOnly) {
       const requestedChannelIdLog = body.channelId ?? body.channel_id ?? body.targetChannelId ?? body.target_channel_id;
@@ -320,7 +359,10 @@ export async function handleMachitanPickProof(
         throw new Error(`Cannot send to channel ${ECOM_PICK_PROOF_CHANNEL_ID}`);
       }
 
-      const imageBuffer = imageBuffers[0] ?? Buffer.alloc(0);
+      // Foto baru di depan, foto lama (mode append) menyusul di belakangnya.
+      const replacement = await prepareReplacement(channel as TextChannel);
+      const postBuffers = replacement ? [...imageBuffers, ...replacement.oldPhotos] : imageBuffers;
+      const imageBuffer = postBuffers[0] ?? Buffer.alloc(0);
       // Satu barang = satu pesan, jadi penandanya pun per barang. Kalau Discord
       // menolak di barang ketiga, dua yang pertama tidak diposting ulang saat PDA
       // mengirim ulang kirimannya.
@@ -355,7 +397,8 @@ export async function handleMachitanPickProof(
             ...(adminNotes !== "-" ? [{ name: "Admin Notes", value: adminNotes.slice(0, 1024), inline: !isPackProof }] : []),
             ...(pdaNotes ? [{ name: `Catatan ${actorLabel}`, value: pdaNotes.slice(0, 1024), inline: false }] : []),
             ...(isPackProof ? [{ name: "Status", value: "Diproses ke RESI Fulfillment", inline: true }] : []),
-            { name: "Items", value: `Item: #${itemId} | Qty: ${qty} | Source: ${source}`, inline: false }
+            { name: "Items", value: `Item: #${itemId} | Qty: ${qty} | Source: ${source}`, inline: false },
+            ...(replacement ? [{ name: "Kiriman Ulang", value: replacement.note, inline: false }] : [])
           )
           .setImage(`attachment://${attachmentName}`)
           .setTimestamp();
@@ -391,19 +434,32 @@ export async function handleMachitanPickProof(
       }
 
       // Foto tambahan (multi-foto) cukup dikirim sekali, bukan diulang per item.
-      if (imageBuffers.length > 1) {
-        const extraAttachments = imageBuffers.slice(1).map((buf, i) =>
-          new AttachmentBuilder(buf, { name: `ecom_pick_proof_extra_${i + 2}.jpg` })
-        );
-        for (let i = 0; i < extraAttachments.length; i += 10) {
+      if (postBuffers.length > 1) {
+        const extraFiles = postBuffers.slice(1).map((buf, i) => ({
+          buf,
+          attachment: new AttachmentBuilder(buf, { name: `ecom_pick_proof_extra_${i + 2}.jpg` })
+        }));
+        // Dipecah per jumlah DAN ukuran. Kunci tetap memakai indeks foto pertama
+        // rombongan (extra0, extra10, …) seperti sebelumnya.
+        let start = 0;
+        for (const chunk of chunkByBytes(extraFiles, (file) => file.buf.length)) {
+          const i = start;
+          start += chunk.length;
           const extraKey = submitKey ? messageKey(submitKey, `extra${i}`) : null;
           if (await isPosted(extraKey)) continue;
           try {
-            await channel.send({
+            const sent = await channel.send({
               content: i === 0 ? `📷 Foto tambahan (Order #${orderTitleStr})` : undefined,
-              files: extraAttachments.slice(i, i + 10)
+              files: chunk.map((file) => file.attachment)
             });
-            await markPosted(extraKey, { proofType, orderIds: cleanOrderIdsArr, itemIds: proofItemIds, pairs: proofPairs });
+            await markPosted(extraKey, {
+              proofType,
+              orderIds: cleanOrderIdsArr,
+              itemIds: proofItemIds,
+              pairs: proofPairs,
+              channelId: sent.channelId,
+              messageId: sent.id
+            });
             postedExtraPhotos = true;
           } catch (err) {
             await markFailed(extraKey, err);
@@ -411,6 +467,16 @@ export async function handleMachitanPickProof(
             console.error("Gagal posting foto tambahan bukti pick e-com:", err);
           }
         }
+      }
+
+      // Kartu lama baru dihapus setelah SEMUA kartu penggantinya masuk. Ada yang
+      // gagal → kartu lama dibiarkan, PDA mengirim ulang, dan percobaan berikutnya
+      // melanjutkan dari sini. Percobaan yang tidak memposting apa pun (semuanya
+      // sudah masuk sebelum bot mati) tetap menghapus: batas waktu kiriman
+      // menjamin kartu pengganti itu sendiri tidak ikut terhapus.
+      let replaced = 0;
+      if (replacement && failures.length === 0 && replacement.oldMessages.length > 0) {
+        replaced = await deleteReplacedMessages(replacement.oldMessages);
       }
 
       // Kiriman ulang yang semua barangnya sudah pernah masuk: jangan dicatat
@@ -421,12 +487,17 @@ export async function handleMachitanPickProof(
           ok: true,
           duplicate: true,
           channelId: ECOM_PICK_PROOF_CHANNEL_ID,
-          skipped: skippedCount
+          skipped: skippedCount,
+          replaced
         });
       }
 
-      // Save to local store for daily excel export
-      addMachitanProof({
+      // Save to local store for daily excel export.
+      // Kiriman pengganti TIDAK dicatat lagi: pick-nya sudah tercatat waktu kartu
+      // aslinya masuk, dan mencatatnya dua kali membuat laporan harian menghitung
+      // barang yang sama dipick dua kali. Kartu lamanya tidak ketemu → dicatat
+      // seperti bukti biasa supaya tidak hilang dari laporan.
+      if (!replacement || replacement.oldMessages.length === 0) addMachitanProof({
         timestamp: new Date().toISOString(),
         channelId: ECOM_PICK_PROOF_CHANNEL_ID,
         orderIds: Array.isArray(body.orderIds) ? body.orderIds.map(String) : [String(body.orderIds)],
@@ -471,23 +542,38 @@ export async function handleMachitanPickProof(
         ok: true,
         channelId: ECOM_PICK_PROOF_CHANNEL_ID,
         count: postedIndices.size,
-        skipped: skippedCount
+        skipped: skippedCount,
+        replaced
       });
     }
+
+    if (!targetChannelId) {
+      throw new Error("MACHITAN_PICK_PROOF_CHANNEL_ID wajib diisi atau kirim channelId di payload.");
+    }
+
+    const channel = await client.channels.fetch(targetChannelId);
+    if (!channel || !channel.isTextBased() || !("send" in channel)) {
+      throw new Error(`Cannot send to channel ${targetChannelId}`);
+    }
+
+    // Kartu lama dicari SEBELUM fotonya dirakit: mode "append" membawa foto lama
+    // ikut masuk, di belakang foto baru.
+    const replacement = isPackProof ? null : await prepareReplacement(channel as TextChannel);
+    const postBuffers = replacement ? [...imageBuffers, ...replacement.oldPhotos] : imageBuffers;
 
     // Semua foto jadi attachment; embed menampilkan foto pertama, sisanya tampil
     // sebagai attachment tambahan di pesan yang sama.
     const proofBaseName = isPackProof ? "pack_proof" : "pick_proof";
-    const attachments = imageBuffers.map((buf, i) => {
+    const attachments = postBuffers.map((buf, i) => {
       const ket = namaAman(imageLabels[i] ?? "");
       const dasar = i === 0 ? proofBaseName : `${proofBaseName}_${i + 1}`;
-      return new AttachmentBuilder(buf, { name: ket ? `${dasar}_${ket}.jpg` : `${dasar}.jpg` });
+      return { buf, attachment: new AttachmentBuilder(buf, { name: ket ? `${dasar}_${ket}.jpg` : `${dasar}.jpg` }) };
     });
     // Judulnya menyebut foto DAN unit sekaligus: "3 foto dari 5 unit" langsung
     // memperlihatkan ada dua yang belum dipotret, tanpa siapa pun menghitung.
     const photoLabel =
-      imagesBase64.length > 1 || (totalUnit > 1 && imagesBase64.length > 0)
-        ? ` · ${imagesBase64.length} foto${totalUnit > 1 ? ` dari ${totalUnit} unit` : ""}`
+      postBuffers.length > 1 || (totalUnit > 1 && postBuffers.length > 0)
+        ? ` · ${postBuffers.length} foto${totalUnit > 1 ? ` dari ${totalUnit} unit` : ""}`
         : "";
 
     // Create Embed
@@ -508,25 +594,21 @@ export async function handleMachitanPickProof(
         ...(imageLabels.some((x) => x)
           ? [{
               name: "Foto",
-              value: imagesBase64
+              value: postBuffers
                 .map((_, i) => `${i + 1}. ${imageLabels[i] || "(tanpa keterangan)"}`)
                 .join("\n")
                 .slice(0, 1024),
               inline: false,
             }]
-          : [])
+          : []),
+        ...(replacement ? [{ name: "Kiriman Ulang", value: replacement.note, inline: false }] : [])
       )
       .setImage(isPackProof ? "attachment://pack_proof.jpg" : "attachment://pick_proof.jpg")
       .setTimestamp();
 
-    if (!targetChannelId) {
-      throw new Error("MACHITAN_PICK_PROOF_CHANNEL_ID wajib diisi atau kirim channelId di payload.");
-    }
-
-    const channel = await client.channels.fetch(targetChannelId);
-    if (!channel || !channel.isTextBased() || !("send" in channel)) {
-      throw new Error(`Cannot send to channel ${targetChannelId}`);
-    }
+    // Penanda kiriman ini: percobaan ulangnya mengenali kartu yang sudah ia pasang
+    // lewat footer ini, dan tidak menghapusnya sebagai "kartu lama".
+    if (replacement && submittedAtText) embed.setFooter({ text: submittedAtText });
 
     let mentionContent = "";
     if (isPackProof) {
@@ -541,11 +623,10 @@ export async function handleMachitanPickProof(
       }
     }
 
-    // Discord max 10 file per pesan — chunk kalau lebih (jaga-jaga).
-    const fileChunks: (typeof attachments)[] = [];
-    for (let i = 0; i < attachments.length; i += 10) {
-      fileChunks.push(attachments.slice(i, i + 10));
-    }
+    // Discord max 10 file dan ~25MB per pesan — dipecah per jumlah DAN ukuran.
+    // Mode append bisa membawa belasan foto lama sekaligus.
+    const fileChunks = chunkByBytes(attachments, (file) => file.buf.length)
+      .map((chunk) => chunk.map((file) => file.attachment));
 
     // Pesan utama dan tiap rombongan foto tambahan punya penanda sendiri: kalau
     // pesan utama sudah masuk tapi foto tambahannya belum, kiriman ulang cuma
@@ -555,21 +636,30 @@ export async function handleMachitanPickProof(
     let postedAnything = false;
 
     if (!(await isPosted(mainKey))) {
-      await channel.send({
+      const sent = await channel.send({
         content: mentionContent ? mentionContent : undefined,
         embeds: [embed],
         files: fileChunks[0]
       });
-      await markPosted(mainKey, proofMeta);
+      await markPosted(mainKey, { ...proofMeta, channelId: sent.channelId, messageId: sent.id });
       postedAnything = true;
     }
 
     for (let i = 1; i < fileChunks.length; i++) {
       const chunkKey = submitKey ? messageKey(submitKey, `chunk${i}`) : null;
       if (await isPosted(chunkKey)) continue;
-      await channel.send({ files: fileChunks[i] });
-      await markPosted(chunkKey, proofMeta);
+      const sent = await channel.send({ files: fileChunks[i] });
+      await markPosted(chunkKey, { ...proofMeta, channelId: sent.channelId, messageId: sent.id });
       postedAnything = true;
+    }
+
+    // Semua pesan pengganti sudah masuk (kegagalan di atas melempar), baru kartu
+    // lama dihapus — juga kalau semuanya sudah masuk di percobaan sebelumnya
+    // (bot mati sebelum sempat menghapus). Batas waktu kiriman menjaga kartu
+    // pengganti itu sendiri.
+    let replaced = 0;
+    if (replacement && replacement.oldMessages.length > 0) {
+      replaced = await deleteReplacedMessages(replacement.oldMessages);
     }
 
     if (!postedAnything) {
@@ -577,12 +667,15 @@ export async function handleMachitanPickProof(
         message: "Proof sudah pernah masuk Discord, tidak diposting ulang",
         ok: true,
         duplicate: true,
-        channelId: targetChannelId
+        channelId: targetChannelId,
+        replaced
       });
     }
 
-    // Save to local store for daily excel export
-    addMachitanProof({
+    // Save to local store for daily excel export.
+    // Kiriman pengganti tidak dicatat lagi — pick-nya sudah tercatat bersama kartu
+    // aslinya. Kartu lamanya tidak ketemu → dicatat seperti bukti biasa.
+    if (!replacement || replacement.oldMessages.length === 0) addMachitanProof({
       timestamp: new Date().toISOString(),
       channelId: targetChannelId,
       orderIds: Array.isArray(body.orderIds) ? body.orderIds.map(String) : [String(body.orderIds)],
@@ -626,12 +719,17 @@ export async function handleMachitanPickProof(
     }).catch(err => console.error("Failed to save proof to store", err));
 
 
-    sendJson(response, 200, { message: "Photo received and sent to Discord", ok: true, channelId: targetChannelId });
+    sendJson(response, 200, { message: "Photo received and sent to Discord", ok: true, channelId: targetChannelId, replaced });
   } catch (error) {
     console.error("Machitan Pick Proof Intake Error:", error);
     await markFailed(failureKey, error);
     if (error instanceof PayloadTooLargeError) {
       return sendJson(response, 413, { error: error.message, ok: false });
+    }
+    if (error instanceof OldPhotoDownloadError) {
+      // Bukan kesalahan kiriman PDA: foto lama belum bisa diambil, kartu lama
+      // dibiarkan, PDA menahan kirimannya dan mencoba lagi.
+      return sendJson(response, 502, { error: error.message, ok: false, oldPhotosUnavailable: true });
     }
     sendJson(response, 500, { error: error instanceof Error ? error.message : "Internal Server Error", ok: false });
   }
