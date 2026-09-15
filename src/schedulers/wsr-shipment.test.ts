@@ -71,15 +71,29 @@ test("tiap tempat dapat alamatnya sendiri — toko ke panel tokonya", () => {
     item("BETA", "LAMBDA", 1)
   ]);
 
-  assert.match(isi, /SS: <https:\/\/team\.kyou\.id\/warehouse\/stock-rotation>/);
-  assert.match(isi, /ALPHA: <https:\/\/team\.kyou\.id\/store\/alpha\/kiriman>/);
-  assert.match(isi, /BETA: <https:\/\/team\.kyou\.id\/store\/beta\/kiriman>/);
+  assert.match(isi, /SS: <https:\/\/team\.kyou\.id\/warehouse\/stock-rotation\?kiriman=19>/);
+  assert.match(isi, /ALPHA: <https:\/\/team\.kyou\.id\/store\/alpha\/kiriman\?kiriman=19>/);
+  assert.match(isi, /BETA: <https:\/\/team\.kyou\.id\/store\/beta\/kiriman\?kiriman=19>/);
 });
 
 test("kiriman yang semuanya gudang tetap satu alamat", () => {
   const isi = description(shipment(), [item("OMEGA", "LAMBDA", 5), item("SS", "LAMBDA", 2)]);
-  assert.match(isi, /OMEGA\/SS: <https:\/\/team\.kyou\.id\/warehouse\/stock-rotation>/);
+  assert.match(isi, /OMEGA\/SS: <https:\/\/team\.kyou\.id\/warehouse\/stock-rotation\?kiriman=19>/);
   assert.ok(!isi.includes("/store/"), "gudang tidak boleh diarahkan ke panel toko");
+});
+
+// WSR-GAMMA_LAMBDA-20, 15 Sep 2026: tautan polos membuka kota terakhir di
+// peramban (Bekasi), dan orang Lambda mengira kirimannya hilang.
+test("tautan gudang membuka kirimannya langsung, bukan kota terakhir", () => {
+  const isi = description(shipment({ id: 20, totalItems: 13, totalQty: 20 }), [
+    item("LAMBDA", "GAMMA", 20)
+  ]);
+  assert.match(isi, /LAMBDA: <https:\/\/team\.kyou\.id\/warehouse\/stock-rotation\?kiriman=20>/);
+});
+
+test("kiriman yang sudah beres tetap menaut ke kirimannya", () => {
+  const isi = description(shipment({ status: "done" }), [item("OMEGA", "LAMBDA", 5)]);
+  assert.match(isi, /stock-rotation\?kiriman=19>/);
 });
 
 test("isi toko biasa tetap berbunyi isi toko, rinciannya per tujuan", () => {

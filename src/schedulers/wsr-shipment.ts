@@ -94,7 +94,21 @@ const WEB_ASAL = "https://team.kyou.id";
 // Alamat layar kerja gudang. Sempat tertulis /warehouse/rotasi-stok — alamat
 // yang tidak pernah ada, jadi tiap orang yang menekannya mendarat di halaman
 // kosong lalu menyimpulkan kirimannya belum masuk.
-const WEB_GUDANG = "<https://team.kyou.id/warehouse/stock-rotation>";
+const WEB_GUDANG = "https://team.kyou.id/warehouse/stock-rotation";
+
+/*
+TAUTANNYA MEMBAWA NOMOR KIRIMAN (15 Sep 2026).
+
+Papan kiriman di team.kyou.id membuka kota yang terakhir dipilih di peramban
+itu, bukan kota kirimannya. Tautan polos membuat orang Lambda yang terakhir
+melihat Bekasi mendarat di Bekasi, lalu menyimpulkan kiriman yang ditag
+untuknya hilang — WSR-GAMMA_LAMBDA-20. Dengan `?kiriman=<id>` papannya
+langsung membuka kiriman itu, dari kota mana pun. Sebelum kakera mengerti
+parameternya, ia diabaikan dan halamannya terbuka seperti biasa.
+*/
+function tautanKiriman(dasar: string, id: number): string {
+  return `<${dasar}?kiriman=${id}>`;
+}
 
 /*
 ALAMATNYA IKUT TEMPATNYA (9 Sep 2026).
@@ -109,10 +123,10 @@ Sekarang tiap tempat dapat alamatnya sendiri, dan toko punya layarnya sendiri di
 dalam panel tokonya. Nama tokonya dibaca dari PERAN_TOKO — daftar yang sama yang
 dipakai menandai orangnya, jadi tidak ada dua daftar toko yang harus sepakat.
 */
-function alamatTempat(nama: string): string {
+function alamatTempat(nama: string, id: number): string {
   const kunci = nama.trim().toUpperCase();
-  if (kunci in PERAN_TOKO) return `<${WEB_ASAL}/store/${kunci.toLowerCase()}/kiriman>`;
-  return WEB_GUDANG;
+  if (kunci in PERAN_TOKO) return tautanKiriman(`${WEB_ASAL}/store/${kunci.toLowerCase()}/kiriman`, id);
+  return tautanKiriman(WEB_GUDANG, id);
 }
 
 /**
@@ -122,15 +136,15 @@ function alamatTempat(nama: string): string {
  * Yang bercampur toko dan gudang dapat satu baris per pihak, bukan satu alamat
  * yang benar untuk sebagian orang saja.
  */
-function barisAlamat(asal: string[]): string {
+function barisAlamat(asal: string[], id: number): string {
   const perAlamat = new Map<string, string[]>();
   for (const nama of asal) {
-    const alamat = alamatTempat(nama);
+    const alamat = alamatTempat(nama, id);
     const daftar = perAlamat.get(alamat);
     if (daftar) daftar.push(nama);
     else perAlamat.set(alamat, [nama]);
   }
-  if (perAlamat.size === 0) return `   ${WEB_GUDANG}`;
+  if (perAlamat.size === 0) return `   ${tautanKiriman(WEB_GUDANG, id)}`;
   return [...perAlamat.entries()]
     .map(([alamat, nama]) => `   ${nama.join("/")}: ${alamat}`)
     .join("\n");
@@ -437,9 +451,9 @@ export function openingEmbed(shipment: ShipmentRow, items: ShipmentItem[]): Embe
     : sudahBeres
       ? `Kiriman ini **sudah dikerjakan** — stoknya sudah berpindah, tidak ada ` +
         `yang perlu disiapkan lagi. Rinciannya di menu **Kiriman**, di PDA atau ` +
-        `di ${WEB_NAMA}: ${WEB_GUDANG}`
+        `di ${WEB_NAMA}: ${tautanKiriman(WEB_GUDANG, shipment.id)}`
       : `**Cara mengerjakan — di PDA atau di ${WEB_NAMA}, tidak perlu tiket:**\n` +
-        `1. Buka menu **Kiriman**, cari **${code}**. Di web:\n${barisAlamat(asal)}\n` +
+        `1. Buka menu **Kiriman**, cari **${code}**. Di web:\n${barisAlamat(asal, shipment.id)}\n` +
         `2. Siapkan barangnya sesuai daftarnya — sudah urut rak dan selalu kondisi terbaru. **Centang** tiap barang yang sudah diambil dari rak.\n` +
         `3. Tekan **Pindahkan N barang** — yang berpindah HANYA yang kamu centang; sisanya tetap menunggu di kiriman ini.\n\n` +
         `Stok **belum** berpindah sampai langkah 3. Siapa yang mencentang dan siapa ` +
