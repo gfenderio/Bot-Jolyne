@@ -242,7 +242,9 @@ const newShipmentsQuery = (sejakId: number, batasWib: string) => `
  * pesan per kiriman, dan jendela tengoknya cuma dua hari.
  */
 async function kodeSudahDiumumkan(channel: TextChannel): Promise<Set<string>> {
-  const out = new Set<string>();
+  // Yang baru diumumkan proses ini ikut dihitung, walau Discord belum
+  // memulangkan pesannya.
+  const out = new Set<string>(diumumkanProsesIni);
   try {
     const pesan = await channel.messages.fetch({ limit: 100 });
     for (const m of pesan.values()) {
@@ -260,6 +262,33 @@ async function kodeSudahDiumumkan(channel: TextChannel): Promise<Set<string>> {
     console.error("[wsr-shipment] gagal membaca pesan channel — lanjut tanpa pengecekan dobel:", err);
   }
   return out;
+}
+
+/*
+PENGUMUMAN BERGILIRAN — SATU JALUR PADA SATU WAKTU (15 Sep 2026).
+
+Penjaga anti-dobel di atas membaca isi channel, lalu mengirim. Dua jalur yang
+membaca BERBARENGAN sama-sama melihat channel yang belum memuat kirimannya, dan
+dua-duanya mengirim. Terjadi pada WSR-GAMMA_LAMBDA-20: dorongan kakera dan
+putaran poller jalan dalam tiga detik yang sama, dua pengumuman terkirim
+berselang 2,4 detik, masing-masing dengan thread-nya sendiri.
+
+Jadi seluruh jalur yang mengumumkan — dorongan kakera, poller, kirim ulang
+manual — lewat antrean yang sama, dan pemeriksaannya dilakukan DI DALAM
+giliran. Kode yang diumumkan proses ini juga dicatat sendiri: pesan yang baru
+saja terkirim belum tentu sudah ikut terbaca dari Discord sesaat kemudian.
+
+Yang tidak ditutup di sini: dua PROSES bot yang hidup bersamaan (saat deploy).
+Antrean ini hidup di dalam satu proses.
+*/
+const diumumkanProsesIni = new Set<string>();
+let antreanPengumuman: Promise<unknown> = Promise.resolve();
+
+export function bergiliran<T>(kerja: () => Promise<T>): Promise<T> {
+  const hasil = antreanPengumuman.then(kerja, kerja);
+  // Kegagalan satu giliran tidak boleh menahan giliran berikutnya.
+  antreanPengumuman = hasil.catch(() => undefined);
+  return hasil;
 }
 
 function batasWaktuWib(jam: number): string {
@@ -736,6 +765,7 @@ async function kirimPengumuman(
     content: perluDikerjakan || opsi.selaluTag ? mention(shipment, channel, items) : undefined,
     embeds: [openingEmbed(shipment, items)]
   });
+  diumumkanProsesIni.add(code);
   if (!perluDikerjakan) return;
 
   const peta = opsi.threadYangAda ?? (await petaThreadKiriman(channel));
@@ -887,13 +917,16 @@ export async function umumkanKirimanSekarang(
   const shipment = rowsToShipments(res.columns, res.rows)[0];
   if (!shipment) return "tidak-ketemu";
 
-  const sudah = await kodeSudahDiumumkan(channel);
-  if (sudah.has(shipmentCode(shipment))) return "sudah-ada";
+  // Periksa-lalu-kirim di dalam giliran: lihat `bergiliran`.
+  return bergiliran(async () => {
+    const sudah = await kodeSudahDiumumkan(channel);
+    if (sudah.has(shipmentCode(shipment))) return "sudah-ada" as const;
 
-  const items = (await fetchItems(config, [shipment.id])).get(shipment.id) ?? [];
-  await kirimPengumuman(channel, shipment, items);
-  console.log(`[wsr-shipment] ${shipmentCode(shipment)} diumumkan seketika (dorongan kakera).`);
-  return "terkirim";
+    const items = (await fetchItems(config, [shipment.id])).get(shipment.id) ?? [];
+    await kirimPengumuman(channel, shipment, items);
+    console.log(`[wsr-shipment] ${shipmentCode(shipment)} diumumkan seketika (dorongan kakera).`);
+    return "terkirim" as const;
+  });
 }
 
 export async function runWsrShipmentCheck(client: Client): Promise<void> {
@@ -930,13 +963,17 @@ export async function runWsrShipmentCheck(client: Client): Promise<void> {
       config,
       newShipmentsQuery(sejakId, batasWaktuWib(env.WSR_SHIPMENT_LOOKBACK_HOURS))
     );
-    const sudah = await kodeSudahDiumumkan(channel);
-    const shipments = rowsToShipments(res.columns, res.rows).filter(
-      (s) => !sudah.has(shipmentCode(s))
-    );
-    if (shipments.length === 0) {
-      setWatermark(maxId);
-    } else {
+    // Periksa-lalu-kirim di dalam giliran, sama dengan dorongan kakera: tanpa
+    // itu keduanya bisa sama-sama melihat channel kosong dan sama-sama mengirim.
+    await bergiliran(async () => {
+      const sudah = await kodeSudahDiumumkan(channel);
+      const shipments = rowsToShipments(res.columns, res.rows).filter(
+        (s) => !sudah.has(shipmentCode(s))
+      );
+      if (shipments.length === 0) {
+        setWatermark(maxId);
+        return;
+      }
       const itemsByBatch = await fetchItems(config, shipments.map((s) => s.id));
       // Daftar thread ditarik sekali untuk seluruh putaran, lalu ikut terisi
       // sendiri tiap ada thread baru dibuka.
@@ -957,7 +994,7 @@ export async function runWsrShipmentCheck(client: Client): Promise<void> {
       // hilang dari pantauan.
       setWatermark(maxId);
       console.log(`[wsr-shipment] ${terkirim} kiriman diumumkan ke channel.`);
-    }
+    });
   }
 
   // Selalu dijalankan, termasuk saat tidak ada kiriman baru: kiriman bisa
@@ -993,7 +1030,9 @@ export async function kirimUlangPengumuman(
   await channel.guild.roles.fetch();
 
   const items = (await fetchItems(config, [shipment.id])).get(shipment.id) ?? [];
-  await kirimPengumuman(channel, shipment, items, { selaluTag: opsi.selaluTag });
+  // Kirim ulang manual memang sengaja mengirim lagi, tapi tetap antre supaya
+  // tidak bertabrakan dengan poller yang sedang mengumumkan kiriman lain.
+  await bergiliran(() => kirimPengumuman(channel, shipment, items, { selaluTag: opsi.selaluTag }));
   console.log(`[wsr-shipment] pengumuman ${shipmentCode(shipment)} dikirim ulang (status ${shipment.status}).`);
 }
 

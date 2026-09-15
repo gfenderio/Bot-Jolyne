@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { openingEmbed, type ShipmentItem, type ShipmentRow } from "./wsr-shipment.js";
+import { bergiliran, openingEmbed, type ShipmentItem, type ShipmentRow } from "./wsr-shipment.js";
 
 /*
 Dua bentuk kiriman yang kolom `direction`-nya SAMA-SAMA 'request', tapi
@@ -104,6 +104,35 @@ test("isi toko biasa tetap berbunyi isi toko, rinciannya per tujuan", () => {
 
   assert.match(isi, /Gudang → Toko \(isi toko\)/);
   assert.match(isi, /Untuk \*\*GAMMA\*\* 127 pcs/);
+});
+
+// WSR-GAMMA_LAMBDA-20: dorongan kakera dan poller memeriksa channel berbarengan,
+// dua-duanya melihatnya kosong, dua pengumuman terkirim. Giliran kedua harus
+// baru memeriksa SESUDAH giliran pertama selesai mengirim.
+test("dua pengumuman yang datang berbarengan dikerjakan bergiliran", async () => {
+  const terumumkan = new Set<string>();
+  const jejak: string[] = [];
+  const umumkan = (jalur: string) =>
+    bergiliran(async () => {
+      jejak.push(`${jalur}:periksa`);
+      if (terumumkan.has("WSR-GAMMA_LAMBDA-20")) return "sudah-ada";
+      await new Promise((r) => setTimeout(r, 20)); // Discord yang lambat
+      terumumkan.add("WSR-GAMMA_LAMBDA-20");
+      jejak.push(`${jalur}:kirim`);
+      return "terkirim";
+    });
+
+  const [a, b] = await Promise.all([umumkan("kakera"), umumkan("poller")]);
+  assert.deepEqual([a, b], ["terkirim", "sudah-ada"]);
+  assert.deepEqual(jejak, ["kakera:periksa", "kakera:kirim", "poller:periksa"]);
+});
+
+test("giliran yang gagal tidak menahan giliran berikutnya", async () => {
+  const gagal = bergiliran(async () => {
+    throw new Error("Discord menolak");
+  });
+  await assert.rejects(gagal);
+  assert.equal(await bergiliran(async () => "jalan"), "jalan");
 });
 
 test("kiriman tanpa rincian barang tetap punya kalimat arah", () => {
