@@ -15,7 +15,6 @@ import { startBaitoAttendanceScheduler } from "./schedulers/baito-attendance.js"
 import { startFulfillmentStaleScheduler } from "./schedulers/fulfillment-stale.js";
 import { startPickTriageScheduler } from "./schedulers/pick-triage.js";
 import { startSplitPrintScheduler } from "./schedulers/split-print.js";
-import { startWsrShipmentScheduler } from "./schedulers/wsr-shipment.js";
 
 if (!env.DISCORD_TOKEN) {
   console.warn("DISCORD_TOKEN belum diisi. Discord bot client dilewati.");
@@ -40,7 +39,8 @@ if (!env.DISCORD_TOKEN) {
     startFulfillmentStaleScheduler(readyClient);
     startPickTriageScheduler(readyClient);
     startSplitPrintScheduler(readyClient);
-    startWsrShipmentScheduler(readyClient);
+    // Kiriman Rotasi Stok TIDAK dipoll lagi (15 Sep 2026): kakera mendorong
+    // kabar dibuat/ditutup ke POST /kakera/wsr-shipment.
   });
   client.on(Events.Error, (error) => {
     console.error("Discord client error", error);

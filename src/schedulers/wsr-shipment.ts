@@ -7,12 +7,6 @@ import {
 } from "discord.js";
 import { env } from "../config/env.js";
 import { fetchNativeQueryWithPagination, type MetabaseConfig } from "../services/metabase.js";
-import {
-  getOrInitWatermark,
-  getReported,
-  markReported,
-  setWatermark
-} from "../services/wsrShipmentStore.js";
 
 /**
  * Kiriman WSR → PENGINGAT ke channel gudang. Titik.
@@ -37,6 +31,12 @@ import {
  * dua: (1) menepuk pundak orang gudang saat ada kiriman baru,
  * (2) melapor balik setelah dikerjakan — siapa yang mengerjakan, berapa yang jadi
  * dikirim, dan berapa yang tidak (biasanya karena barangnya belum ada).
+ *
+ * Keputusan 15 Sep 2026: POLLER DICABUT. Semua kabar DIDORONG kakera — "dibuat"
+ * saat tombol Kirim ditekan, "ditutup" saat kirimannya selesai dipindah atau
+ * dibatalkan. Poller lima menitan cuma menambal dorongan yang gagal, dan
+ * justru dialah yang membuat WSR-GAMMA_LAMBDA-20 diumumkan dua kali. Jalur PDA
+ * (hanayo) tidak lagi mengabari Jolyne; terakhir dipakai 19 Agu 2026.
  *
  * Sumber data: tabel `wsr_batches` + `wsr_batch_items` via Metabase (readonly).
  * Skema hasil normalisasi review Shanieulle: nama barang/gudang/rak/orang
@@ -124,8 +124,8 @@ dalam panel tokonya. Nama tokonya dibaca dari PERAN_TOKO — daftar yang sama ya
 dipakai menandai orangnya, jadi tidak ada dua daftar toko yang harus sepakat.
 */
 function alamatTempat(nama: string, id: number): string {
-  const kunci = nama.trim().toUpperCase();
-  if (kunci in PERAN_TOKO) return tautanKiriman(`${WEB_ASAL}/store/${kunci.toLowerCase()}/kiriman`, id);
+  const panel = PANEL_RAK[nama.trim().toUpperCase()];
+  if (panel) return tautanKiriman(`${WEB_ASAL}/store/${panel.toLowerCase()}/kiriman`, id);
   return tautanKiriman(WEB_GUDANG, id);
 }
 
@@ -177,8 +177,6 @@ function metabaseConfig(): MetabaseConfig | null {
   };
 }
 
-const maxIdQuery = () => `SELECT COALESCE(MAX(id), 0) AS max_id FROM wsr_batches`;
-
 // Nama orang di-join dari users (skema normalisasi: created_by = users.user_id).
 const batchSelect = `
   SELECT b.id, b.unit, b.direction, b.status, b.total_items, b.total_qty,
@@ -189,46 +187,6 @@ const batchSelect = `
   LEFT JOIN users eu ON eu.user_id = b.executed_by
 `;
 
-/**
- * SENGAJA tanpa saringan status. Poller ini berjalan tiap beberapa menit, dan
- * kiriman bisa selesai dikerjakan di dalam sela itu (toko membuat kiriman saat
- * orang gudang sudah berdiri di raknya). Versi lama menyaring `status =
- * 'pending'`, jadi kiriman seperti itu tidak pernah diumumkan SAMA SEKALI --
- * watermark tetap digeser, dan pengumumannya hilang selamanya. Terbukti 30 Jul:
- * WSR-GAMMA_LAMBDA-5 dibuat 14:54:54, dipindahkan 14:57:12, dan yang sampai ke
- * Discord cuma laporan selesainya.
- *
- * Yang menentukan perlu-tidaknya orang di-tag adalah status kiriman SAAT
- * diumumkan, bukan apakah dia masuk daftar ini (lihat pemanggilnya).
- */
-/*
-WATERMARK BUKAN LAGI SATU-SATUNYA PENJAGA, dan itu memperbaiki lubang yang sudah
-menelan pengumuman.
-
-Store watermark hidup di berkas biasa tanpa volume persisten (lihat
-wsrShipmentStore.ts): tiap redeploy ia hilang, lalu dipatok ulang ke id
-TERTINGGI saat itu supaya riwayat lama tidak diblast. Konsekuensinya yang tidak
-disadari: kiriman yang dibuat tepat sebelum redeploy — atau selagi bot mati —
-ikut terlewat, DIAM-DIAM dan selamanya. Tidak ada error, tidak ada log; cuma
-channel yang sepi.
-
-Terjadi 26 Agu 2026: WSR-ALPHA-9 dan -10 ada di wsr_batches berstatus pending,
-tapi pesan terakhir di channel tanggal 19 Agustus.
-
-Sekarang daftar calonnya = yang lebih baru dari watermark ATAU yang dibuat dalam
-`jamTengok` terakhir. Yang menjaga supaya tidak dobel bukan watermark, melainkan
-ISI CHANNEL ITU SENDIRI: kode kiriman yang sudah pernah diumumkan dibaca dari
-pesan yang ada di sana (lihat kodeSudahDiumumkan). Watermark tetap dipakai —
-ia yang membuat putaran biasa tidak perlu menyisir apa pun — tapi kehilangannya
-tidak lagi berarti kehilangan pengumuman.
-*/
-const newShipmentsQuery = (sejakId: number, batasWib: string) => `
-  ${batchSelect}
-  WHERE b.id > ${sejakId} OR b.created_at >= '${batasWib}'
-  ORDER BY b.id ASC
-`;
-
-/** "YYYY-MM-DD HH:MM:SS" WIB, sekian jam ke belakang dari sekarang. */
 /**
  * Kode kiriman yang pengumumannya SUDAH ada di channel.
  *
@@ -273,8 +231,9 @@ dua-duanya mengirim. Terjadi pada WSR-GAMMA_LAMBDA-20: dorongan kakera dan
 putaran poller jalan dalam tiga detik yang sama, dua pengumuman terkirim
 berselang 2,4 detik, masing-masing dengan thread-nya sendiri.
 
-Jadi seluruh jalur yang mengumumkan — dorongan kakera, poller, kirim ulang
-manual — lewat antrean yang sama, dan pemeriksaannya dilakukan DI DALAM
+Poller-nya sudah dicabut, tapi antreannya tetap: dorongan kakera yang datang
+berdekatan dan kirim ulang manual masih bisa bertabrakan dengan cara yang sama.
+Seluruh jalur lewat antrean ini, dan pemeriksaannya dilakukan DI DALAM
 giliran. Kode yang diumumkan proses ini juga dicatat sendiri: pesan yang baru
 saja terkirim belum tentu sudah ikut terbaca dari Discord sesaat kemudian.
 
@@ -291,11 +250,6 @@ export function bergiliran<T>(kerja: () => Promise<T>): Promise<T> {
   return hasil;
 }
 
-function batasWaktuWib(jam: number): string {
-  const wib = new Date(Date.now() - jam * 3_600_000 + 7 * 3_600_000);
-  return wib.toISOString().slice(0, 19).replace("T", " ");
-}
-
 // Isi kiriman: semua string di-join dari tabel asalnya (items/item_sources/racks).
 const itemsQuery = (ids: number[]) => `
   SELECT i.batch_id, i.item_id, it.name, COALESCE(it.barcode, '') AS barcode,
@@ -308,16 +262,6 @@ const itemsQuery = (ids: number[]) => `
   LEFT JOIN racks r ON r.id = i.rack_id
   WHERE i.batch_id IN (${ids.join(",")})
   ORDER BY i.id ASC
-`;
-
-/**
- * Kiriman yang sudah selesai dikerjakan: 'done' = semuanya pindah, 'cancelled' =
- * sisanya dibatalkan (barang yang terlanjur pindah tetap pindah).
- */
-const doneShipmentsQuery = () => `
-  ${batchSelect}
-  WHERE b.status IN ('done', 'cancelled')
-  ORDER BY b.id ASC
 `;
 
 /** Berapa barang yang benar-benar pindah vs tidak, untuk laporan penyelesaian. */
@@ -557,11 +501,28 @@ function gudangPengerja(shipment: ShipmentRow, items: ShipmentItem[]): string[] 
  * `[]` sendiri, supaya jatuhnya ke aturan lama itu disengaja.
  */
 /**
+ * Rak → panel toko yang mengerjakannya. SAMA dengan kakera
+ * (apps/web/src/apps/store/locations/locations.ts, `racksOf`): panel toko
+ * memegang raknya sendiri PLUS gudang pasangannya, jadi Lambda dikerjakan dari
+ * panel Gamma. Papan gudang kakera justru menyaring rak-rak ini keluar.
+ *
+ * Dulu Lambda dianggap gudang: tautannya ke papan gudang — tempat kirimannya
+ * TIDAK PERNAH tampil — dan tag-nya orang Surabaya. WSR-GAMMA_LAMBDA-20
+ * (15 Sep 2026) ditag ke Shello dan ditautkan ke layar yang tidak memuatnya.
+ */
+const PANEL_RAK: Record<string, string> = {
+  ALPHA: "ALPHA",
+  BETA: "BETA",
+  GAMMA: "GAMMA",
+  LAMBDA: "GAMMA",
+};
+
+/**
  * Peran Discord tiap toko, dibaca saat dipakai — bukan dibekukan saat modul
  * dimuat, supaya env yang diisi belakangan langsung berlaku tanpa deploy ulang.
  *
- * Cuma toko. Gudang (Omega, SS, Sigma, OP, Lambda) tetap memakai tag Bekasi /
- * Surabaya yang sudah ada, dan itu sengaja tidak disentuh.
+ * Kuncinya PANEL, bukan rak: rak Lambda memakai peran Gamma lewat PANEL_RAK.
+ * Gudang tanpa panel (Omega, SS, Sigma, OP) memakai tag Bekasi / Surabaya.
  */
 const PERAN_TOKO: Record<string, () => string> = {
   ALPHA: () => env.WSR_SHIPMENT_MENTION_TOKO_ALPHA_ID?.trim() ?? "",
@@ -609,9 +570,12 @@ function idPeran(isi: string, channel: TextChannel): string {
   return peran?.id ?? "";
 }
 
-function mentionIdsUntuk(shipment: ShipmentRow, items: ShipmentItem[], channel: TextChannel): string[] {
+export function mentionIdsUntuk(shipment: ShipmentRow, items: ShipmentItem[], channel: TextChannel): string[] {
   const surabaya = gudangSurabaya();
   const pengerja = gudangPengerja(shipment, items);
+  // Tag orang gudang cuma untuk rak TANPA panel toko. Rak berpanel ditag peran
+  // tokonya di bawah — sama dengan pembagian papan di kakera.
+  const gudang = pengerja.filter((g) => !PANEL_RAK[g]);
 
   const idSurabaya =
     env.WSR_SHIPMENT_MENTION_SURABAYA_ID?.trim() || env.WSR_SHIPMENT_MENTION_GAMMA_LAMBDA_ID?.trim() || "";
@@ -625,8 +589,8 @@ function mentionIdsUntuk(shipment: ShipmentRow, items: ShipmentItem[], channel: 
     const lama = shipment.unit.trim().toUpperCase() === "GAMMA_LAMBDA" ? idSurabaya : idBekasi;
     if (lama) ids.push(lama);
   } else {
-    if (pengerja.some((g) => surabaya.has(g)) && idSurabaya) ids.push(idSurabaya);
-    if (pengerja.some((g) => !surabaya.has(g)) && idBekasi) ids.push(idBekasi);
+    if (gudang.some((g) => surabaya.has(g)) && idSurabaya) ids.push(idSurabaya);
+    if (gudang.some((g) => !surabaya.has(g)) && idBekasi) ids.push(idBekasi);
   }
 
   const peran =
@@ -647,7 +611,8 @@ function mentionIdsUntuk(shipment: ShipmentRow, items: ShipmentItem[], channel: 
     atau keluar; id orang berhenti berarti tanpa ada yang sadar.
   */
   for (const g of pengerja) {
-    const isi = PERAN_TOKO[g]?.();
+    const panel = PANEL_RAK[g];
+    const isi = panel ? PERAN_TOKO[panel]?.() : undefined;
     if (!isi) continue;
     const idToko = idPeran(isi, channel);
     if (idToko) ids.push(idToko);
@@ -679,9 +644,8 @@ berselang-seling dengan kiriman lain, dan orang yang mau tahu "kiriman saya
 sampai mana" harus menyusuri channel sambil mencocokkan kodenya sendiri.
 
 THREAD-NYA DICARI DARI DISCORD, BUKAN DISIMPAN. Store bot ini hidup di berkas
-biasa tanpa volume persisten — tiap redeploy ia hilang (lihat wsrShipmentStore).
-Id thread yang disimpan di sana akan ikut hilang, dan laporannya diam-diam
-balik lagi ke channel. Nama thread = kode kirimannya, jadi thread-nya bisa
+biasa tanpa volume persisten — tiap redeploy ia hilang. Id thread yang disimpan
+di sana akan ikut hilang, dan laporannya diam-diam balik lagi ke channel. Nama thread = kode kirimannya, jadi thread-nya bisa
 dikenali dari Discord sendiri, sumber yang tidak ikut hilang saat deploy.
 Cara yang sama sudah dipakai penjaga anti-dobel (kodeSudahDiumumkan).
 
@@ -737,8 +701,8 @@ async function kirimSusulan(
 }
 
 /**
- * Pengumuman pembuka + thread-nya — SATU tempat untuk ketiga jalur yang
- * mengumumkan (poller, dorongan kakera, kirim ulang manual).
+ * Pengumuman pembuka + thread-nya — SATU tempat untuk semua jalur yang
+ * mengumumkan (dorongan kakera, kirim ulang manual).
  *
  * Disatukan justru karena cacat yang sedang diperbaiki: ketiganya dulu menyusun
  * `channel.send` sendiri-sendiri, dan waktu aturan tag diperbaiki 3 Sep 2026,
@@ -785,89 +749,6 @@ async function kirimPengumuman(
   }
 }
 
-/**
- * Laporan balik SETELAH kiriman dikerjakan (permintaan 28 Jul): orang toko yang
- * menunggu barangnya harus tahu siapa yang mengerjakan, apa yang jadi dikirim,
- * dan apa yang kurang — tanpa perlu bertanya.
- *
- * Sumbernya tabel kiriman itu sendiri, bukan titipan dari PDA: kalau PDA keburu
- * mati setelah stok berpindah, laporannya tetap terkirim di putaran berikutnya.
- */
-async function laporkanSelesai(config: MetabaseConfig, channel: TextChannel): Promise<void> {
-  const res = await fetchNativeQueryWithPagination(config, doneShipmentsQuery());
-  const selesai = rowsToShipments(res.columns, res.rows);
-  if (selesai.length === 0) return;
-
-  const sudah = new Set(getReported());
-  // Putaran pertama (store kosong / hilang saat deploy ulang): tandai semua yang
-  // sudah selesai sebagai "sudah dilapor" TANPA mengirim apa pun. Tanpa ini,
-  // kiriman lama diblast ke channel begitu fitur ini naik.
-  if (sudah.size === 0) {
-    markReported(selesai.map((s) => s.id));
-    return;
-  }
-
-  const belum = selesai.filter((s) => !sudah.has(s.id));
-  if (belum.length === 0) return;
-
-  // Hitungan per kiriman ditarik sekali untuk semua yang mau dilapor.
-  const hitung = new Map<number, { dipindah: number; tidak: number }>();
-  const countRes = await fetchNativeQueryWithPagination(config, closingCountsQuery(belum.map((s) => s.id)));
-  const idx = (name: string) => countRes.columns.indexOf(name);
-  for (const row of countRes.rows) {
-    hitung.set(Number(row[idx("batch_id")] ?? 0), {
-      dipindah: Number(row[idx("dipindah")] ?? 0),
-      tidak: Number(row[idx("tidak_dipindah")] ?? 0)
-    });
-  }
-
-  const peta = await petaThreadKiriman(channel);
-  const terkirim: number[] = [];
-  for (const shipment of belum) {
-    const angka = hitung.get(shipment.id) ?? { dipindah: 0, tidak: 0 };
-    // Dibatalkan tanpa satu pun barang berpindah = tidak ada yang perlu dilaporkan
-    // ke orang toko selain "batal"; tetap dikabarkan, tapi nadanya beda.
-    const utuh = shipment.status === "done";
-
-    try {
-      const thread = await kirimSusulan(channel, peta, shipmentCode(shipment), {
-        embeds: [
-          new EmbedBuilder()
-            .setColor(utuh ? 0x2e7d32 : 0xef6c00)
-            .setTitle(
-              utuh
-                ? `✅ ${shipmentCode(shipment)} selesai — ${angka.dipindah} barang dikirim`
-                : `📦 ${shipmentCode(shipment)} ditutup — ${angka.dipindah} dari ${shipment.totalItems} barang dikirim`
-            )
-            .setDescription(
-              `Dikerjakan **${shipment.executedBy}**.\n` +
-                `Diminta **${shipment.createdBy}** dari **${shipment.unit}**.\n\n` +
-                (utuh
-                  ? "Semua barang di kiriman ini sudah dipindah, tidak ada yang tertinggal."
-                  : `**${angka.tidak} barang tidak jadi dikirim** — biasanya karena barangnya belum ada ` +
-                    "di gudang asal. Barang itu masih di tempatnya; buat kiriman baru dari PDA kalau tetap dibutuhkan.")
-            )
-            .setFooter({ text: `Dikerjakan ${shipment.executedAt} WIB` })
-            .setTimestamp()
-        ]
-      });
-      // Kiriman ini sudah tidak menunggu apa-apa lagi, jadi thread-nya ditutup.
-      // Ditutup, BUKAN dikunci: kalau ada yang perlu ditanyakan soal barang yang
-      // tidak jadi dikirim, orangnya masih bisa membukanya dengan membalas.
-      if (thread && !thread.archived) await thread.setArchived(true).catch(() => undefined);
-      terkirim.push(shipment.id);
-    } catch (err) {
-      console.error(`[wsr-shipment] gagal kirim laporan selesai #${shipment.id}:`, err);
-    }
-  }
-
-  // Hanya yang benar-benar terkirim yang ditandai — sisanya dicoba lagi nanti.
-  markReported(terkirim);
-  if (terkirim.length > 0) {
-    console.log(`[wsr-shipment] ${terkirim.length} laporan kiriman selesai dikirim.`);
-  }
-}
-
 /** Satu kiriman, dicari langsung dari id-nya. Dipakai jalur dorongan kakera. */
 const shipmentByIdQuery = (id: number) => `
   ${batchSelect}
@@ -884,11 +765,10 @@ const shipmentByIdQuery = (id: number) => `
  * terbaca sebagai "kirimannya gagal", bukan "sebentar lagi". Dilaporkan Gilang
  * 29 Agu 2026: WSR-ALPHA-12 dibuat 16:29, pengumumannya sampai 16:32.
  *
- * POLLER-NYA TIDAK DIMATIKAN, dan itu penting. Dorongan bisa gagal — kakera
- * mati, jaringannya putus, bot-nya sedang deploy — dan yang menambal itu justru
- * putaran lima menitan yang sama. Yang menjaga tidak dobel bukan urutan
- * keduanya, melainkan ISI CHANNEL: kode yang sudah diumumkan dibaca dari pesan
- * yang benar-benar ada di sana (lihat kodeSudahDiumumkan).
+ * SEKARANG SATU-SATUNYA JALUR (15 Sep 2026): poller yang dulu menambal dorongan
+ * yang gagal sudah dicabut. Dorongan yang gagal tercatat di log kakera, dan
+ * kirimannya diumumkan ulang manual lewat `npm run wsr:umumkan-ulang`. Penjaga
+ * dobel tetap ISI CHANNEL (lihat kodeSudahDiumumkan) + antrean `bergiliran`.
  *
  * Isinya dibaca ULANG dari database, bukan diambil dari badan permintaan.
  * Kakera cuma menyebut id; nama barang, rak, dan jumlahnya tetap datang dari
@@ -929,84 +809,90 @@ export async function umumkanKirimanSekarang(
   });
 }
 
-export async function runWsrShipmentCheck(client: Client): Promise<void> {
+/** Kiriman yang laporan penutupnya sudah dikirim proses ini. */
+const dilaporProsesIni = new Set<number>();
+
+/**
+ * Laporan balik SETELAH kiriman ditutup (permintaan 28 Jul): orang toko yang
+ * menunggu barangnya harus tahu siapa yang mengerjakan, apa yang jadi dikirim,
+ * dan apa yang kurang — tanpa perlu bertanya.
+ *
+ * DIDORONG kakera (15 Sep 2026), bukan dicari poller: kakera mengabari begitu
+ * tombol Pindahkan menuntaskan kirimannya atau tombol Batalkan ditekan. Isinya
+ * tetap dibaca ulang dari database, bukan dari badan permintaan.
+ */
+export async function laporkanDitutupSekarang(
+  client: Client,
+  batchId: number
+): Promise<"terkirim" | "sudah-ada" | "belum-ditutup" | "tidak-ketemu" | "belum-siap"> {
   const config = metabaseConfig();
   if (!config) {
-    console.warn("[wsr-shipment] Metabase belum dikonfigurasi — lewati.");
-    return;
+    console.warn("[wsr-shipment] kabar penutupan datang tapi Metabase belum dikonfigurasi.");
+    return "belum-siap";
   }
-
-  const max = await fetchNativeQueryWithPagination(config, maxIdQuery());
-  const maxId = Number(max.rows[0]?.[0] ?? 0);
-  if (!Number.isFinite(maxId)) return;
-
-  const sejakId = getOrInitWatermark(maxId);
-
-  const channel = (await client.channels.fetch(env.WSR_SHIPMENT_CHANNEL_ID).catch(() => null)) as TextChannel | null;
+  const channel = (await client.channels
+    .fetch(env.WSR_SHIPMENT_CHANNEL_ID)
+    .catch(() => null)) as TextChannel | null;
   if (!channel?.isTextBased()) {
-    console.error(
-      `[wsr-shipment] channel ${env.WSR_SHIPMENT_CHANNEL_ID} tidak ketemu — watermark TIDAK digeser supaya tidak ada kiriman yang hilang.`
-    );
-    return;
+    console.error(`[wsr-shipment] channel ${env.WSR_SHIPMENT_CHANNEL_ID} tidak ketemu — laporan penutupan dilewat.`);
+    return "belum-siap";
   }
 
-  {
-    /*
-      Dijalankan SETIAP putaran, bukan cuma waktu maxId > watermark.
+  const res = await fetchNativeQueryWithPagination(config, shipmentByIdQuery(batchId));
+  const shipment = rowsToShipments(res.columns, res.rows)[0];
+  if (!shipment) return "tidak-ketemu";
+  if (shipment.status !== "done" && shipment.status !== "cancelled") return "belum-ditutup";
 
-      Syarat lama itu masuk akal selama watermark dipercaya penuh; sekarang yang
-      dicari justru kiriman yang watermark-nya sudah telanjur melewati mereka —
-      dan untuk kiriman begitu maxId TIDAK pernah lebih besar dari watermark.
-      Ongkosnya satu query sempit tiap lima menit.
-    */
-    const res = await fetchNativeQueryWithPagination(
-      config,
-      newShipmentsQuery(sejakId, batasWaktuWib(env.WSR_SHIPMENT_LOOKBACK_HOURS))
-    );
-    // Periksa-lalu-kirim di dalam giliran, sama dengan dorongan kakera: tanpa
-    // itu keduanya bisa sama-sama melihat channel kosong dan sama-sama mengirim.
-    await bergiliran(async () => {
-      const sudah = await kodeSudahDiumumkan(channel);
-      const shipments = rowsToShipments(res.columns, res.rows).filter(
-        (s) => !sudah.has(shipmentCode(s))
-      );
-      if (shipments.length === 0) {
-        setWatermark(maxId);
-        return;
-      }
-      const itemsByBatch = await fetchItems(config, shipments.map((s) => s.id));
-      // Daftar thread ditarik sekali untuk seluruh putaran, lalu ikut terisi
-      // sendiri tiap ada thread baru dibuka.
-      const threadYangAda = await petaThreadKiriman(channel);
+  return bergiliran(async () => {
+    if (dilaporProsesIni.has(shipment.id)) return "sudah-ada" as const;
 
-      let terkirim = 0;
-      for (const shipment of shipments) {
-        try {
-          const items = itemsByBatch.get(shipment.id) ?? [];
-          await kirimPengumuman(channel, shipment, items, { threadYangAda });
-          terkirim++;
-        } catch (err) {
-          console.error(`[wsr-shipment] gagal kirim kiriman #${shipment.id}:`, err);
-        }
-      }
+    const countRes = await fetchNativeQueryWithPagination(config, closingCountsQuery([shipment.id]));
+    const idx = (name: string) => countRes.columns.indexOf(name);
+    const row = countRes.rows[0];
+    const angka = {
+      dipindah: Number(row?.[idx("dipindah")] ?? 0),
+      tidak: Number(row?.[idx("tidak_dipindah")] ?? 0)
+    };
+    // Dibatalkan tanpa satu pun barang berpindah = tidak ada yang perlu dilaporkan
+    // ke orang toko selain "batal"; tetap dikabarkan, tapi nadanya beda.
+    const utuh = shipment.status === "done";
 
-      // Digeser SETELAH pesan terkirim — kegagalan kirim tidak membuat kiriman
-      // hilang dari pantauan.
-      setWatermark(maxId);
-      console.log(`[wsr-shipment] ${terkirim} kiriman diumumkan ke channel.`);
+    const peta = await petaThreadKiriman(channel);
+    const thread = await kirimSusulan(channel, peta, shipmentCode(shipment), {
+      embeds: [
+        new EmbedBuilder()
+          .setColor(utuh ? 0x2e7d32 : 0xef6c00)
+          .setTitle(
+            utuh
+              ? `✅ ${shipmentCode(shipment)} selesai — ${angka.dipindah} barang dikirim`
+              : `📦 ${shipmentCode(shipment)} ditutup — ${angka.dipindah} dari ${shipment.totalItems} barang dikirim`
+          )
+          .setDescription(
+            `Dikerjakan **${shipment.executedBy}**.\n` +
+              `Diminta **${shipment.createdBy}** dari **${shipment.unit}**.\n\n` +
+              (utuh
+                ? "Semua barang di kiriman ini sudah dipindah, tidak ada yang tertinggal."
+                : `**${angka.tidak} barang tidak jadi dikirim** — biasanya karena barangnya belum ada ` +
+                  `di gudang asal. Barang itu masih di tempatnya; buat kiriman baru di ${WEB_NAMA} kalau tetap dibutuhkan.`)
+          )
+          .setFooter({ text: `Dikerjakan ${shipment.executedAt} WIB` })
+          .setTimestamp()
+      ]
     });
-  }
-
-  // Selalu dijalankan, termasuk saat tidak ada kiriman baru: kiriman bisa
-  // selesai dikerjakan tanpa ada kiriman baru yang lahir di putaran yang sama.
-  await laporkanSelesai(config, channel);
+    dilaporProsesIni.add(shipment.id);
+    // Kiriman ini sudah tidak menunggu apa-apa lagi, jadi thread-nya ditutup.
+    // Ditutup, BUKAN dikunci: kalau ada yang perlu ditanyakan soal barang yang
+    // tidak jadi dikirim, orangnya masih bisa membukanya dengan membalas.
+    if (thread && !thread.archived) await thread.setArchived(true).catch(() => undefined);
+    console.log(`[wsr-shipment] laporan penutupan ${shipmentCode(shipment)} dikirim (dorongan kakera).`);
+    return "terkirim" as const;
+  });
 }
 
 /**
- * Kirim ULANG pengumuman satu kiriman — dipakai manual, bukan oleh poller, saat
- * pengumuman aslinya sudah telanjur terkirim dengan isi yang salah (mis. tag-nya
- * menepuk pundak orang yang bukan kotanya). Watermark tidak disentuh, jadi ini
- * tidak mengubah apa pun yang dipantau poller.
+ * Kirim ULANG pengumuman satu kiriman — dipakai manual saat pengumuman aslinya
+ * gagal didorong kakera, atau telanjur terkirim dengan isi yang salah (mis.
+ * tag-nya menepuk pundak orang yang bukan kotanya).
  *
  * `selaluTag` untuk mengetes tag pada kiriman yang sudah beres; tanpa itu aturan
  * normal yang berlaku (yang sudah selesai tidak di-tag).
@@ -1031,36 +917,7 @@ export async function kirimUlangPengumuman(
 
   const items = (await fetchItems(config, [shipment.id])).get(shipment.id) ?? [];
   // Kirim ulang manual memang sengaja mengirim lagi, tapi tetap antre supaya
-  // tidak bertabrakan dengan poller yang sedang mengumumkan kiriman lain.
+  // tidak bertabrakan dengan dorongan kakera yang datang bersamaan.
   await bergiliran(() => kirimPengumuman(channel, shipment, items, { selaluTag: opsi.selaluTag }));
   console.log(`[wsr-shipment] pengumuman ${shipmentCode(shipment)} dikirim ulang (status ${shipment.status}).`);
-}
-
-export function startWsrShipmentScheduler(client: Client): void {
-  if (!env.WSR_SHIPMENT_ENABLED) {
-    console.log("[wsr-shipment] poller nonaktif (WSR_SHIPMENT_ENABLED=false).");
-    return;
-  }
-
-  const intervalMs = env.WSR_SHIPMENT_POLL_MINUTES * 60_000;
-  let running = false;
-
-  const tick = async () => {
-    if (running) {
-      console.warn("[wsr-shipment] putaran sebelumnya belum selesai — lewati.");
-      return;
-    }
-    running = true;
-    try {
-      await runWsrShipmentCheck(client);
-    } catch (err) {
-      console.error("[wsr-shipment] gagal cek:", err);
-    } finally {
-      running = false;
-    }
-  };
-
-  setInterval(tick, intervalMs).unref?.();
-  void tick();
-  console.log(`[wsr-shipment] poller tiket kiriman aktif — cek tiap ${env.WSR_SHIPMENT_POLL_MINUTES} menit.`);
 }

@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bergiliran, openingEmbed, type ShipmentItem, type ShipmentRow } from "./wsr-shipment.js";
+import type { TextChannel } from "discord.js";
+import {
+  bergiliran,
+  mentionIdsUntuk,
+  openingEmbed,
+  type ShipmentItem,
+  type ShipmentRow
+} from "./wsr-shipment.js";
 
 /*
 Dua bentuk kiriman yang kolom `direction`-nya SAMA-SAMA 'request', tapi
@@ -82,13 +89,61 @@ test("kiriman yang semuanya gudang tetap satu alamat", () => {
   assert.ok(!isi.includes("/store/"), "gudang tidak boleh diarahkan ke panel toko");
 });
 
-// WSR-GAMMA_LAMBDA-20, 15 Sep 2026: tautan polos membuka kota terakhir di
-// peramban (Bekasi), dan orang Lambda mengira kirimannya hilang.
-test("tautan gudang membuka kirimannya langsung, bukan kota terakhir", () => {
+// WSR-GAMMA_LAMBDA-20, 15 Sep 2026: rak Lambda dikerjakan dari panel Gamma
+// (kakera: racksOf). Tautannya dulu ke papan gudang — yang tidak pernah memuat
+// rak Lambda — jadi orang yang menekannya mengira kirimannya hilang.
+test("rak Lambda ditautkan ke panel Gamma, langsung ke kirimannya", () => {
   const isi = description(shipment({ id: 20, totalItems: 13, totalQty: 20 }), [
     item("LAMBDA", "GAMMA", 20)
   ]);
-  assert.match(isi, /LAMBDA: <https:\/\/team\.kyou\.id\/warehouse\/stock-rotation\?kiriman=20>/);
+  assert.match(isi, /LAMBDA: <https:\/\/team\.kyou\.id\/store\/gamma\/kiriman\?kiriman=20>/);
+  assert.ok(!isi.includes("/warehouse/stock-rotation"), "rak Lambda bukan milik papan gudang");
+});
+
+test("rak gudang tanpa panel tetap ke papan gudang, langsung ke kirimannya", () => {
+  const isi = description(shipment(), [item("SIGMA", "LAMBDA", 5)]);
+  assert.match(isi, /SIGMA: <https:\/\/team\.kyou\.id\/warehouse\/stock-rotation\?kiriman=19>/);
+});
+
+/*
+TAG: rak berpanel toko → peran tokonya; rak tanpa panel → orang gudang kotanya.
+Channel tiruan cuma memuat daftar peran — itu satu-satunya yang dibaca.
+*/
+function channelDenganPeran(): TextChannel {
+  const peran = [
+    { id: "peran-alpha", name: "Team Alpha Store" },
+    { id: "peran-beta", name: "Team Beta Store" },
+    { id: "peran-gamma", name: "Team Gamma Store" }
+  ];
+  return {
+    guild: {
+      roles: {
+        cache: {
+          find: (cocok: (r: { id: string; name: string }) => boolean) => peran.find(cocok),
+          has: (id: string) => peran.some((r) => r.id === id),
+          size: peran.length
+        }
+      }
+    }
+  } as unknown as TextChannel;
+}
+
+const ORANG_SURABAYA = "1224581529854939138"; // Shello (env bawaan)
+const ORANG_BEKASI = "1115194334497755157"; // env bawaan
+
+test("kiriman dari rak Lambda men-tag Team Gamma Store, bukan orang Surabaya", () => {
+  const ids = mentionIdsUntuk(shipment({ id: 20 }), [item("LAMBDA", "GAMMA", 20)], channelDenganPeran());
+  assert.deepEqual(ids, ["peran-gamma"]);
+  assert.ok(!ids.includes(ORANG_SURABAYA));
+});
+
+test("minta dari Bekasi tetap men-tag orang Bekasi plus peran toko yang raknya dipakai", () => {
+  const ids = mentionIdsUntuk(
+    shipment(),
+    [item("SS", "LAMBDA", 42), item("OMEGA", "LAMBDA", 16), item("ALPHA", "LAMBDA", 3), item("BETA", "LAMBDA", 1)],
+    channelDenganPeran()
+  );
+  assert.deepEqual(ids.sort(), [ORANG_BEKASI, "peran-alpha", "peran-beta"].sort());
 });
 
 test("kiriman yang sudah beres tetap menaut ke kirimannya", () => {

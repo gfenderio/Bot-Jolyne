@@ -271,10 +271,10 @@ const envSchema = z.object({
   // bentuk yang bisa dibawa keliling rak, jadi bot memantau tabel wsr_batches
   // dan mengirim Excel-nya ke channel. Stok baru berpindah saat kiriman itu
   // dieksekusi dari PDA.
-  WSR_SHIPMENT_ENABLED: optionalBoolean,
+  // Poller-nya dicabut 15 Sep 2026: kakera mendorong kabar dibuat/ditutup ke
+  // POST /kakera/wsr-shipment. Setelan poller (ENABLED, POLL_MINUTES,
+  // STORE_PATH, LOOKBACK_HOURS) ikut dicabut; yang tersisa di server diabaikan.
   WSR_SHIPMENT_CHANNEL_ID: optionalString.default("1529679453876256859"),
-  WSR_SHIPMENT_POLL_MINUTES: pollIntervalSeconds.default(5),
-  WSR_SHIPMENT_STORE_PATH: optionalString.default("data/wsr-shipment.json"),
 
   // Orang gudang yang di-tag tiap ada kiriman WSR baru (keputusan 27 Jul: Jolyne
   // jadi pengingat, bukan tiket). Kosongkan kalau tidak mau ada yang di-tag.
@@ -349,16 +349,6 @@ const envSchema = z.object({
   WSR_SHIPMENT_MENTION_TOKO_BETA_ID: optionalString.default("Team Beta Store"),
   WSR_SHIPMENT_MENTION_TOKO_GAMMA_ID: optionalString.default("Team Gamma Store"),
 
-  /**
-   * Seberapa jauh ke belakang poller menengok tiap putaran, di luar watermark.
-   *
-   * Ini jaring pengaman untuk watermark yang hilang saat redeploy — bukan
-   * pengganti watermark. Dua hari cukup untuk menutup akhir pekan dan deploy
-   * beruntun, dan cukup pendek supaya kiriman lama tidak pernah terbawa. Yang
-   * menjaga tidak dobel isi channelnya sendiri, bukan angka ini.
-   */
-  WSR_SHIPMENT_LOOKBACK_HOURS: z.coerce.number().int().min(1).max(168).default(48),
-
   // Catatan "barang mana yang sudah disiapkan gudang, oleh siapa" — lihat
   // src/machitan/wsrPrepStore.ts. Ditaruh di /app/data (volume) supaya tidak
   // hilang saat deploy ulang.
@@ -392,7 +382,6 @@ process.env.SPLIT_PRINT_ENABLED = "true";
 // Kiriman WSR pindah ke channel khusus (permintaan 22 Jul) — tidak lagi
 // menumpang channel laporan WS Inbox.
 process.env.WSR_SHIPMENT_CHANNEL_ID = "1529679453876256859";
-process.env.WSR_SHIPMENT_ENABLED = "true";
 // Env mati yang mungkin masih tersisa di server; dibersihkan biar tidak
 // menyesatkan kalau ada yang membaca konfigurasi Coolify.
 delete process.env.PICK_TRIAGE_SINCE;
