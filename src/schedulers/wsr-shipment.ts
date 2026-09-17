@@ -855,17 +855,25 @@ export async function laporkanDitutupSekarang(
     };
     // Dibatalkan tanpa satu pun barang berpindah = tidak ada yang perlu dilaporkan
     // ke orang toko selain "batal"; tetap dikabarkan, tapi nadanya beda.
-    const utuh = shipment.status === "done";
+    //
+    // Sejak 17 Sep 2026 kakera bisa menutup kiriman sebagai `done` walau sebagian
+    // barangnya tidak ketemu (tombol Selesai). Jadi "utuh" dibaca dari barisnya,
+    // bukan dari status saja — kalau tidak, kiriman bersisa dilaporkan "tidak ada
+    // yang tertinggal".
+    const selesai = shipment.status === "done";
+    const utuh = selesai && angka.tidak === 0;
 
     const peta = await petaThreadKiriman(channel);
     const thread = await kirimSusulan(channel, peta, shipmentCode(shipment), {
       embeds: [
         new EmbedBuilder()
-          .setColor(utuh ? 0x2e7d32 : 0xef6c00)
+          .setColor(selesai ? 0x2e7d32 : 0xef6c00)
           .setTitle(
             utuh
               ? `✅ ${shipmentCode(shipment)} selesai — ${angka.dipindah} barang dikirim`
-              : `📦 ${shipmentCode(shipment)} ditutup — ${angka.dipindah} dari ${shipment.totalItems} barang dikirim`
+              : selesai
+                ? `✅ ${shipmentCode(shipment)} selesai — ${angka.dipindah} dari ${shipment.totalItems} barang dikirim`
+                : `📦 ${shipmentCode(shipment)} ditutup — ${angka.dipindah} dari ${shipment.totalItems} barang dikirim`
           )
           .setDescription(
             `Dikerjakan **${shipment.executedBy}**.\n` +
