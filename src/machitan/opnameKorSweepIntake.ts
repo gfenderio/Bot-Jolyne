@@ -103,6 +103,15 @@ async function readRequestBody(request: IncomingMessage, maxBytes = 5 * 1024 * 1
   return body;
 }
 
+/** One KOR/SUR pair the 02:00 sweep closed by itself, and why it was allowed. */
+export type ClosedPair = {
+  item_id?: string | number;
+  sur_source?: string;
+  kor_source?: string;
+  qty?: number;
+  dasar?: string;
+};
+
 type SweptItem = {
   item_id?: string;
   item_name?: string | null;
@@ -149,8 +158,32 @@ export function buildOpnameKorSweepWorkbook(
   sweptAt: string,
   surplus: SurplusItem[] = [],
   ws: WsSisir | null = null,
+  pairs: ClosedPair[] = [],
 ): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook();
+
+  // Auto-closed pairs first: each one erased a KOR record, so a wrong one must
+  // be easy to find and reverse from the settle popup.
+  if (pairs.length > 0) {
+    const pairSheet = workbook.addWorksheet("Pasangan ditutup otomatis");
+    pairSheet.columns = [
+      { header: "Item ID", key: "itemId", width: 12 },
+      { header: "KOR", key: "kor", width: 16 },
+      { header: "SUR", key: "sur", width: 16 },
+      { header: "Unit", key: "qty", width: 8 },
+      { header: "Dasar", key: "dasar", width: 34 },
+    ];
+    pairSheet.getRow(1).font = { bold: true };
+    for (const pair of pairs) {
+      pairSheet.addRow({
+        itemId: pair.item_id ?? "-",
+        kor: pair.kor_source ?? "-",
+        sur: pair.sur_source ?? "-",
+        qty: Number(pair.qty ?? 0),
+        dasar: pair.dasar ?? "-",
+      });
+    }
+  }
 
   const sheet = workbook.addWorksheet("Pindah ke KOR");
   sheet.columns = [
@@ -323,6 +356,7 @@ export async function handleOpnameKorSweepIntake(
     const items: SweptItem[] = Array.isArray(body.items) ? body.items : [];
     const needsHuman: string[] = Array.isArray(body.needs_human) ? body.needs_human.map(String) : [];
     const surplus: SurplusItem[] = Array.isArray(body.surplus) ? body.surplus : [];
+    const pairs: ClosedPair[] = Array.isArray(body.pairs_closed) ? body.pairs_closed : [];
     const sweptAt = String(body.swept_at ?? new Date().toISOString());
     const ws: WsSisir | null = body.ws ?? null;
     const wsDitutup = ws?.ditutup ?? [];
@@ -349,12 +383,12 @@ export async function handleOpnameKorSweepIntake(
     // ketika isinya tidak kosong.
     if (
       items.length === 0 && needsHuman.length === 0 && surplus.length === 0
-      && wsDitutup.length === 0 && wsNyangkut.length === 0
+      && wsDitutup.length === 0 && wsNyangkut.length === 0 && pairs.length === 0
     ) {
       return sendJson(response, 200, { message: "Tidak ada yang dilaporkan", ok: true });
     }
 
-    const workbook = buildOpnameKorSweepWorkbook(items, needsHuman, sweptAt, surplus, ws);
+    const workbook = buildOpnameKorSweepWorkbook(items, needsHuman, sweptAt, surplus, ws, pairs);
     const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
 
     const tanggal = sweptAt.slice(0, 10);
@@ -426,6 +460,9 @@ export async function handleOpnameKorSweepIntake(
             : null,
           lebihTanpaAsal.length > 0
             ? `**${lebihTanpaAsal.length} barang** hasil hitungnya lebih dan belum ketahuan asalnya. Stoknya sengaja belum ditambah — menunggu keputusan orang kantor.`
+            : null,
+          pairs.length > 0
+            ? `**${pairs.length} pasangan hilang/lebih ditutup otomatis** (gudang sama, sesama Bekasi, atau ada jejak transfer). Kalau ada yang keliru, balikkan dari popup settle — daftarnya di berkas.`
             : null,
           wsDitutup.length > 0
             ? `**${wsDitutup.length} barang WS** yang tertinggal di Pending ditutup otomatis; selisihnya lewat KOR seperti penutupan biasa.`
