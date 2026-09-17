@@ -7,6 +7,7 @@ import { handleMachitanPickCancel } from "./pickCancelIntake.js";
 import { handleMachitanShipping } from "./shippingIntake.js";
 import { handleWsInboxIntake } from "./wsInboxIntake.js";
 import { handleWsrShipmentPush } from "./wsrShipmentIntake.js";
+import { handleOpnameRequestPush } from "./opnameRequestIntake.js";
 import { handleOpnameKorSweepIntake } from "./opnameKorSweepIntake.js";
 import { handleAbsenRequest } from "./absenIntake.js";
 import { handleMachitanPickupProof } from "./pickupProofIntake.js";
@@ -107,6 +108,17 @@ export function startMachitanHttpServer(client: Client<true>) {
         console.error("Gagal mengumumkan kiriman WSR dorongan kakera", error);
         if (!response.headersSent) {
           sendJson(response, 500, { ok: false, error: "Internal server error handling WSR shipment push" });
+        }
+      });
+      return;
+    }
+
+    // "Request cek fisik & opname" from the Meja Selisih desk on team.kyou.id.
+    if (pathname === "/kakera/opname-request") {
+      handleOpnameRequestPush(request, response, client).catch((error) => {
+        console.error("Gagal mengirim request opname dari kakera", error);
+        if (!response.headersSent) {
+          sendJson(response, 500, { ok: false, error: "Internal server error handling opname request" });
         }
       });
       return;

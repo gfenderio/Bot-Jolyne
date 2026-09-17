@@ -338,6 +338,12 @@ const envSchema = z.object({
   WSR_SHIPMENT_MENTION_TOKO_BETA_ID: optionalString.default("Team Beta Store"),
   WSR_SHIPMENT_MENTION_TOKO_GAMMA_ID: optionalString.default("Team Gamma Store"),
 
+  // Channel for "request cek fisik & opname" from the Meja Selisih desk
+  // (#cek-fisik-&-opname). Accepts an id or a channel name.
+  OPNAME_REQUEST_CHANNEL: optionalString.default("1550038731002609724"),
+  // Who is tagged when Sigma holds the requested item (role or person id).
+  OPNAME_REQUEST_MENTION_SIGMA: optionalString.default("715841421466402858"),
+
   // Catatan "barang mana yang sudah disiapkan gudang, oleh siapa" — lihat
   // src/machitan/wsrPrepStore.ts. Ditaruh di /app/data (volume) supaya tidak
   // hilang saat deploy ulang.
