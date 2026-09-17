@@ -12,7 +12,6 @@ import { startMachitanHttpServer } from "./machitan/httpServer.js";
 import { startBaitoAttendanceScheduler } from "./schedulers/baito-attendance.js";
 // Dinonaktifkan — lihat blok ready di bawah.
 // import { startOripaLiveRecapScheduler } from "./schedulers/oripa-live-recap.js";
-import { startFulfillmentStaleScheduler } from "./schedulers/fulfillment-stale.js";
 import { startPickTriageScheduler } from "./schedulers/pick-triage.js";
 import { startSplitPrintScheduler } from "./schedulers/split-print.js";
 
@@ -36,7 +35,8 @@ if (!env.DISCORD_TOKEN) {
     startBaitoAttendanceScheduler(readyClient);
     // Dinonaktifkan — rekap live mingguan tidak perlu cron lagi.
     // startOripaLiveRecapScheduler(readyClient);
-    startFulfillmentStaleScheduler(readyClient);
+    // Digest "Order nyangkut 3-30 hari" DICABUT 17 Sep 2026 — tidak dibaca
+    // siapa pun di #pending-shipment, cuma menenggelamkan triase PICK.
     startPickTriageScheduler(readyClient);
     startSplitPrintScheduler(readyClient);
     // Kiriman Rotasi Stok TIDAK dipoll lagi (15 Sep 2026): kakera mendorong

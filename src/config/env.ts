@@ -187,17 +187,6 @@ const envSchema = z.object({
   // tidak perlu ikut tertanam di script yang bisa dilihat editor spreadsheet.
   COSTUME_LOAN_CHANNEL_ID: optionalString.default("1540207172074606623"),
   COSTUME_LOAN_INTAKE_TOKEN: optionalString,
-  // Digest harian "order belum diproses > N hari" di fulfillment kyou.id.
-  FULFILLMENT_STALE_ENABLED: optionalBoolean,
-  // Kirim digest sekali langsung saat bot start (selain jadwal harian 09:00).
-  // Berguna supaya hari pertama enable / setiap redeploy tidak ke-skip kalau
-  // prosesnya baru hidup setelah lewat 09:00 WIB.
-  FULFILLMENT_STALE_RUN_ON_START: optionalBoolean,
-  FULFILLMENT_STALE_CHANNEL_ID: optionalString.default("1524977369641652227"),
-  FULFILLMENT_STALE_THRESHOLD_DAYS: pollIntervalSeconds.default(3),
-  // Batas atas: order lebih lama = abandoned, tidak masuk digest (samakan
-  // dgn App\Support\FulfillmentStale::MAX_DAYS di kyou.id).
-  FULFILLMENT_STALE_MAX_DAYS: pollIntervalSeconds.default(30),
   // Triase interaktif "PICK nyangkut >= N jam" (item-level). MVP Discord-only.
   PICK_TRIAGE_ENABLED: optionalBoolean,
   PICK_TRIAGE_CHANNEL_ID: optionalString.default("1524977369641652227"),
@@ -358,11 +347,8 @@ const envSchema = z.object({
 // Override dari kode agar mengabaikan setting environment server Coolify
 process.env.BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID = "1500736344182358066";
 
-// Triase PICK + digest fulfillment-stale: semua dipaksa dari kode supaya tidak
-// perlu utak-atik env di Coolify tiap ganti setelan. Server masih menyimpan
-// FULFILLMENT_STALE_CHANNEL_ID lama (channel bot-update) — override ini yang
-// memindahkannya ke #pending-shipment.
-process.env.FULFILLMENT_STALE_CHANNEL_ID = "1524977369641652227";
+// Triase PICK: semua dipaksa dari kode supaya tidak perlu utak-atik env di
+// Coolify tiap ganti setelan.
 process.env.PICK_TRIAGE_CHANNEL_ID = "1524977369641652227";
 process.env.PICK_TRIAGE_RESULT_CHANNEL_ID = "1525411338191376464";
 process.env.PICK_TRIAGE_MENTION_USER_ID = "1337888111471886456";

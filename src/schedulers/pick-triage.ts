@@ -23,8 +23,7 @@ import { buildTriageSelect, itemListValue } from "../handlers/pickTriage.js";
 /**
  * Triase interaktif "PICK nyangkut >= N jam" (default band 24-30 jam).
  *
- * Beda dengan fulfillment-stale.ts (digest read-only, 3-30 hari, semua stage):
- * ini khusus stage PICK dan interaktif — tiap order punya dropdown 3 opsi
+ * Khusus stage PICK dan interaktif — tiap order punya dropdown 3 opsi
  * (masih antri / rusak / belum ketemu) yang saat dipilih membuka modal
  * deskripsi lalu menghasilkan embed balasan.
  *
@@ -35,7 +34,7 @@ import { buildTriageSelect, itemListValue } from "../handlers/pickTriage.js";
  * belum ketemu), itu dijelaskan di deskripsi modal.
  *
  * Logika stage PICK dijaga konsisten dengan App\Support\FulfillmentStale di
- * kyou.id & fulfillment-stale.ts: order sudah di-print (masuk PICK), belum
+ * kyou.id: order sudah di-print (masuk PICK), belum
  * di-pack, dan barang (order_items) belum di-pick.
  *
  * Bukan cron harian: bot POLL tiap PICK_TRIAGE_POLL_MINUTES menit dan mengirim
@@ -55,6 +54,8 @@ import { buildTriageSelect, itemListValue } from "../handlers/pickTriage.js";
  */
 
 const EMBED_COLOR = 0xd9534f;
+// Role "B2B Sales Division" di server TeamKyou! — yang di-tag untuk order partner.
+const B2B_SALES_ROLE_ID = "1204414908813549650";
 const EMBED_COLOR_EARLY = 0x9b59b6;
 // Hijau, sama dengan embed hasil yang dijawab manual (handlers/pickTriage.ts):
 // laporan yang beres otomatis harus terlihat "selesai", bukan "peringatan".
@@ -88,6 +89,7 @@ type StalePickItem = {
   shipping: string;
   isEarly: boolean;
   eta: string;
+  isPartner: boolean;
 };
 
 /** Semua barang nyangkut milik satu order, digabung jadi satu pesan. */
@@ -102,6 +104,8 @@ type StalePickOrder = {
   shipping: string;
   isEarly: boolean;
   eta: string; // perkiraan barang datang (orders.eta), mis. "July-August 2026"
+  /** Pembelinya partner (ada baris di `partners`) — di-tag B2B Sales, bukan Irwanda. */
+  isPartner: boolean;
 };
 
 /**
@@ -139,7 +143,7 @@ function buildQuery(minHours: number, maxHours: number, earlyMinHours: number): 
   // hari); sisanya tetap minHours (24 jam).
   //
   // Tetap pakai BAND, bukan cutoff absolut. Yang nyangkut lebih lama dari batas
-  // atas SENGAJA tidak dikirim: itu ranah digest fulfillment-stale (3-30 hari).
+  // atas SENGAJA tidak dikirim: digest fulfillment-stale yang dulu memegangnya sudah dicabut (17 Sep 2026).
   // Jangan tambahkan mode cutoff absolut lagi — pernah bikin barang 1378 jam
   // ikut terkirim dan membanjiri channel.
   const earlyMaxHours = earlyMinHours + bandWidth();
@@ -155,7 +159,9 @@ function buildQuery(minHours: number, maxHours: number, earlyMinHours: number): 
       u.name AS user_name,
       o.shipping_type AS shipping_type,
       ${EARLY_BILLED_SQL} AS is_early,
-      COALESCE(o.eta, '') AS eta
+      COALESCE(o.eta, '') AS eta,
+      -- Partner = ada baris di partners, sama dengan is_partner di fulfillment kakera.
+      EXISTS (SELECT 1 FROM partners pa WHERE pa.user_id = o.user_id) AS is_partner
     FROM orders o
     JOIN users u ON u.user_id = o.user_id
     JOIN order_items oi ON oi.order_id = o.order_id
@@ -202,6 +208,7 @@ export async function fetchStalePickItems(
   const iShip = idx("shipping_type");
   const iEarly = idx("is_early");
   const iEta = idx("eta");
+  const iPartner = idx("is_partner");
 
   return rows.map((row): StalePickItem => ({
     itemId: String(row[iItem] ?? "").trim(),
@@ -214,7 +221,8 @@ export async function fetchStalePickItems(
     // Metabase mengembalikan boolean MySQL sebagai true/false atau 1/0 —
     // tergantung driver, jadi jangan bandingkan ke satu bentuk saja.
     isEarly: ["true", "1"].includes(String(row[iEarly]).toLowerCase()),
-    eta: String(row[iEta] ?? "").trim()
+    eta: String(row[iEta] ?? "").trim(),
+    isPartner: ["true", "1"].includes(String(row[iPartner]).toLowerCase())
   }));
 }
 
@@ -239,7 +247,8 @@ export function groupByOrder(items: StalePickItem[]): StalePickOrder[] {
         user: item.user,
         shipping: item.shipping,
         isEarly: item.isEarly,
-        eta: item.eta
+        eta: item.eta,
+        isPartner: item.isPartner
       });
       continue;
     }
@@ -314,7 +323,7 @@ export function orderEmbed(order: StalePickOrder, mainPhotoName?: string): Embed
   return embed
     .addFields(
       { name: "Barang", value: itemListValue(order.itemNames, order.itemIds), inline: false },
-      { name: "Customer", value: order.user, inline: true },
+      { name: "Customer", value: order.isPartner ? `${order.user} · Partner` : order.user, inline: true },
       { name: "Kurir", value: order.shipping, inline: true }
     )
     .setFooter({ text: `${footer}${photoNote}` });
@@ -394,9 +403,16 @@ export async function runPickTriageCheck(client: Client): Promise<number> {
 
     // Mention di SEMUA pesan triase, termasuk order yang ditagih early (keputusan
     // user 2026-07-11 — sebelumnya early sengaja tidak di-tag).
-    const mention = env.PICK_TRIAGE_MENTION_USER_ID
-      ? `<@${env.PICK_TRIAGE_MENTION_USER_ID}>`
-      : undefined;
+    //
+    // Order PARTNER di-tag role B2B Sales Division, bukan Irwanda (permintaan
+    // Irwanda 17 Sep 2026): pembelinya dipegang tim B2B, merekalah yang bisa
+    // menjawab kenapa barangnya belum diambil.
+    const partnerRole = order.isPartner ? B2B_SALES_ROLE_ID : "";
+    const mention = partnerRole
+      ? `<@&${partnerRole}>`
+      : env.PICK_TRIAGE_MENTION_USER_ID
+        ? `<@${env.PICK_TRIAGE_MENTION_USER_ID}>`
+        : undefined;
 
     const message = await textChannel.send({
       ...(mention ? { content: mention } : {}),
@@ -405,7 +421,9 @@ export async function runPickTriageCheck(client: Client): Promise<number> {
       components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(buildTriageSelect(posted))],
       // Batasi siapa yang benar-benar kena ping: tanpa ini, teks lain di embed
       // yang kebetulan berbentuk mention bisa ikut memberi notifikasi.
-      allowedMentions: { users: mention ? [env.PICK_TRIAGE_MENTION_USER_ID] : [] }
+      allowedMentions: partnerRole
+        ? { roles: [partnerRole] }
+        : { users: mention ? [env.PICK_TRIAGE_MENTION_USER_ID] : [] }
     });
     markPosted({ ...posted, messageId: message.id });
   }
