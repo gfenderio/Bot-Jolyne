@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { ChannelType, type Client, type Guild, type TextChannel } from "discord.js";
+import { ChannelType, EmbedBuilder, type Client, type Guild, type TextChannel } from "discord.js";
 import { env } from "../config/env.js";
 import { isAuthorizedMachitanIntake } from "./intakeAuth.js";
 
@@ -22,6 +22,7 @@ export interface OpnameRequest {
   itemId: number;
   itemName: string;
   itemUrl: string;
+  imageUrl: string;
   stocks: { source: string; units: number }[];
   sources: string[];
   tagSources: string[];
@@ -71,6 +72,7 @@ export function parseOpnameRequest(raw: unknown): OpnameRequest | string {
     itemId,
     itemName: String(r.itemName ?? "").trim() || `Item ${itemId}`,
     itemUrl: String(r.itemUrl ?? "").trim(),
+    imageUrl: String(r.imageUrl ?? "").trim(),
     stocks,
     sources: [...new Set(sources)],
     tagSources: [...new Set(tagSources)],
@@ -86,22 +88,36 @@ export function escapeMarkdown(text: string): string {
   return text.replace(/([\\[\]()*_~`|>])/g, "\\$1");
 }
 
-/** The message body, in the wording Cindy wrote. Tags are appended by the caller. */
-export function opnameRequestText(req: OpnameRequest, tags: string): string {
-  const safe = escapeMarkdown(req.itemName);
-  const name = req.itemUrl ? `[${safe}](${req.itemUrl})` : safe;
+/** Amber, the colour of "needs a look" on the desk. */
+const REQUEST_COLOR = 0xe0a030;
+
+/**
+ * The request as an embed: item on top with its picture, recorded stock as an
+ * aligned block, and where to look. Tags stay in the message content — Discord
+ * does not ping mentions placed inside an embed.
+ */
+export function opnameRequestEmbed(req: OpnameRequest): EmbedBuilder {
+  const width = Math.max(4, ...req.stocks.map((s) => s.source.length));
   const stock = req.stocks.length
-    ? req.stocks.map((s) => `${s.source} ${s.units}`).join(" · ")
-    : "tidak ada stok tercatat";
-  const lines = [
-    "**Request cek fisik & opname**",
-    `Tolong cek fisik ${name} dan update opname via Machitan untuk barang ini.`,
-    `ID ${req.itemId} · stok tercatat: ${stock}`,
-    `Cek di: ${req.sources.join(", ")}`
-  ];
-  if (req.requestedBy) lines.push(`Diminta oleh ${req.requestedBy}`);
-  if (tags) lines.push(`CC: ${tags}`);
-  return lines.join("\n");
+    ? "```\n" + req.stocks.map((s) => `${s.source.padEnd(width)}  ${s.units}`).join("\n") + "\n```"
+    : "_tidak ada stok tercatat_";
+
+  const embed = new EmbedBuilder()
+    .setColor(REQUEST_COLOR)
+    .setAuthor({ name: "Request cek fisik & opname" })
+    .setTitle(req.itemName.slice(0, 256))
+    .setDescription("Tolong cek fisik barang ini di rak, lalu update opname lewat **Machitan**.")
+    .addFields(
+      { name: "ID", value: String(req.itemId), inline: true },
+      { name: "Diminta oleh", value: req.requestedBy || "-", inline: true },
+      { name: "Stok tercatat", value: stock.slice(0, 1024) },
+      { name: "Cek di", value: req.sources.join(" · ").slice(0, 1024) }
+    )
+    .setFooter({ text: "Balas hasil hitungnya di thread ini" })
+    .setTimestamp(new Date());
+  if (req.itemUrl) embed.setURL(req.itemUrl);
+  if (req.imageUrl) embed.setThumbnail(req.imageUrl);
+  return embed;
 }
 
 async function findChannel(client: Client, idOrName: string): Promise<TextChannel | null> {
@@ -199,7 +215,8 @@ export async function handleOpnameRequestPush(
   let pesan;
   try {
     pesan = await channel.send({
-      content: opnameRequestText(parsed, tags.text.join(" ")),
+      content: tags.text.length ? tags.text.join(" ") : undefined,
+      embeds: [opnameRequestEmbed(parsed)],
       allowedMentions: { roles: tags.roles, users: tags.users }
     });
   } catch (err) {
