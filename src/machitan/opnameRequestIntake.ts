@@ -191,15 +191,27 @@ export async function handleOpnameRequestPush(
 
   const channel = await findChannel(client, env.OPNAME_REQUEST_CHANNEL);
   if (!channel) {
-    sendJson(response, 503, { ok: false, error: `Channel ${env.OPNAME_REQUEST_CHANNEL} belum ada atau tidak terbaca bot` });
+    sendJson(response, 503, { ok: false, error: `Jolyne tidak bisa membuka channel request opname (${env.OPNAME_REQUEST_CHANNEL}) — tambahkan Jolyne ke channel itu.` });
     return;
   }
 
   const tags = await resolveMentions(channel.guild, mentionKeys(parsed.tagSources));
-  const pesan = await channel.send({
-    content: opnameRequestText(parsed, tags.text.join(" ")),
-    allowedMentions: { roles: tags.roles, users: tags.users }
-  });
+  let pesan;
+  try {
+    pesan = await channel.send({
+      content: opnameRequestText(parsed, tags.text.join(" ")),
+      allowedMentions: { roles: tags.roles, users: tags.users }
+    });
+  } catch (err) {
+    // Usually the bot is not allowed in the channel (Discord 50001 Missing
+    // Access). Say so, instead of a bare 500 the desk cannot act on.
+    console.error("[opname-request] gagal kirim ke channel:", err);
+    sendJson(response, 502, {
+      ok: false,
+      error: `Jolyne tidak bisa kirim ke #${channel.name} — tambahkan Jolyne ke channel itu (View Channel, Send Messages, Create Public Threads, Mention roles).`
+    });
+    return;
+  }
 
   try {
     const title = `Opname ${parsed.itemId} ${parsed.itemName}`.slice(0, 100);
