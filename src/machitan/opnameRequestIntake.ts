@@ -131,7 +131,7 @@ export function opnameRequestEmbed(req: OpnameRequest): EmbedBuilder {
   return embed;
 }
 
-async function findChannel(client: Client, idOrName: string): Promise<TextChannel | null> {
+export async function findChannel(client: Client, idOrName: string): Promise<TextChannel | null> {
   const v = idOrName.trim();
   if (!v) return null;
   if (/^\d+$/.test(v)) {
@@ -176,12 +176,12 @@ async function resolveMentions(
   return out;
 }
 
-function sendJson(response: ServerResponse, statusCode: number, payload: unknown) {
+export function sendJson(response: ServerResponse, statusCode: number, payload: unknown) {
   response.writeHead(statusCode, { "Content-Type": "application/json" });
   response.end(`${JSON.stringify(payload)}\n`);
 }
 
-async function readBody(request: IncomingMessage, maxBytes = 32 * 1024): Promise<string> {
+export async function readBody(request: IncomingMessage, maxBytes = 32 * 1024): Promise<string> {
   let body = "";
   for await (const chunk of request) {
     body += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);

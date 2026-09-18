@@ -351,6 +351,9 @@ const envSchema = z.object({
       "DELTA=686065875627147275,LAMBDA=1224581529854939138,OMEGA=1115194334497755157," +
       "SS=1115194334497755157,SIGMA=715841421466402858"
   ),
+  // Channel for round 2 ("cek silang") of an opname session. Empty = the
+  // request channel above.
+  OPNAME_CROSSCHECK_CHANNEL: optionalString.default(""),
 
   // Catatan "barang mana yang sudah disiapkan gudang, oleh siapa" — lihat
   // src/machitan/wsrPrepStore.ts. Ditaruh di /app/data (volume) supaya tidak

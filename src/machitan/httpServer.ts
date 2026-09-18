@@ -8,6 +8,7 @@ import { handleMachitanShipping } from "./shippingIntake.js";
 import { handleWsInboxIntake } from "./wsInboxIntake.js";
 import { handleWsrShipmentPush } from "./wsrShipmentIntake.js";
 import { handleOpnameRequestPush } from "./opnameRequestIntake.js";
+import { handleOpnameCrosscheckPush } from "./opnameCrosscheckIntake.js";
 import { handleOpnameKorSweepIntake } from "./opnameKorSweepIntake.js";
 import { handleAbsenRequest } from "./absenIntake.js";
 import { handleMachitanPickupProof } from "./pickupProofIntake.js";
@@ -119,6 +120,17 @@ export function startMachitanHttpServer(client: Client<true>) {
         console.error("Gagal mengirim request opname dari kakera", error);
         if (!response.headersSent) {
           sendJson(response, 500, { ok: false, error: "Internal server error handling opname request" });
+        }
+      });
+      return;
+    }
+
+    // Round 2 ("cek silang") of an opname session on team.kyou.id.
+    if (pathname === "/kakera/opname-crosscheck") {
+      handleOpnameCrosscheckPush(request, response, client).catch((error) => {
+        console.error("Gagal mengirim cek silang opname dari kakera", error);
+        if (!response.headersSent) {
+          sendJson(response, 500, { ok: false, error: "Internal server error handling opname crosscheck" });
         }
       });
       return;
