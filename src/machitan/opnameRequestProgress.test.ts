@@ -18,8 +18,8 @@ test("lines: answered first, then pending; cancelled replaces pending", () => {
     pending: ["ALPHA"]
   });
   assert.ok(typeof p !== "string");
-  assert.equal(progressLines(p), "✅ **BETA** — 0 unit · Budi 10:20 · 1 foto\n⏳ **ALPHA** — belum dicek");
-  assert.equal(progressLines({ ...p, status: "cancelled" }), "✅ **BETA** — 0 unit · Budi 10:20 · 1 foto\n🚫 Dibatalkan dari Meja Selisih");
+  assert.equal(progressLines(p), "✅ **BETA** — sudah cek · Budi 10:20\n⏳ **ALPHA** — belum dicek");
+  assert.equal(progressLines({ ...p, status: "cancelled" }), "✅ **BETA** — sudah cek · Budi 10:20\n🚫 Dibatalkan dari Meja Selisih");
 });
 
 test("embed: one Hasil field, replaced on every update, green when done", () => {
@@ -32,8 +32,8 @@ test("embed: one Hasil field, replaced on every update, green when done", () => 
   assert.match(e.author?.name ?? "", /selesai/);
 });
 
-test("latest answer shows its first photo", () => {
-  const e = latestEmbed({ source: "ALPHA", counted: 2, by: "Ani", at: "2026-09-18 10:25", photos: ["https://kyoucdn.id/a.jpg", "https://kyoucdn.id/b.jpg"] }).toJSON();
-  assert.equal(e.image?.url, "https://kyoucdn.id/a.jpg");
-  assert.match(e.footer?.text ?? "", /\+1 foto/);
+test("latest answer: who checked, never the count or the photo (blind count)", () => {
+  const e = latestEmbed({ source: "ALPHA", counted: 2, by: "Ani", at: "2026-09-18 10:25", photos: ["https://kyoucdn.id/a.jpg"] }).toJSON();
+  assert.equal(e.description, "✅ **ALPHA** sudah cek fisik · Ani · 10:25");
+  assert.equal(e.image, undefined);
 });

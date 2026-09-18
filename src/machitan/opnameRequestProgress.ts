@@ -8,9 +8,10 @@ import { readBody, sendJson } from "./opnameRequestIntake.js";
  *
  * Since 18 Sep 2026 the stores answer on the PDA (Machitan → Cek Fisik), not in
  * the Discord thread. After every answer kakera sends the whole state; Jolyne
- * only reports it: the original request message gets a "Hasil" field (who
- * answered, how many, who is still pending) and the thread gets one line per
- * new answer with its photo. Nothing here is stored — kakera holds the answers
+ * only reports it: the original request message gets a "Hasil" field (who has
+ * checked, who is still pending) and the thread gets one line per new answer.
+ * No counts and no photos here: the count is blind, and the numbers live on the
+ * Meja Selisih desk in kakera (Gilang, 18 Sep 2026). Nothing here is stored — kakera holds the answers
  * and remembers where the message is, because this bot's store does not survive
  * a redeploy.
  */
@@ -81,9 +82,7 @@ export function parseProgress(raw: unknown): RequestProgress | string {
 
 /** The "Hasil" field: answered places first, then the ones still waited for. */
 export function progressLines(p: RequestProgress): string {
-  const lines = p.answers.map(
-    (a) => `✅ **${a.source}** — ${a.counted} unit · ${a.by || "?"} ${hhmm(a.at)}${a.photos.length ? ` · ${a.photos.length} foto` : ""}`
-  );
+  const lines = p.answers.map((a) => `✅ **${a.source}** — sudah cek · ${a.by || "?"} ${hhmm(a.at)}`);
   if (p.status === "cancelled") lines.push("🚫 Dibatalkan dari Meja Selisih");
   else lines.push(...p.pending.map((s) => `⏳ **${s}** — belum dicek`));
   return lines.join("\n").slice(0, 1024) || "_belum ada jawaban_";
@@ -99,12 +98,9 @@ export function progressEmbed(original: EmbedBuilder, p: RequestProgress): Embed
 }
 
 export function latestEmbed(a: ProgressAnswer): EmbedBuilder {
-  const e = new EmbedBuilder()
+  return new EmbedBuilder()
     .setColor(COLOR_DONE)
-    .setDescription(`✅ **${a.source}** menghitung **${a.counted} unit** · ${a.by || "?"} · ${hhmm(a.at)}`);
-  if (a.photos[0]) e.setImage(a.photos[0]);
-  if (a.photos.length > 1) e.setFooter({ text: `+${a.photos.length - 1} foto lagi di team.kyou.id` });
-  return e;
+    .setDescription(`✅ **${a.source}** sudah cek fisik · ${a.by || "?"} · ${hhmm(a.at)}`);
 }
 
 export async function handleOpnameRequestProgress(

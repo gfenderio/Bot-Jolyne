@@ -60,3 +60,11 @@ test("request embed: item and places to check, no recorded stock", () => {
   assert.equal(field("Cek di"), "BETA · OMEGA · GAMMA");
   assert.equal(field("Diminta oleh"), "Cindy Wilianto");
 });
+
+test("PDA request (with requestId) hides the recorded stock", () => {
+  const req = parseOpnameRequest({ requestId: 9, itemId: 5, itemName: "X", sources: ["BETA"], stocks: [{ source: "BETA", units: 3 }] });
+  assert.ok(typeof req !== "string");
+  const fields = opnameRequestEmbed(req).toJSON().fields?.map((f) => f.name) ?? [];
+  assert.ok(!fields.includes("Stok tercatat"));
+  assert.match(opnameRequestEmbed(req).toJSON().description ?? "", /Machitan → Cek Fisik/);
+});
