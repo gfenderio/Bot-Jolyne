@@ -1,6 +1,6 @@
 const DEFAULT_SETTINGS = {
   deviceId: "yugi-browser",
-  intakeUrl: "http://w9a2iwiolpi9wvw2fx6wlboo.43.134.34.13.sslip.io",
+  intakeUrl: "http://l34c5hyr32isdiytiggu9suj.51.210.255.90.sslip.io",
   token: ""
 };
 const MAX_LOG_ENTRIES = 120;

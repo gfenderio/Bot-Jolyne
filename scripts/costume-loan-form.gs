@@ -7,7 +7,7 @@
  * Jalankan pasangPemicu() sekali untuk memasang pemicu on form submit.
  */
 
-var BOT_URL = "http://w9a2iwiolpi9wvw2fx6wlboo.43.134.34.13.sslip.io/forms/costume-loan";
+var BOT_URL = "http://l34c5hyr32isdiytiggu9suj.51.210.255.90.sslip.io/forms/costume-loan";
 
 /** Aman dijalankan berulang: pemicu lama dibuang dulu. */
 function pasangPemicu() {

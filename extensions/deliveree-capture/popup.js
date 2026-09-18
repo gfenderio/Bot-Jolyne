@@ -2,7 +2,7 @@ const DEFAULT_SETTINGS = {
   autoRetry: false,
   deviceId: "yugi-browser",
   enabled: true,
-  intakeUrl: "http://w9a2iwiolpi9wvw2fx6wlboo.43.134.34.13.sslip.io",
+  intakeUrl: "http://l34c5hyr32isdiytiggu9suj.51.210.255.90.sslip.io",
   token: ""
 };
 
@@ -44,7 +44,7 @@ function formatTime(value) {
 function getEndpointMode() {
   const value = elements.intakeUrl.value.trim();
 
-  if (value.startsWith("http://w9a2iwiolpi9wvw2fx6wlboo.43.134.34.13.sslip.io") || value.startsWith("https://")) {
+  if (value.startsWith("http://l34c5hyr32isdiytiggu9suj.51.210.255.90.sslip.io") || value.startsWith("https://")) {
     return "remote";
   }
 

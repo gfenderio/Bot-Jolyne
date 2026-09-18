@@ -1,7 +1,7 @@
 {
     "manifest_version":  3,
     "name":  "Kyou Deliveree Partner",
-    "version":  "0.2.0",
+    "version":  "0.2.1",
     "description":  "Pemantauan \u0026 Auto Retry Driver Deliveree.",
     "icons":  {
                   "16":  "icons/scanner-partner-16.png",
@@ -16,7 +16,7 @@
                         "storage"
                     ],
     "host_permissions":  [
-                             "https://webapp.deliveree.com/*",                             "http://w9a2iwiolpi9wvw2fx6wlboo.43.134.34.13.sslip.io/*"
+                             "https://webapp.deliveree.com/*",                             "http://l34c5hyr32isdiytiggu9suj.51.210.255.90.sslip.io/*"
                          ],
     "background":  {
                        "service_worker":  "background.js"
