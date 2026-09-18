@@ -8,7 +8,7 @@ import { handleMachitanShipping } from "./shippingIntake.js";
 import { handleWsInboxIntake } from "./wsInboxIntake.js";
 import { handleWsrShipmentPush } from "./wsrShipmentIntake.js";
 import { handleOpnameRequestPush } from "./opnameRequestIntake.js";
-import { handleOpnameCrosscheckPush } from "./opnameCrosscheckIntake.js";
+import { handleOpnameRecountPush } from "./opnameRecountIntake.js";
 import { handleOpnameRequestProgress } from "./opnameRequestProgress.js";
 import { handleOpnameKorSweepIntake } from "./opnameKorSweepIntake.js";
 import { handleAbsenRequest } from "./absenIntake.js";
@@ -137,12 +137,12 @@ export function startMachitanHttpServer(client: Client<true>) {
       return;
     }
 
-    // Round 2 ("cek silang") of an opname session on team.kyou.id.
-    if (pathname === "/kakera/opname-crosscheck") {
-      handleOpnameCrosscheckPush(request, response, client).catch((error) => {
-        console.error("Gagal mengirim cek silang opname dari kakera", error);
+    // Phase 2 of an event opname: the recount Excel from team.kyou.id.
+    if (pathname === "/kakera/opname-recount") {
+      handleOpnameRecountPush(request, response, client).catch((error) => {
+        console.error("Gagal mengirim Excel hitung ulang opname", error);
         if (!response.headersSent) {
-          sendJson(response, 500, { ok: false, error: "Internal server error handling opname crosscheck" });
+          sendJson(response, 500, { ok: false, error: "Internal server error handling opname recount" });
         }
       });
       return;
