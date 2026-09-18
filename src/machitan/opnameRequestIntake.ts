@@ -21,6 +21,8 @@ import { isAuthorizedMachitanIntake } from "./intakeAuth.js";
  */
 
 export interface OpnameRequest {
+  /** kakera's task id (warehouse.check_requests); 0 from an older kakera. */
+  requestId: number;
   itemId: number;
   itemName: string;
   itemUrl: string;
@@ -83,7 +85,9 @@ export function parseOpnameRequest(raw: unknown): OpnameRequest | string {
   const tagSources = Array.isArray(r.tagSources)
     ? r.tagSources.map((s) => String(s).trim().toUpperCase()).filter(Boolean)
     : [];
+  const requestId = Number(r.requestId);
   return {
+    requestId: Number.isInteger(requestId) && requestId > 0 ? requestId : 0,
     itemId,
     itemName: String(r.itemName ?? "").trim() || `Item ${itemId}`,
     itemUrl: String(r.itemUrl ?? "").trim(),
@@ -118,13 +122,19 @@ export function opnameRequestEmbed(req: OpnameRequest): EmbedBuilder {
     .setColor(REQUEST_COLOR)
     .setAuthor({ name: "Request cek fisik & opname" })
     .setTitle(req.itemName.slice(0, 256))
-    .setDescription("Tolong cek fisik barang ini di rak, lalu update opname lewat **Machitan**.")
+    .setDescription(
+      req.requestId
+        ? "Kerjakan di **Machitan → Cek Fisik**: hitung barangnya di rak, foto, lalu kirim. Tidak perlu balas di Discord — hasilnya muncul di sini otomatis."
+        : "Tolong cek fisik barang ini di rak, lalu update opname lewat **Machitan**."
+    )
     .addFields(
       { name: "ID", value: String(req.itemId), inline: true },
       { name: "Diminta oleh", value: req.requestedBy || "-", inline: true },
       { name: "Cek di", value: req.sources.join(" · ").slice(0, 1024) }
     )
-    .setFooter({ text: "Hitung lewat Machitan, menu Cek Fisik" })
+    .setFooter({
+      text: req.requestId ? `Cek Fisik #${req.requestId} · hitung lewat Machitan` : "Hitung lewat Machitan, menu Cek Fisik"
+    })
     .setTimestamp(new Date());
   if (req.itemUrl) embed.setURL(req.itemUrl);
   if (req.imageUrl) embed.setThumbnail(req.imageUrl);
@@ -244,14 +254,22 @@ export async function handleOpnameRequestPush(
     return;
   }
 
+  let threadId = "";
   try {
     const title = `Opname ${parsed.itemId} ${parsed.itemName}`.slice(0, 100);
-    await pesan.startThread({ name: title, autoArchiveDuration: 10080 });
+    threadId = (await pesan.startThread({ name: title, autoArchiveDuration: 10080 })).id;
   } catch (err) {
     // The request itself is already posted; a missing thread permission must
     // not turn it into a failure that kakera would report as "not sent".
     console.error(`[opname-request] gagal membuka thread item ${parsed.itemId}:`, err);
   }
 
-  sendJson(response, 200, { ok: true, messageId: pesan.id, tagged: tags.text.length, rolesNotFound: tags.missing });
+  sendJson(response, 200, {
+    ok: true,
+    messageId: pesan.id,
+    channelId: channel.id,
+    threadId,
+    tagged: tags.text.length,
+    rolesNotFound: tags.missing
+  });
 }
