@@ -13,9 +13,11 @@ import { isAuthorizedMachitanIntake } from "./intakeAuth.js";
  * each place, and opens a thread so the answers stay under the request.
  *
  * Only places that actually HOLD the item are tagged (`tagSources`, decided by
- * kakera). Stores are tagged by role NAME ("Team Alpha Store"), the same way the
- * WSR tags work; Sigma by a fixed id. The other Bekasi warehouses are internal
- * and are listed without a tag.
+ * kakera). Each place tags its PIC — one person, from OPNAME_REQUEST_PIC — not
+ * the whole store role: Cindy asked for the PICs on 18 Sep and the role tag
+ * pinged everyone in the store for a count one person does (19 Sep). A place
+ * without a PIC falls back to the store role ("Team Alpha Store"), Sigma to
+ * OPNAME_REQUEST_MENTION_SIGMA; the rest are listed without a tag.
  */
 
 export interface OpnameRequest {
@@ -42,12 +44,25 @@ const STORE_OF: Record<string, string> = {
  * Who to tag for these places: a role name or an id, deduplicated, in order.
  * Places with no entry (Omega, SS, OP, ORIPA, KCC) are not tagged.
  */
-export function mentionKeys(sources: string[]): string[] {
+export function mentionKeys(sources: string[], picSpec: string = env.OPNAME_REQUEST_PIC): string[] {
+  const pic = parsePicMap(picSpec);
   const keys = sources
     .map((s) => s.trim().toUpperCase())
-    .map((s) => (s === "SIGMA" ? env.OPNAME_REQUEST_MENTION_SIGMA.trim() : STORE_OF[s] ? `Team ${STORE_OF[s]} Store` : ""))
+    .map((s) =>
+      pic[s] ?? (s === "SIGMA" ? env.OPNAME_REQUEST_MENTION_SIGMA.trim() : STORE_OF[s] ? `Team ${STORE_OF[s]} Store` : "")
+    )
     .filter(Boolean);
   return [...new Set(keys)];
+}
+
+/** "ALPHA=123,SS=456" → { ALPHA: "123", SS: "456" }. Malformed pairs are skipped. */
+export function parsePicMap(spec: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const pair of spec.split(",")) {
+    const [place, id] = pair.split("=").map((x) => x?.trim() ?? "");
+    if (place && id) out[place.toUpperCase()] = id;
+  }
+  return out;
 }
 
 export function parseOpnameRequest(raw: unknown): OpnameRequest | string {

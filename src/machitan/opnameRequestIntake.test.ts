@@ -2,13 +2,27 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { escapeMarkdown, mentionKeys, opnameRequestEmbed, parseOpnameRequest } from "./opnameRequestIntake.js";
 
-test("tags: stores by role name, Lambda uses Gamma, Sigma by id, other Bekasi warehouses untagged", () => {
-  assert.deepEqual(mentionKeys(["BETA", "OMEGA", "SS", "LAMBDA", "GAMMA", "delta", "SIGMA", "ORIPA", "KCC"]), [
+test("tags: without PICs, stores by role name, Lambda uses Gamma, Sigma by id, other Bekasi warehouses untagged", () => {
+  assert.deepEqual(mentionKeys(["BETA", "OMEGA", "SS", "LAMBDA", "GAMMA", "delta", "SIGMA", "ORIPA", "KCC"], ""), [
     "Team Beta Store",
     "Team Gamma Store",
     "Team Delta Store",
     "715841421466402858"
   ]);
+});
+
+test("tags: a place with a PIC tags that person, one tag per person, the rest fall back", () => {
+  assert.deepEqual(mentionKeys(["ALPHA", "OMEGA", "SS", "BETA", "ORIPA"], "ALPHA=11, OMEGA=22,SS=22,broken,=9"), [
+    "11",
+    "22",
+    "Team Beta Store"
+  ]);
+});
+
+test("tags: default PICs cover every store and Omega/SS", () => {
+  const keys = mentionKeys(["ALPHA", "BETA", "GAMMA", "DELTA", "LAMBDA", "OMEGA", "SS", "SIGMA"]);
+  assert.equal(keys.length, 7);
+  assert.ok(keys.every((k) => /^\d+$/.test(k)));
 });
 
 test("item names with brackets and stars do not break the link", () => {
