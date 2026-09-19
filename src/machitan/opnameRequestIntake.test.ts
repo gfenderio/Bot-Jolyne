@@ -34,7 +34,7 @@ test("parse refuses a request without places", () => {
   assert.equal(parseOpnameRequest({ itemId: 0, sources: ["BETA"] }), "itemId wajib berupa angka");
 });
 
-test("request embed: item, aligned stock block, places to check", () => {
+test("request embed: item and places to check, no recorded stock", () => {
   const req = parseOpnameRequest({
     itemId: 101250,
     itemName: "[Set of 10] Chongyuan Mini Figure",
@@ -54,7 +54,9 @@ test("request embed: item, aligned stock block, places to check", () => {
   assert.equal(e.url, "https://team.kyou.id/items/101250");
   assert.equal(e.thumbnail?.url, "https://kyoucdn.id/thumbnail/a.jpg");
   const field = (name: string) => e.fields?.find((f) => f.name === name)?.value;
-  assert.equal(field("Stok tercatat"), "```\nALPHA      2\nBETA       1\nALPHA-SUR  1\n```");
+  // Blind count: the recorded stock never reaches the message.
+  assert.equal(field("Stok tercatat"), undefined);
+  assert.ok(!JSON.stringify(e).includes("ALPHA-SUR"));
   assert.equal(field("Cek di"), "BETA · OMEGA · GAMMA");
   assert.equal(field("Diminta oleh"), "Cindy Wilianto");
 });

@@ -107,16 +107,13 @@ export function escapeMarkdown(text: string): string {
 const REQUEST_COLOR = 0xe0a030;
 
 /**
- * The request as an embed: item on top with its picture, recorded stock as an
- * aligned block, and where to look. Tags stay in the message content — Discord
- * does not ping mentions placed inside an embed.
+ * The request as an embed: item on top with its picture, and where to look.
+ * Recorded stock is NOT shown (Gilang, 19 Sep 2026): the count is blind, and a
+ * number on the message is exactly what a store would copy instead of counting.
+ * Tags stay in the message content — Discord does not ping mentions placed
+ * inside an embed.
  */
 export function opnameRequestEmbed(req: OpnameRequest): EmbedBuilder {
-  const width = Math.max(4, ...req.stocks.map((s) => s.source.length));
-  const stock = req.stocks.length
-    ? "```\n" + req.stocks.map((s) => `${s.source.padEnd(width)}  ${s.units}`).join("\n") + "\n```"
-    : "_tidak ada stok tercatat_";
-
   const embed = new EmbedBuilder()
     .setColor(REQUEST_COLOR)
     .setAuthor({ name: "Request cek fisik & opname" })
@@ -125,10 +122,9 @@ export function opnameRequestEmbed(req: OpnameRequest): EmbedBuilder {
     .addFields(
       { name: "ID", value: String(req.itemId), inline: true },
       { name: "Diminta oleh", value: req.requestedBy || "-", inline: true },
-      { name: "Stok tercatat", value: stock.slice(0, 1024) },
       { name: "Cek di", value: req.sources.join(" · ").slice(0, 1024) }
     )
-    .setFooter({ text: "Balas hasil hitungnya di thread ini" })
+    .setFooter({ text: "Hitung lewat Machitan, menu Cek Fisik" })
     .setTimestamp(new Date());
   if (req.itemUrl) embed.setURL(req.itemUrl);
   if (req.imageUrl) embed.setThumbnail(req.imageUrl);
