@@ -226,7 +226,10 @@ export async function handleOpnameRequestPush(
     return;
   }
 
-  const tags = await resolveMentions(channel.guild, mentionKeys(parsed.tagSources));
+  // Omega/SS are never in kakera's tagSources (they are not waited for), but
+  // Cindy's PIC list names Agmoe for them — so he is pinged when they are asked.
+  const bekasi = parsed.sources.filter((s) => s === "OMEGA" || s === "SS");
+  const tags = await resolveMentions(channel.guild, mentionKeys([...parsed.tagSources, ...bekasi]));
   let pesan;
   try {
     pesan = await channel.send({
