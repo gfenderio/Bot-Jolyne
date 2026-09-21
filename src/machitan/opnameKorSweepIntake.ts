@@ -434,7 +434,7 @@ export async function handleOpnameKorSweepIntake(
               // Umur diambil dari baris paling tua: satu barang yang menggantung
               // tiga minggu jauh lebih penting daripada dua puluh barang yang
               // baru semalam, dan rata-rata akan menyembunyikannya.
-              ? `**${items.length} barang** hasil hitungnya kurang dan **masih menggantung** — belum ada yang menyatakan ketemu atau hilang${umurTertua(items) !== null ? `, yang terlama sudah **${umurTertua(items)} hari**` : ""}. Stoknya sengaja TIDAK dipindah ke KOR.`
+              ? `**${items.length} barang** hasil hitungnya kurang dan **masih menggantung** — belum ada yang memutuskan ketemu atau masuk KOR${umurTertua(items) !== null ? `, yang terlama sudah **${umurTertua(items)} hari**` : ""}. Stoknya sengaja TIDAK dipindah ke KOR.`
               : `**${items.length} barang** (${totalUnits} unit) hasil hitungnya kurang dan sudah dipindah ke KOR gudangnya. Tidak perlu ditindaklanjuti.`
             : tertahan
               ? "Tidak ada hitungan yang menggantung semalam."
@@ -462,7 +462,7 @@ export async function handleOpnameKorSweepIntake(
             ? `**${lebihTanpaAsal.length} barang** hasil hitungnya lebih dan belum ketahuan asalnya. Stoknya sengaja belum ditambah — menunggu keputusan orang kantor.`
             : null,
           pairs.length > 0
-            ? `**${pairs.length} pasangan hilang/lebih ditutup otomatis** (gudang sama, sesama Bekasi, atau ada jejak transfer). Kalau ada yang keliru, balikkan dari popup settle — daftarnya di berkas.`
+            ? `**${pairs.length} barang yang belum ketemu di satu tempat dan lebih di tempat lain dipasangkan otomatis** (gudang sama, sesama Bekasi, atau ada jejak transfer). Kalau ada yang keliru, balikkan dari popup settle — daftarnya di berkas.`
             : null,
           wsDitutup.length > 0
             ? `**${wsDitutup.length} barang WS** yang tertinggal di Pending ditutup otomatis; selisihnya lewat KOR seperti penutupan biasa.`
