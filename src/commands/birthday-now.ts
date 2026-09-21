@@ -1,14 +1,16 @@
 import { EmbedBuilder, SlashCommandBuilder } from "discord.js";
 import { env } from "../config/env.js";
-import { fetchAdminBirthdays } from "../services/metabase.js";
+import { fetchBirthdays, hasKakeraReadConfig } from "../services/kakeraRead.js";
 import type { SlashCommand } from "../types/command.js";
 
 const JAKARTA_TIME_ZONE = "Asia/Jakarta";
 
 type BirthdayRow = Array<string | number>;
 
-export function hasMetabaseConfig() {
-  return Boolean(env.METABASE_URL && env.METABASE_EMAIL && env.METABASE_PASSWORD);
+/** Every admin with a birth date: [username, name, birthdate], from kakera (Metabase died 21 Sep 2026). */
+export async function fetchAdminBirthdayRows(): Promise<BirthdayRow[]> {
+  const people = await fetchBirthdays();
+  return people.map((person) => [person.username, person.name, person.birthdate]);
 }
 
 function getJakartaToday(now = new Date()) {
@@ -79,7 +81,6 @@ export function buildBirthdayNowEmbed(rows: BirthdayRow[], title = "Birthday Har
       .setColor(0x8a8f98)
       .setTitle(title)
       .setDescription(`Tidak ada admin yang berulang tahun hari ini, ${formatTodayDate()}.`)
-      .setFooter({ text: "Data diambil dari Metabase" })
       .setTimestamp();
   }
 
@@ -114,14 +115,9 @@ function buildTestBirthdayRow(interaction: Parameters<SlashCommand["execute"]>[0
 }
 
 export async function fetchTodayBirthdayRows() {
-  const dataset = await fetchAdminBirthdays({
-    url: env.METABASE_URL!,
-    email: env.METABASE_EMAIL!,
-    password: env.METABASE_PASSWORD!,
-    databaseId: env.METABASE_DATABASE_ID
-  });
+  const rows = await fetchAdminBirthdayRows();
 
-  return dataset.rows
+  return rows
     .filter(([, , birthdate]) => isBirthdayToday(birthdate))
     .sort((left, right) => String(left[1]).localeCompare(String(right[1]), "id-ID"));
 }
@@ -132,9 +128,9 @@ export const command: SlashCommand = {
     .setDescription("Tampilkan admin yang berulang tahun hari ini."),
 
   async execute(interaction) {
-    if (!hasMetabaseConfig()) {
+    if (!hasKakeraReadConfig()) {
       await interaction.reply({
-        content: "Konfigurasi Metabase belum lengkap di `.env`.",
+        content: "JOLYNE_READ_KEY belum diisi di `.env`.",
         flags: ["Ephemeral"]
       });
       return;

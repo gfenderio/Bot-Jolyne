@@ -1,6 +1,7 @@
 import type { Client } from "discord.js";
 import { env } from "../config/env.js";
-import { buildBirthdayNowEmbed } from "../commands/birthday-now.js";
+import { buildBirthdayNowEmbed, fetchTodayBirthdayRows } from "../commands/birthday-now.js";
+import { hasKakeraReadConfig } from "../services/kakeraRead.js";
 
 const JAKARTA_TIME_ZONE = "Asia/Jakarta";
 
@@ -43,7 +44,7 @@ function getJakartaDateKey(now = new Date()) {
  *
  * Channel-nya sendiri yang jadi catatan — bot tidak punya volume persisten,
  * jadi penanda di berkas hilang tiap redeploy dan dulu membuat ucapan yang sama
- * terkirim berulang. Ini juga yang membuat hanayo aman mengirim ulang.
+ * terkirim berulang.
  */
 async function announcementAlreadyPosted(
   client: Client<true>,
@@ -71,43 +72,77 @@ async function announcementAlreadyPosted(
   }
 }
 
-export type BirthdayPerson = {
-  username: string;
-  name: string;
-  birthdate: string;
-};
-
-export type BirthdayAnnounceResult = "sent" | "already-posted" | "empty" | "wrong-date" | "no-channel";
-
 /**
- * Posts today's greeting from a list pushed by hanayo (`jolyne:birthday`, 09:00 WIB).
- *
- * The bot used to fetch this list from Metabase on its own schedule. Metabase
- * started rejecting the bot's login on 21 Sep 2026 and the greeting stopped
- * without a trace, so hanayo now reads the database and sends the list here.
+ * Posts today's greeting once. Safe to call repeatedly (startup catch-up, the
+ * 09:00 timer, a redeploy mid-morning): the channel check above is the record.
  */
-export async function announceBirthdays(
-  client: Client<true>,
-  date: string,
-  people: BirthdayPerson[]
-): Promise<BirthdayAnnounceResult> {
-  // A retry that arrives after midnight must not greet yesterday's people "today".
-  if (date !== getJakartaDateKey()) return "wrong-date";
-  if (people.length === 0) return "empty";
+async function announceToday(client: Client<true>) {
+  if (!hasKakeraReadConfig()) {
+    console.warn("Birthday scheduler: JOLYNE_READ_KEY belum diisi — dilewati.");
+    return;
+  }
+
+  const birthdayRows = await fetchTodayBirthdayRows();
+  if (birthdayRows.length === 0) {
+    console.log("Birthday scheduler: tidak ada birthday hari ini.");
+    return;
+  }
 
   if (await announcementAlreadyPosted(client, env.BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID)) {
-    console.log("Birthday: ucapan hari ini sudah ada di channel — tidak dikirim ulang.");
-    return "already-posted";
+    console.log("Birthday scheduler: ucapan hari ini sudah ada di channel — tidak dikirim ulang.");
+    return;
   }
 
   const channel = await client.channels.fetch(env.BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID);
   if (!channel?.isTextBased() || !("send" in channel)) {
-    console.error(`Birthday: channel ${env.BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID} tidak bisa dikirimi pesan.`);
-    return "no-channel";
+    console.error(`Birthday scheduler: channel ${env.BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID} tidak bisa dikirimi pesan.`);
+    return;
   }
 
-  const rows = people.map((person) => [person.username, person.name, person.birthdate]);
-  await channel.send({ embeds: [buildBirthdayNowEmbed(rows)] });
-  console.log(`Birthday: mengirim ${people.length} ucapan birthday.`);
-  return "sent";
+  await channel.send({ embeds: [buildBirthdayNowEmbed(birthdayRows)] });
+  console.log(`Birthday scheduler: mengirim ${birthdayRows.length} ucapan birthday.`);
+}
+
+function getDelayUntilNext9amJakarta(now = new Date()) {
+  const today = getJakartaDateParts(now);
+  // 09:00 WIB = 02:00 UTC. Today's slot if it is still ahead, else tomorrow's.
+  let next = Date.UTC(today.year, today.month - 1, today.day, 2);
+  if (next <= now.getTime()) next = Date.UTC(today.year, today.month - 1, today.day + 1, 2);
+  return Math.max(1_000, next - now.getTime());
+}
+
+function isPast9amJakarta(now = new Date()) {
+  const today = getJakartaDateParts(now);
+  return now.getTime() >= Date.UTC(today.year, today.month - 1, today.day, 2);
+}
+
+export function startBirthdayNowScheduler(client: Client<true>) {
+  let timeout: NodeJS.Timeout | undefined;
+
+  const scheduleNextRun = () => {
+    timeout = setTimeout(async () => {
+      try {
+        await announceToday(client);
+      } catch (error) {
+        console.error("Birthday scheduler failed.", error);
+      } finally {
+        scheduleNextRun();
+      }
+    }, getDelayUntilNext9amJakarta());
+  };
+
+  // Catch-up for a bot that was down (or redeployed) at 09:00. Before 09:00 it
+  // waits for the timer, so a restart at 07:00 does not greet two hours early.
+  if (isPast9amJakarta()) {
+    announceToday(client).catch((error) => {
+      console.error("Birthday scheduler catch-up failed.", error);
+    });
+  }
+
+  scheduleNextRun();
+  console.log(`Birthday scheduler aktif untuk channel ${env.BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID}.`);
+
+  return () => {
+    if (timeout) clearTimeout(timeout);
+  };
 }

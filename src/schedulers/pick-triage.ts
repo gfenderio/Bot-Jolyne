@@ -7,7 +7,7 @@ import {
 } from "discord.js";
 import { env } from "../config/env.js";
 import { buildItemPhotos, MAX_PHOTOS } from "../services/itemPhotos.js";
-import { fetchNativeQueryWithPagination, type MetabaseConfig } from "../services/metabase.js";
+import { fetchOrderProgress as fetchOrderStates, fetchStalePicks, hasKakeraReadConfig } from "../services/kakeraRead.js";
 import {
   markPosted,
   isPosted,
@@ -74,10 +74,8 @@ const EMBED_COLOR_AUTO = 0x2f8f5b;
  * tidak adil — barangnya sendiri mungkin belum datang. Karena itu ambangnya
  * dilonggarkan jadi 4 hari (PICK_TRIAGE_EARLY_MIN_HOURS).
  */
-const EARLY_BILLED_SQL = `EXISTS (
-        SELECT 1 FROM admin_logs al2
-        WHERE al2.order_id = o.order_id AND al2.action = 'early_order'
-      )`;
+// Pengecekannya (admin_logs.action = 'early_order') sekarang di kakera:
+// pkg/jolyneread/picktriage.go, ikut dengan kuerinya.
 
 type StalePickItem = {
   itemId: string;
@@ -120,109 +118,29 @@ function itemImageUrl(raw: string): string | undefined {
   return `https://kyoucdn.id/thumbnail/${path.replace(/^\/+/, "")}`;
 }
 
-function metabaseConfig(): MetabaseConfig | null {
-  if (!env.METABASE_URL || !env.METABASE_EMAIL || !env.METABASE_PASSWORD) {
-    return null;
-  }
-  return {
-    url: env.METABASE_URL,
-    email: env.METABASE_EMAIL,
-    password: env.METABASE_PASSWORD,
-    databaseId: env.METABASE_DATABASE_ID
-  };
-}
-
-/** Lebar band pengaman (jam) — sama untuk order biasa maupun yang ditagih early. */
-function bandWidth(): number {
-  return Math.max(1, env.PICK_TRIAGE_MAX_HOURS - env.PICK_TRIAGE_MIN_HOURS);
-}
-
-function buildQuery(minHours: number, maxHours: number, earlyMinHours: number): string {
-  // Dua ambang dalam SATU query: order yang ditagih early (barangnya boleh jadi
-  // belum datang) baru ditanyakan setelah earlyMinHours (default 96 jam = 4
-  // hari); sisanya tetap minHours (24 jam).
-  //
-  // Tetap pakai BAND, bukan cutoff absolut. Yang nyangkut lebih lama dari batas
-  // atas SENGAJA tidak dikirim: digest fulfillment-stale yang dulu memegangnya sudah dicabut (17 Sep 2026).
-  // Jangan tambahkan mode cutoff absolut lagi — pernah bikin barang 1378 jam
-  // ikut terkirim dan membanjiri channel.
-  const earlyMaxHours = earlyMinHours + bandWidth();
-
-  // Tanpa LIMIT — fetchNativeQueryWithPagination yang menambah LIMIT/OFFSET.
-  return `
-    SELECT
-      oi.id AS item_id,
-      o.order_id AS order_id,
-      oi.item_name AS item_name,
-      COALESCE(img.path, '') AS image_path,
-      ROUND(TIMESTAMPDIFF(HOUR, o.updated_at, NOW())) AS hours_stuck,
-      u.name AS user_name,
-      o.shipping_type AS shipping_type,
-      ${EARLY_BILLED_SQL} AS is_early,
-      COALESCE(o.eta, '') AS eta,
-      -- Partner = ada baris di partners, sama dengan is_partner di fulfillment kakera.
-      EXISTS (SELECT 1 FROM partners pa WHERE pa.user_id = o.user_id) AS is_partner
-    FROM orders o
-    JOIN users u ON u.user_id = o.user_id
-    JOIN order_items oi ON oi.order_id = o.order_id
-    -- Gambar barang buat kolase di embed. LEFT JOIN, bukan JOIN: barang tanpa
-    -- gambar di master tetap harus muncul di pesan triase.
-    LEFT JOIN items i ON i.item_id = oi.item_id
-    LEFT JOIN images img ON img.image_id = i.main_img
-    WHERE o.status = 'paid'
-      AND (oi.is_picked = 0 OR oi.is_picked IS NULL)
-      AND o.pack_status = 0
-      AND EXISTS (
-        SELECT 1 FROM admin_logs al
-        WHERE al.order_id = o.order_id
-          AND al.action IN ('print_order_address', 'print_order_address_manual')
-      )
-      AND TIMESTAMPDIFF(HOUR, o.updated_at, NOW()) BETWEEN
-            (CASE WHEN ${EARLY_BILLED_SQL} THEN ${earlyMinHours} ELSE ${minHours} END)
-        AND (CASE WHEN ${EARLY_BILLED_SQL} THEN ${earlyMaxHours} ELSE ${maxHours} END)
-    ORDER BY hours_stuck DESC
-  `.trim();
-}
-
 export async function fetchStalePickItems(
   minHours: number,
   maxHours: number,
   earlyMinHours: number
 ): Promise<StalePickItem[]> {
-  const config = metabaseConfig();
-  if (!config) {
-    throw new Error("Metabase belum dikonfigurasi (METABASE_URL/EMAIL/PASSWORD).");
-  }
-
-  const { columns, rows } = await fetchNativeQueryWithPagination(
-    config,
-    buildQuery(minHours, maxHours, earlyMinHours)
-  );
-  const idx = (name: string) => columns.indexOf(name);
-  const iItem = idx("item_id");
-  const iOrder = idx("order_id");
-  const iName = idx("item_name");
-  const iImage = idx("image_path");
-  const iHours = idx("hours_stuck");
-  const iUser = idx("user_name");
-  const iShip = idx("shipping_type");
-  const iEarly = idx("is_early");
-  const iEta = idx("eta");
-  const iPartner = idx("is_partner");
+  // Dua ambang: order yang ditagih early (barangnya boleh jadi belum datang)
+  // baru ditanyakan setelah earlyMinHours; sisanya minHours. Tetap BAND, bukan
+  // cutoff absolut — yang lebih tua dari batas atas SENGAJA tidak dikirim
+  // (pernah bikin barang 1378 jam ikut terkirim dan membanjiri channel).
+  // Lebar band early = maxHours - minHours, dihitung kakera.
+  const rows = await fetchStalePicks(minHours, maxHours, earlyMinHours);
 
   return rows.map((row): StalePickItem => ({
-    itemId: String(row[iItem] ?? "").trim(),
-    orderId: String(row[iOrder] ?? "-").trim(),
-    itemName: String(row[iName] ?? "-").trim() || "-",
-    imageUrl: itemImageUrl(String(row[iImage] ?? "")),
-    hours: Number(row[iHours] ?? 0),
-    user: String(row[iUser] ?? "-").trim() || "-",
-    shipping: String(row[iShip] ?? "-").trim() || "-",
-    // Metabase mengembalikan boolean MySQL sebagai true/false atau 1/0 —
-    // tergantung driver, jadi jangan bandingkan ke satu bentuk saja.
-    isEarly: ["true", "1"].includes(String(row[iEarly]).toLowerCase()),
-    eta: String(row[iEta] ?? "").trim(),
-    isPartner: ["true", "1"].includes(String(row[iPartner]).toLowerCase())
+    itemId: String(row.itemId ?? "").trim(),
+    orderId: String(row.orderId ?? "-").trim(),
+    itemName: String(row.itemName ?? "-").trim() || "-",
+    imageUrl: itemImageUrl(String(row.imagePath ?? "")),
+    hours: Number(row.hoursStuck ?? 0),
+    user: String(row.userName ?? "-").trim() || "-",
+    shipping: String(row.shippingType ?? "-").trim() || "-",
+    isEarly: row.isEarly === true,
+    eta: String(row.eta ?? "").trim(),
+    isPartner: row.isPartner === true
   }));
 }
 
@@ -352,7 +270,7 @@ export async function runPickTriageCheck(client: Client): Promise<number> {
   try {
     items = await fetchStalePickItems(minHours, maxHours, earlyMinHours);
   } catch (error) {
-    console.error("[pick-triage] gagal ambil data dari Metabase:", error);
+    console.error("[pick-triage] gagal ambil data dari database (kakera):", error);
     return 0;
   }
 
@@ -451,44 +369,19 @@ async function fetchOrderProgress(
   orderIds: string[]
 ): Promise<Map<string, { stillStuck: boolean; reason: string }>> {
   const result = new Map<string, { stillStuck: boolean; reason: string }>();
-  const config = metabaseConfig();
-  if (!config || orderIds.length === 0) return result;
+  if (!hasKakeraReadConfig() || orderIds.length === 0) return result;
 
-  // Order id berasal dari store kita sendiri (aslinya dari DB), tapi tetap
-  // disaring ke alfanumerik/dash sebelum masuk klausa IN — jangan pernah
-  // menyisipkan string mentah ke SQL.
+  // Disaring juga di sini: id yang aneh cukup dilewat, jangan sampai satu id
+  // rusak membuat kakera menolak seluruh daftar.
   const safe = orderIds.filter((id) => /^[A-Za-z0-9_-]+$/.test(id));
   if (safe.length === 0) return result;
 
-  const inList = safe.map((id) => `'${id}'`).join(", ");
-  const query = `
-    SELECT
-      o.order_id AS order_id,
-      o.status AS status,
-      o.pack_status AS pack_status,
-      EXISTS (
-        SELECT 1 FROM order_items oi
-        WHERE oi.order_id = o.order_id
-          AND (oi.is_picked = 0 OR oi.is_picked IS NULL)
-      ) AS has_unpicked
-    FROM orders o
-    WHERE o.order_id IN (${inList})
-  `.trim();
-
-  const { columns, rows } = await fetchNativeQueryWithPagination(config, query);
-  const idx = (name: string) => columns.indexOf(name);
-  const iOrder = idx("order_id");
-  const iStatus = idx("status");
-  const iPack = idx("pack_status");
-  const iUnpicked = idx("has_unpicked");
-  const truthy = (v: unknown) => ["true", "1"].includes(String(v).toLowerCase());
-
-  for (const row of rows) {
-    const orderId = String(row[iOrder] ?? "").trim();
+  for (const row of await fetchOrderStates(safe)) {
+    const orderId = String(row.orderId ?? "").trim();
     if (!orderId) continue;
-    const status = String(row[iStatus] ?? "").trim();
-    const packed = truthy(row[iPack]);
-    const hasUnpicked = truthy(row[iUnpicked]);
+    const status = String(row.status ?? "").trim();
+    const packed = row.packStatus === 1;
+    const hasUnpicked = row.hasUnpicked === true;
 
     const stillStuck = status === "paid" && !packed && hasUnpicked;
     const reason = packed

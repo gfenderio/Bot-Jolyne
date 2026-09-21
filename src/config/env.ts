@@ -15,18 +15,6 @@ const optionalString = z.preprocess(
 
 const optionalUrl = optionalString.pipe(z.string().url().optional());
 
-const optionalDatabaseId = z.preprocess(
-  (value) => {
-    if (typeof value === "string") {
-      const trimmed = value.trim();
-      return trimmed === "" ? 2 : trimmed;
-    }
-
-    return value === undefined ? 2 : value;
-  },
-  z.coerce.number().int().positive()
-);
-
 const pollIntervalSeconds = z.preprocess(
   (value) => {
     if (value === undefined) {
@@ -49,6 +37,7 @@ const pollIntervalSeconds = z.preprocess(
  * undefined jadi 10 sebelum `.default()` sempat jalan, jadi angka bawaan yang
  * ditulis di sebelahnya tidak pernah berlaku dan nilainya diam-diam jadi 10.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- unused since the e-com poller went; kept for the next numeric setting (see above).
 const positiveIntWithDefault = (fallback: number) =>
   z.preprocess(
     (value) => {
@@ -114,11 +103,12 @@ const envSchema = z.object({
   DISCORD_GUILD_ID: optionalString,
   DISCORD_WEBHOOK_URL: optionalUrl,
   POLL_INTERVAL_SECONDS: pollIntervalSeconds,
-  METABASE_URL: optionalUrl,
-  METABASE_EMAIL: optionalString.pipe(z.string().email().optional()),
-  METABASE_PASSWORD: optionalString,
-  METABASE_DATABASE_ID: optionalDatabaseId,
   BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID: optionalString.default("1500736344182358066"),
+  // Database reads go through kakera (POST /v1/jolyne/query) since Metabase
+  // rejected the bot's login on 21 Sep 2026. JOLYNE_READ_KEY must equal
+  // kakera's env of the same name.
+  KAKERA_API_URL: optionalUrl.default("https://team.kyou.id"),
+  JOLYNE_READ_KEY: optionalString,
   DELIVEREE_ACTION_MODE: delivereeActionMode,
   DELIVEREE_ALERT_CHANNEL_ID: optionalString.default("1501899831268868106"),
   DELIVEREE_ALLOWED_CHANNEL_IDS: optionalStringList,
@@ -126,16 +116,6 @@ const envSchema = z.object({
   DELIVEREE_BUTTON_SIGNING_SECRET: optionalString,
   DELIVEREE_CASE_STORE_PATH: optionalString.default("data/deliveree-cases.json"),
   MACHITAN_PICK_PROOF_CHANNEL_ID: optionalString.default("1418827227264450663"),
-  MACHITAN_ECOMMERCE_PICK_REQUEST_CHANNEL_ID: optionalString.default("1501899831268868106"),
-  MACHITAN_ECOMMERCE_PICK_REQUEST_POLL_ENABLED: optionalBoolean,
-  MACHITAN_ECOMMERCE_PICK_REQUEST_NOTIFY_EXISTING: optionalBoolean,
-  MACHITAN_ECOMMERCE_PICK_REQUEST_POLL_INTERVAL_SECONDS: positiveIntWithDefault(15),
-  MACHITAN_ECOMMERCE_PICK_REQUEST_POLL_LIMIT: positiveIntWithDefault(50),
-  MACHITAN_ECOMMERCE_PICK_REQUEST_SEEN_STORE_PATH: optionalString.default("data/machitan-ecommerce-pick-requests-seen.json"),
-  // Berapa lama pick e-commerce boleh belum ada buktinya sebelum dilaporkan.
-  // PDA menyimpan bukti yang gagal kirim dan mencoba lagi, jadi jangan terlalu
-  // pendek — laporan yang ternyata keburu terkirim sendiri cuma jadi berisik.
-  MACHITAN_ECOMMERCE_PICK_REQUEST_GRACE_MINUTES: positiveIntWithDefault(20),
   // Channel tujuan export Absen Arrival (RES/CONV xlsx). Default = channel machitan update.
   MACHITAN_ABSEN_CHANNEL_ID: optionalString.default("1501899831268868106"),
   // Bukti foto paket pickup toko diterima. Default di kode (bukan env server) —

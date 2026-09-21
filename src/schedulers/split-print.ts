@@ -1,6 +1,6 @@
 import { EmbedBuilder, type Client, type TextChannel } from "discord.js";
 import { env } from "../config/env.js";
-import { fetchNativeQueryWithPagination, type MetabaseConfig } from "../services/metabase.js";
+import { fetchSplits as fetchSplitRows, fetchSplitWatermark, hasKakeraReadConfig, type SplitClick } from "../services/kakeraRead.js";
 import { getOrInitWatermark, setWatermark, isPosted, markPosted } from "../services/splitPrintStore.js";
 import { orderLink, printLabelUrl, printLabelClickUrl } from "../services/kyouLinks.js";
 import { daftarKlik, geserMenit, JENDELA_KLIK_MENIT, type PrintClick } from "../services/splitPrintClickStore.js";
@@ -100,61 +100,13 @@ function klikSah(): PrintClick[] {
   );
 }
 
-/** Satu catatan cetak jatuh di jendela klik ini. */
-function jendelaKlik(c: PrintClick): string {
-  return `(alp.order_id = ${c.orderId} AND alp.created_at >= '${c.at}' AND alp.created_at <= '${geserMenit(c.at, JENDELA_KLIK_MENIT)}')`;
-}
-
-/** Catatan cetak ini sudah diklaim oleh SEBUAH klik — grup mana pun. */
-export function diklaimSiapaPun(klik: PrintClick[]): string {
-  if (klik.length === 0) return "FALSE";
-  return `(${klik.map(jendelaKlik).join(" OR ")})`;
-}
-
-/** Catatan cetak ini diklaim klik untuk gudang yang sedang diperiksa. */
-export function diklaimGrupIni(klik: PrintClick[], kolomGrup: string): string {
-  if (klik.length === 0) return "FALSE";
-  return `(${klik.map((c) => `(${kolomGrup} = ${c.packGroupId} AND ${jendelaKlik(c)})`).join(" OR ")})`;
-}
-
-/**
- * Potongan SQL: benar tepat ketika bagian gudang ini sudah dicetak.
- *
- * Dua jalur, dan urutannya penting:
- *
- *  1. CATATAN YANG DIKLAIM KLIK — dipakai apa adanya. Ini yang pasti: angkanya
- *     datang dari tautan yang dikirim bot sendiri, bukan dari siapa yang login.
- *
- *  2. CATATAN YANG TIDAK DIKLAIM SIAPA PUN — jatuh ke tebakan lama:
- *     `users.office_location` → `item_sources.name` → `pack_group_id`.
- *     Dipertahankan karena cetakan dari halaman /admin (yang tidak lewat
- *     tautan bot) memang tidak punya klik, dan karena 2,6 juta catatan lama
- *     tidak akan pernah punya. Untuk halaman gudang `/admin/alpha|beta|gamma|
- *     omega` tebakan ini justru tepat: rutenya dijaga middleware lokasi, jadi
- *     orang BETA memang cuma bisa mencetak dari halaman BETA.
- *
- * Yang berubah dibanding versi lama: catatan yang SUDAH diklaim klik tidak lagi
- * ikut ditebak. Itu yang menutup kasus "orang Bekasi membuka tautan Tangerang"
- * — dulu catatan itu membungkam Bekasi, sekarang dia menandai Tangerang.
- *
- * JOIN-nya jadi LEFT: catatan yang diklaim klik harus tetap terhitung meskipun
- * pencetaknya tidak punya lokasi kerja.
+/*
+ * "Bagian gudang ini sudah dicetak" dinilai di kakera
+ * (pkg/jolyneread/splitprint.go, printedByGroup), dengan dua jalur yang sama
+ * seperti dulu di sini: catatan yang DIKLAIM KLIK dipakai apa adanya, catatan
+ * yang tidak diklaim siapa pun jatuh ke tebakan lokasi pencetak
+ * (users.office_location → item_sources → pack_group_id).
  */
-export function sudahDicetakGudangIni(kolomGrup: string, klik: PrintClick[]): string {
-  return `
-        EXISTS (
-          SELECT 1
-          FROM admin_logs alp
-          LEFT JOIN users pu           ON pu.user_id = alp.user_id
-          LEFT JOIN item_sources psrc  ON psrc.name  = pu.office_location
-          WHERE alp.order_id = o.order_id
-            AND alp.action IN ('print_order_address', 'print_order_address_manual')
-            AND (
-              ${diklaimGrupIni(klik, kolomGrup)}
-              OR (NOT ${diklaimSiapaPun(klik)} AND psrc.pack_group_id = ${kolomGrup})
-            )
-        )`.trim();
-}
 
 type SplitRow = {
   orderId: string;
@@ -169,16 +121,6 @@ type SplitRow = {
   dicetakPada: string;
 };
 
-function metabaseConfig(): MetabaseConfig | null {
-  if (!env.METABASE_URL || !env.METABASE_EMAIL || !env.METABASE_PASSWORD) return null;
-  return {
-    url: env.METABASE_URL,
-    email: env.METABASE_EMAIL,
-    password: env.METABASE_PASSWORD,
-    databaseId: env.METABASE_DATABASE_ID
-  };
-}
-
 /**
  * Berat yang akan tercetak di label, dalam kg — rumus PERSIS dari kyou.id
  * (`resources/views/admin/orders/address.blade.php`). Ditampilkan supaya orang
@@ -190,133 +132,17 @@ export function labelKg(gram: number): number {
   return Math.round(gram / 1000);
 }
 
-/** Waktu cetak terbaru yang ada di database. Jadi batas atas putaran ini. */
-function watermarkQuery(): string {
-  return `
-    SELECT MAX(al.created_at) AS terbaru
-    FROM admin_logs al
-    WHERE al.action IN ('print_order_address', 'print_order_address_manual')
-  `.trim();
-}
-
-/**
- * Order yang BARU dicetak (di antara watermark lama & baru) dan punya barang di
- * gudang jauh. Satu baris = satu gudang pada satu order.
- *
- * Catatan cetaknya dipakai lewat EXISTS, BUKAN JOIN. Ini bukan gaya-gayaan:
- * JOIN ke admin_logs menggandakan baris item sebanyak jumlah catatan cetak —
- * order 396668 punya 5 catatan, dan beratnya sempat terbaca 5.000 g padahal
- * aslinya 1.000 g.
+/*
+ * Order yang BARU dicetak (di antara watermark lama & baru) dan pengirimannya
+ * terpisah, satu baris per gudang yang belum mencetak bagiannya. Kuerinya —
+ * beserta alasan tiap syaratnya (PO/UREQ, partner cetak sendiri, EXISTS bukan
+ * JOIN) — sekarang di kakera: pkg/jolyneread/splitprint.go.
  */
-function splitQuery(sejak: string, sampai: string, klik: PrintClick[]): string {
-  return `
-    SELECT
-      o.order_id                                   AS order_id,
-      s.pack_group_id                              AS pack_group_id,
-      MAX(COALESCE(d.name, '-'))                   AS kota,
-      GROUP_CONCAT(DISTINCT oi.source ORDER BY oi.source SEPARATOR ', ') AS gudang,
-      SUM(oi.quantity)                             AS pcs,
-      SUM(i.weight * oi.quantity)                  AS gram,
-      GROUP_CONCAT(
-        CONCAT(oi.quantity, 'x ', COALESCE(NULLIF(oi.item_name, ''), i.name))
-        ORDER BY oi.id SEPARATOR '||'
-      )                                            AS barang,
-      MAX(u.name)                                  AS customer,
-      MAX(o.shipping_type)                         AS kurir,
-      (SELECT MAX(al.created_at) FROM admin_logs al
-        WHERE al.order_id = o.order_id
-          AND al.action IN ('print_order_address', 'print_order_address_manual')
-      )                                            AS dicetak_pada
-    FROM orders o
-    JOIN users u        ON u.user_id  = o.user_id
-    JOIN order_items oi ON oi.order_id = o.order_id
-    JOIN items i        ON i.item_id   = oi.item_id
-    JOIN item_sources s ON s.name      = oi.source
-    LEFT JOIN districts d ON d.district_id = s.district_id
-    WHERE o.status = 'paid'
-      -- SEMUA gudang, bukan cuma yang jauh.
-      --
-      -- BARANG PO/UREQ TIDAK IKUT DI SINI, DAN ITU TERBUKTI TIDAK JADI MASALAH.
-      -- Keduanya tidak punya pack group: barang PO source-nya kosong, dan UREQ
-      -- bukan baris order_items sama sekali (tabel order_bo). kyou.id
-      -- mencetak keduanya di label group 1 (Order::itemsForPackGroup), jadi
-      -- dulu diduga berat & isi label Bekasi yang ditampilkan bisa kurang dari
-      -- label aslinya. DIUKUR 7 AGU 2026 lewat Metabase, dugaan itu KOSONG:
-      --
-      --   251 order terpisah yang dicetak dalam 90 hari  -> 0 memuat PO/UREQ
-      --   diperluas ke 400 hari tanpa syarat cetak        -> 0
-      --   13.196 order ber-PO dalam 120 hari              -> SEMUA grup gudang = 0
-      --
-      -- Sebabnya: order berisi barang PO tidak pernah dicampur dengan barang
-      -- bergudang, jadi ordernya tidak pernah lolos syarat "terpisah" di bawah.
-      -- Tambalannya sempat ditulis penuh (meniru aturan PO/UREQ, terbukti jalan
-      -- di prod) lalu DIBUANG karena tidak akan pernah menyalakan angka apa pun.
-      -- Baru perlu dibangkitkan lagi kalau kyou.id mulai membolehkan barang PO
-      -- satu order dengan barang gudang — ukur ulang tiga angka di atas dulu.
-      AND s.pack_group_id IS NOT NULL
-      AND EXISTS (
-        SELECT 1 FROM admin_logs al
-        WHERE al.order_id = o.order_id
-          AND al.action IN ('print_order_address', 'print_order_address_manual')
-          AND al.created_at >  '${sejak}'
-          AND al.created_at <= '${sampai}'
-          -- Penandaan "partner mencetak sendiri" dari papan kakera memakai
-          -- catatan yang sama supaya /admin lama & PDA ikut melihatnya, tapi
-          -- TIDAK boleh memicu pesan ini: labelnya dicetak partner di luar
-          -- sistem, jadi memanggil gudang lain untuk mencetak bagiannya cuma
-          -- menyuruh orang mengerjakan sesuatu yang tidak ada.
-          AND al.information NOT LIKE '%"partner_self_print":true%'
-      )
-      -- Cuma order yang pengirimannya BENAR-BENAR terpisah. Dulu ini kebetulan
-      -- terjaga oleh hitungan "cetak < gudang" (order satu gudang selalu 1 >= 1
-      -- begitu dicetak). Hitungan itu diganti, jadi syaratnya ditulis eksplisit
-      -- — tanpa ini order biasa yang kebetulan dicetak orang gudang lain ikut
-      -- terkirim.
-      AND (
-        SELECT COUNT(DISTINCT s3.pack_group_id)
-        FROM order_items oi3
-        JOIN item_sources s3 ON s3.name = oi3.source
-        WHERE oi3.order_id = o.order_id
-          AND s3.pack_group_id IS NOT NULL
-      ) > 1
-      -- Gudang yang SUDAH mencetak bagiannya tidak usah dikirimi apa-apa. Ini
-      -- yang bikin head fulfillment berhenti ketag waktu dia sendiri yang
-      -- mencetak: begitu ada orang berlokasi Bekasi mencetak order ini, baris
-      -- grup 1 hilang — dan tag menempel pada baris grup 1.
-      AND NOT ${sudahDicetakGudangIni("s.pack_group_id", klik)}
-      -- Rem untuk cetakan yang pencetaknya tidak punya lokasi (tidak bisa
-      -- dihubungkan ke gudang manapun): kalau jumlahnya sudah sebanyak gudang
-      -- yang belum ketahuan mencetak, anggap sudah beres dan diam. Ini hitungan
-      -- kasar yang lama, sekarang cuma dipakai untuk sisa kecil ini — bukan
-      -- lagi satu-satunya rem.
-      --
-      -- Catatan yang sudah diklaim klik DIKELUARKAN dari hitungan ini: gudangnya
-      -- sudah ketahuan pasti di atas, jadi menghitungnya lagi sebagai "tak
-      -- dikenal" akan membungkam gudang yang justru belum mencetak.
-      AND (
-        SELECT COUNT(*)
-        FROM admin_logs al2
-        LEFT JOIN users uu          ON uu.user_id = al2.user_id
-        LEFT JOIN item_sources usrc ON usrc.name  = uu.office_location
-        WHERE al2.order_id = o.order_id
-          AND al2.action IN ('print_order_address', 'print_order_address_manual')
-          AND usrc.pack_group_id IS NULL
-          AND NOT ${diklaimSiapaPun(klik).replace(/alp\./g, "al2.")}
-      ) < (
-        SELECT COUNT(DISTINCT s2.pack_group_id)
-        FROM order_items oi2
-        JOIN item_sources s2 ON s2.name = oi2.source
-        WHERE oi2.order_id = o.order_id
-          AND s2.pack_group_id IS NOT NULL
-          AND NOT ${sudahDicetakGudangIni("s2.pack_group_id", klik)}
-      )
-    GROUP BY o.order_id, s.pack_group_id
-    ORDER BY dicetak_pada ASC
-  `.trim();
-}
 
 /**
- * Ubah nilai waktu dari Metabase jadi DATETIME MySQL apa adanya —
+ * Ubah nilai waktu jadi DATETIME MySQL apa adanya. Sejak 21 Sep 2026 kakera
+ * sudah mengirim bentuk "2026-07-13 16:04:16"; bentuk Metabase lama di bawah
+ * tetap ditangani —
  * "2026-07-13T16:04:16+07:00" → "2026-07-13 16:04:16".
  *
  * SENGAJA tidak lewat `new Date()`. Sesi MySQL berjalan di UTC (`NOW()` = 10:30)
@@ -330,26 +156,26 @@ function toMysqlDatetime(raw: unknown): string {
   return String(raw ?? "").trim().replace("T", " ").replace(/(\+\d{2}:\d{2}|Z)$/, "").slice(0, 19);
 }
 
-async function fetchSplits(
-  config: MetabaseConfig,
-  sejak: string,
-  sampai: string,
-  klik: PrintClick[]
-): Promise<SplitRow[]> {
-  const { columns, rows } = await fetchNativeQueryWithPagination(config, splitQuery(sejak, sampai, klik));
-  const idx = (name: string) => columns.indexOf(name);
+async function fetchSplits(sejak: string, sampai: string, klik: PrintClick[]): Promise<SplitRow[]> {
+  const clicks: SplitClick[] = klik.map((c) => ({
+    orderId: c.orderId,
+    packGroupId: c.packGroupId,
+    from: c.at,
+    to: geserMenit(c.at, JENDELA_KLIK_MENIT)
+  }));
+  const rows = await fetchSplitRows(sejak, sampai, clicks);
 
   return rows.map((row): SplitRow => ({
-    orderId: String(row[idx("order_id")] ?? "").trim(),
-    packGroupId: Number(row[idx("pack_group_id")] ?? 0),
-    kota: String(row[idx("kota")] ?? "-").trim() || "-",
-    gudang: String(row[idx("gudang")] ?? "-").trim() || "-",
-    pcs: Number(row[idx("pcs")] ?? 0),
-    gram: Number(row[idx("gram")] ?? 0),
-    barang: String(row[idx("barang")] ?? "").split("||").filter(Boolean),
-    customer: String(row[idx("customer")] ?? "-").trim() || "-",
-    kurir: String(row[idx("kurir")] ?? "-").trim() || "-",
-    dicetakPada: String(row[idx("dicetak_pada")] ?? "")
+    orderId: String(row.orderId ?? "").trim(),
+    packGroupId: Number(row.packGroupId ?? 0),
+    kota: String(row.city ?? "-").trim() || "-",
+    gudang: String(row.warehouses ?? "-").trim() || "-",
+    pcs: Number(row.pcs ?? 0),
+    gram: Number(row.grams ?? 0),
+    barang: (row.items ?? []).filter(Boolean),
+    customer: String(row.customer ?? "-").trim() || "-",
+    kurir: String(row.courier ?? "-").trim() || "-",
+    dicetakPada: String(row.printedAt ?? "")
   }));
 }
 
@@ -415,16 +241,14 @@ function embedFor(row: SplitRow): EmbedBuilder {
 }
 
 export async function runSplitPrintCheck(client: Client): Promise<void> {
-  const config = metabaseConfig();
-  if (!config) {
-    console.warn("[split-print] Metabase belum dikonfigurasi — lewati.");
+  if (!hasKakeraReadConfig()) {
+    console.warn("[split-print] JOLYNE_READ_KEY belum diisi — lewati.");
     return;
   }
 
   // Batas atas diambil DULU, sebelum menarik barisnya. Kalau tidak, catatan cetak
   // yang masuk di sela dua query akan terlewat selamanya.
-  const wm = await fetchNativeQueryWithPagination(config, watermarkQuery());
-  const sampai = toMysqlDatetime(wm.rows[0]?.[0]);
+  const sampai = toMysqlDatetime(await fetchSplitWatermark());
   if (!sampai) return;
 
   // Putaran pertama (store kosong / hilang): watermark di-set = cetakan terakhir
@@ -434,7 +258,7 @@ export async function runSplitPrintCheck(client: Client): Promise<void> {
   // Perbandingan string aman: format DATETIME MySQL berurut secara leksikografis.
   if (sampai <= sejak) return; // tak ada cetakan baru
 
-  const rows = await fetchSplits(config, sejak, sampai, klikSah());
+  const rows = await fetchSplits(sejak, sampai, klikSah());
   const baru = rows.filter((r) => r.orderId && !isPosted(r.orderId, r.packGroupId));
 
   if (baru.length === 0) {

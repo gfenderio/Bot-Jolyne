@@ -2,6 +2,7 @@ import { Client, Events, GatewayIntentBits } from "discord.js";
 import { env } from "./config/env.js";
 import { handleInteractionCreate } from "./events/interaction-create.js";
 import { handleReady } from "./events/ready.js";
+import { startBirthdayNowScheduler } from "./schedulers/birthday-now.js";
 import { startMachitanDailyReportScheduler } from "./machitan/dailyReportScheduler.js";
 import { registerGuildSlashCommands } from "./services/slash-commands.js";
 // Dinonaktifkan — lihat blok ready di bawah.
@@ -27,8 +28,7 @@ if (!env.DISCORD_TOKEN) {
   client.once(Events.ClientReady, (readyClient) => {
     handleReady(readyClient);
     startMachitanHttpServer(readyClient);
-    // Birthday tidak dijadwalkan di sini lagi (21 Sep 2026): hanayo mendorong
-    // daftarnya ke POST /hanayo/birthday jam 09:00 WIB.
+    startBirthdayNowScheduler(readyClient);
     startMachitanDailyReportScheduler(readyClient);
     // Dinonaktifkan — tidak dipakai lagi (rekap task Jolyne Tracker ke Discord).
     // startNotionStandupScheduler(readyClient);

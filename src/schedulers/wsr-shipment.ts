@@ -6,7 +6,7 @@ import {
   TextChannel
 } from "discord.js";
 import { env } from "../config/env.js";
-import { fetchNativeQueryWithPagination, type MetabaseConfig } from "../services/metabase.js";
+import { fetchWsrShipment, type WsrShipmentPayload } from "../services/kakeraRead.js";
 
 /**
  * Kiriman WSR → PENGINGAT ke channel gudang. Titik.
@@ -38,7 +38,9 @@ import { fetchNativeQueryWithPagination, type MetabaseConfig } from "../services
  * justru dialah yang membuat WSR-GAMMA_LAMBDA-20 diumumkan dua kali. Jalur PDA
  * (hanayo) tidak lagi mengabari Jolyne; terakhir dipakai 19 Agu 2026.
  *
- * Sumber data: tabel `wsr_batches` + `wsr_batch_items` via Metabase (readonly).
+ * Sumber data: kakera mengirim kirimannya UTUH (kepala, baris, hitungan) di
+ * tiap dorongan — bot tidak membaca database sama sekali untuk WSR. Dulu cuma
+ * id lalu dibaca lewat Metabase, dan ikut mati waktu Metabase mati 21 Sep 2026.
  * Skema hasil normalisasi review Shanieulle: nama barang/gudang/rak/orang
  * TIDAK disalin ke tabel batch — di-JOIN dari `items`/`item_sources`/`racks`/
  * `users` (string hanya hidup di tabel asalnya).
@@ -167,26 +169,6 @@ function shipmentCode(shipment: ShipmentRow): string {
   return `WSR-${shipment.unit}-${shipment.id}`;
 }
 
-function metabaseConfig(): MetabaseConfig | null {
-  if (!env.METABASE_URL || !env.METABASE_EMAIL || !env.METABASE_PASSWORD) return null;
-  return {
-    url: env.METABASE_URL,
-    email: env.METABASE_EMAIL,
-    password: env.METABASE_PASSWORD,
-    databaseId: env.METABASE_DATABASE_ID
-  };
-}
-
-// Nama orang di-join dari users (skema normalisasi: created_by = users.user_id).
-const batchSelect = `
-  SELECT b.id, b.unit, b.direction, b.status, b.total_items, b.total_qty,
-         COALESCE(cu.name, '-') AS created_by, COALESCE(eu.name, '-') AS executed_by,
-         COALESCE(b.executed_at, '') AS executed_at, b.created_at
-  FROM wsr_batches b
-  LEFT JOIN users cu ON cu.user_id = b.created_by
-  LEFT JOIN users eu ON eu.user_id = b.executed_by
-`;
-
 /**
  * Kode kiriman yang pengumumannya SUDAH ada di channel.
  *
@@ -250,69 +232,37 @@ export function bergiliran<T>(kerja: () => Promise<T>): Promise<T> {
   return hasil;
 }
 
-// Isi kiriman: semua string di-join dari tabel asalnya (items/item_sources/racks).
-const itemsQuery = (ids: number[]) => `
-  SELECT i.batch_id, i.item_id, it.name, COALESCE(it.barcode, '') AS barcode,
-         ss.name AS source, sd.name AS destination, i.qty,
-         COALESCE(r.name, '') AS rack, i.status, COALESCE(i.error, '') AS error
-  FROM wsr_batch_items i
-  JOIN items it ON it.item_id = i.item_id
-  JOIN item_sources ss ON ss.id = i.source_id
-  JOIN item_sources sd ON sd.id = i.destination_id
-  LEFT JOIN racks r ON r.id = i.rack_id
-  WHERE i.batch_id IN (${ids.join(",")})
-  ORDER BY i.id ASC
-`;
-
-/** Berapa barang yang benar-benar pindah vs tidak, untuk laporan penyelesaian. */
-const closingCountsQuery = (ids: number[]) => `
-  SELECT i.batch_id,
-         SUM(i.status = 'done') AS dipindah,
-         SUM(i.status <> 'done') AS tidak_dipindah
-  FROM wsr_batch_items i
-  WHERE i.batch_id IN (${ids.join(",")})
-  GROUP BY i.batch_id
-`;
-
-function rowsToShipments(columns: string[], rows: unknown[][]): ShipmentRow[] {
-  const idx = (name: string) => columns.indexOf(name);
-  return rows.map((row) => ({
-    id: Number(row[idx("id")] ?? 0),
-    unit: String(row[idx("unit")] ?? ""),
-    direction: String(row[idx("direction")] ?? ""),
-    status: String(row[idx("status")] ?? ""),
-    totalItems: Number(row[idx("total_items")] ?? 0),
-    totalQty: Number(row[idx("total_qty")] ?? 0),
-    createdBy: String(row[idx("created_by")] ?? "-"),
-    executedBy: String(row[idx("executed_by")] ?? "-"),
-    executedAt: String(row[idx("executed_at")] ?? ""),
-    createdAt: String(row[idx("created_at")] ?? "")
-  }));
-}
-
-async function fetchItems(config: MetabaseConfig, batchIds: number[]): Promise<Map<number, ShipmentItem[]>> {
-  const out = new Map<number, ShipmentItem[]>();
-  if (batchIds.length === 0) return out;
-  const { columns, rows } = await fetchNativeQueryWithPagination(config, itemsQuery(batchIds));
-  const idx = (name: string) => columns.indexOf(name);
-  for (const row of rows) {
-    const item: ShipmentItem = {
-      batchId: Number(row[idx("batch_id")] ?? 0),
-      itemId: String(row[idx("item_id")] ?? ""),
-      name: String(row[idx("name")] ?? ""),
-      barcode: String(row[idx("barcode")] ?? ""),
-      source: String(row[idx("source")] ?? ""),
-      destination: String(row[idx("destination")] ?? ""),
-      qty: Number(row[idx("qty")] ?? 0),
-      rack: String(row[idx("rack")] ?? ""),
-      status: String(row[idx("status")] ?? "pending"),
-      error: String(row[idx("error")] ?? "")
-    };
-    const list = out.get(item.batchId) ?? [];
-    list.push(item);
-    out.set(item.batchId, list);
-  }
-  return out;
+/** Badan dorongan kakera (atau jawaban GET /v1/jolyne/wsr/:id) → bentuk yang dipakai pesan. */
+export function fromPayload(p: WsrShipmentPayload): { shipment: ShipmentRow; items: ShipmentItem[]; moved: number; notMoved: number } {
+  const h = p.shipment;
+  return {
+    shipment: {
+      id: Number(h.id ?? 0),
+      unit: String(h.unit ?? ""),
+      direction: String(h.direction ?? ""),
+      status: String(h.status ?? ""),
+      totalItems: Number(h.totalItems ?? 0),
+      totalQty: Number(h.totalQty ?? 0),
+      createdBy: String(h.createdBy ?? "-"),
+      executedBy: String(h.executedBy ?? "-"),
+      executedAt: String(h.executedAt ?? ""),
+      createdAt: String(h.createdAt ?? "")
+    },
+    items: (p.items ?? []).map((i) => ({
+      batchId: Number(i.batchId ?? 0),
+      itemId: String(i.itemId ?? ""),
+      name: String(i.name ?? ""),
+      barcode: String(i.barcode ?? ""),
+      source: String(i.source ?? ""),
+      destination: String(i.destination ?? ""),
+      qty: Number(i.qty ?? 0),
+      rack: String(i.rack ?? ""),
+      status: String(i.status ?? "pending"),
+      error: String(i.error ?? "")
+    })),
+    moved: Number(p.counts?.moved ?? 0),
+    notMoved: Number(p.counts?.notMoved ?? 0)
+  };
 }
 
 /**
@@ -749,12 +699,6 @@ async function kirimPengumuman(
   }
 }
 
-/** Satu kiriman, dicari langsung dari id-nya. Dipakai jalur dorongan kakera. */
-const shipmentByIdQuery = (id: number) => `
-  ${batchSelect}
-  WHERE b.id = ${id}
-`;
-
 /**
  * Umumkan SATU kiriman sekarang juga — dipanggil kakera begitu tombol Kirim
  * ditekan, lewat POST /kakera/wsr-shipment.
@@ -770,20 +714,14 @@ const shipmentByIdQuery = (id: number) => `
  * kirimannya diumumkan ulang manual lewat `npm run wsr:umumkan-ulang`. Penjaga
  * dobel tetap ISI CHANNEL (lihat kodeSudahDiumumkan) + antrean `bergiliran`.
  *
- * Isinya dibaca ULANG dari database, bukan diambil dari badan permintaan.
- * Kakera cuma menyebut id; nama barang, rak, dan jumlahnya tetap datang dari
- * sumber yang sama dengan pengumuman biasa, jadi tidak ada dua bentuk pesan
- * untuk satu kejadian.
+ * Isinya datang UTUH di badan dorongan (21 Sep 2026) — sebelumnya cuma id lalu
+ * dibaca lewat Metabase. Pesannya tetap dirakit di sini, jadi satu kejadian
+ * tetap punya satu bentuk pesan.
  */
 export async function umumkanKirimanSekarang(
   client: Client,
-  batchId: number
-): Promise<"terkirim" | "sudah-ada" | "tidak-ketemu" | "belum-siap"> {
-  const config = metabaseConfig();
-  if (!config) {
-    console.warn("[wsr-shipment] dorongan kakera datang tapi Metabase belum dikonfigurasi.");
-    return "belum-siap";
-  }
+  payload: WsrShipmentPayload
+): Promise<"terkirim" | "sudah-ada" | "belum-siap"> {
 
   const channel = (await client.channels
     .fetch(env.WSR_SHIPMENT_CHANNEL_ID)
@@ -793,16 +731,13 @@ export async function umumkanKirimanSekarang(
     return "belum-siap";
   }
 
-  const res = await fetchNativeQueryWithPagination(config, shipmentByIdQuery(batchId));
-  const shipment = rowsToShipments(res.columns, res.rows)[0];
-  if (!shipment) return "tidak-ketemu";
+  const { shipment, items } = fromPayload(payload);
 
   // Periksa-lalu-kirim di dalam giliran: lihat `bergiliran`.
   return bergiliran(async () => {
     const sudah = await kodeSudahDiumumkan(channel);
     if (sudah.has(shipmentCode(shipment))) return "sudah-ada" as const;
 
-    const items = (await fetchItems(config, [shipment.id])).get(shipment.id) ?? [];
     await kirimPengumuman(channel, shipment, items);
     console.log(`[wsr-shipment] ${shipmentCode(shipment)} diumumkan seketika (dorongan kakera).`);
     return "terkirim" as const;
@@ -818,18 +753,13 @@ const dilaporProsesIni = new Set<number>();
  * dan apa yang kurang — tanpa perlu bertanya.
  *
  * DIDORONG kakera (15 Sep 2026), bukan dicari poller: kakera mengabari begitu
- * tombol Pindahkan menuntaskan kirimannya atau tombol Batalkan ditekan. Isinya
- * tetap dibaca ulang dari database, bukan dari badan permintaan.
+ * tombol Pindahkan menuntaskan kirimannya atau tombol Batalkan ditekan, dengan
+ * isi kiriman dan hitungannya ikut di badan dorongan.
  */
 export async function laporkanDitutupSekarang(
   client: Client,
-  batchId: number
-): Promise<"terkirim" | "sudah-ada" | "belum-ditutup" | "tidak-ketemu" | "belum-siap"> {
-  const config = metabaseConfig();
-  if (!config) {
-    console.warn("[wsr-shipment] kabar penutupan datang tapi Metabase belum dikonfigurasi.");
-    return "belum-siap";
-  }
+  payload: WsrShipmentPayload
+): Promise<"terkirim" | "sudah-ada" | "belum-ditutup" | "belum-siap"> {
   const channel = (await client.channels
     .fetch(env.WSR_SHIPMENT_CHANNEL_ID)
     .catch(() => null)) as TextChannel | null;
@@ -838,21 +768,13 @@ export async function laporkanDitutupSekarang(
     return "belum-siap";
   }
 
-  const res = await fetchNativeQueryWithPagination(config, shipmentByIdQuery(batchId));
-  const shipment = rowsToShipments(res.columns, res.rows)[0];
-  if (!shipment) return "tidak-ketemu";
+  const { shipment, moved, notMoved } = fromPayload(payload);
   if (shipment.status !== "done" && shipment.status !== "cancelled") return "belum-ditutup";
 
   return bergiliran(async () => {
     if (dilaporProsesIni.has(shipment.id)) return "sudah-ada" as const;
 
-    const countRes = await fetchNativeQueryWithPagination(config, closingCountsQuery([shipment.id]));
-    const idx = (name: string) => countRes.columns.indexOf(name);
-    const row = countRes.rows[0];
-    const angka = {
-      dipindah: Number(row?.[idx("dipindah")] ?? 0),
-      tidak: Number(row?.[idx("tidak_dipindah")] ?? 0)
-    };
+    const angka = { dipindah: moved, tidak: notMoved };
     // Dibatalkan tanpa satu pun barang berpindah = tidak ada yang perlu dilaporkan
     // ke orang toko selain "batal"; tetap dikabarkan, tapi nadanya beda.
     //
@@ -910,12 +832,8 @@ export async function kirimUlangPengumuman(
   batchId: number,
   opsi: { selaluTag?: boolean } = {}
 ): Promise<void> {
-  const config = metabaseConfig();
-  if (!config) throw new Error("Metabase belum dikonfigurasi.");
-
-  const res = await fetchNativeQueryWithPagination(config, `${batchSelect} WHERE b.id = ${batchId}`);
-  const shipment = rowsToShipments(res.columns, res.rows)[0];
-  if (!shipment) throw new Error(`Kiriman #${batchId} tidak ada di wsr_batches.`);
+  // Isinya diminta dari kakera — bentuknya sama persis dengan badan dorongan.
+  const { shipment, items } = fromPayload(await fetchWsrShipment(batchId));
 
   const channel = (await client.channels.fetch(env.WSR_SHIPMENT_CHANNEL_ID).catch(() => null)) as TextChannel | null;
   if (!channel?.isTextBased()) throw new Error(`Channel ${env.WSR_SHIPMENT_CHANNEL_ID} tidak ketemu.`);
@@ -923,7 +841,6 @@ export async function kirimUlangPengumuman(
   // seperti di bot yang sudah lama hidup, jadi ditarik dulu.
   await channel.guild.roles.fetch();
 
-  const items = (await fetchItems(config, [shipment.id])).get(shipment.id) ?? [];
   // Kirim ulang manual memang sengaja mengirim lagi, tapi tetap antre supaya
   // tidak bertabrakan dengan dorongan kakera yang datang bersamaan.
   await bergiliran(() => kirimPengumuman(channel, shipment, items, { selaluTag: opsi.selaluTag }));

@@ -6,18 +6,14 @@ import {
   EmbedBuilder,
   SlashCommandBuilder
 } from "discord.js";
-import { env } from "../config/env.js";
-import { fetchAdminBirthdays } from "../services/metabase.js";
+import { hasKakeraReadConfig } from "../services/kakeraRead.js";
+import { fetchAdminBirthdayRows } from "./birthday-now.js";
 import type { SlashCommand } from "../types/command.js";
 
 const PAGE_SIZE = 10;
 const JAKARTA_TIME_ZONE = "Asia/Jakarta";
 
 type BirthdayRow = Array<string | number>;
-
-function hasMetabaseConfig() {
-  return Boolean(env.METABASE_URL && env.METABASE_EMAIL && env.METABASE_PASSWORD);
-}
 
 function getJakartaToday(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -240,12 +236,12 @@ async function handleBirthdayPagination(
 export const command: SlashCommand = {
   data: new SlashCommandBuilder()
     .setName("birthday")
-    .setDescription("Ambil daftar birthday admin dari Metabase."),
+    .setDescription("Daftar birthday admin."),
 
   async execute(interaction) {
-    if (!hasMetabaseConfig()) {
+    if (!hasKakeraReadConfig()) {
       await interaction.reply({
-        content: "Konfigurasi Metabase belum lengkap di `.env`.",
+        content: "JOLYNE_READ_KEY belum diisi di `.env`.",
         flags: ["Ephemeral"]
       });
       return;
@@ -253,13 +249,8 @@ export const command: SlashCommand = {
 
     await interaction.deferReply({ flags: ["Ephemeral"] });
 
-    const dataset = await fetchAdminBirthdays({
-      url: env.METABASE_URL!,
-      email: env.METABASE_EMAIL!,
-      password: env.METABASE_PASSWORD!,
-      databaseId: env.METABASE_DATABASE_ID
-    });
+    const rows = await fetchAdminBirthdayRows();
 
-    await handleBirthdayPagination(interaction, sortRowsByUpcomingBirthday(dataset.rows));
+    await handleBirthdayPagination(interaction, sortRowsByUpcomingBirthday(rows));
   }
 };
