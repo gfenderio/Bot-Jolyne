@@ -1,15 +1,8 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
 import type { Client } from "discord.js";
 import { env } from "../config/env.js";
-import {
-  buildBirthdayNowEmbed,
-  fetchTodayBirthdayRows,
-  hasMetabaseConfig
-} from "../commands/birthday-now.js";
+import { buildBirthdayNowEmbed } from "../commands/birthday-now.js";
 
 const JAKARTA_TIME_ZONE = "Asia/Jakarta";
-const LAST_RUN_FILE = "data/birthday-last-run.json";
 
 /**
  * Judul embed ucapan — dipakai untuk MENGENALI ucapan yang sudah terkirim di
@@ -18,10 +11,6 @@ const LAST_RUN_FILE = "data/birthday-last-run.json";
  * sini, pengaman anti-dobel ini diam-diam berhenti bekerja.
  */
 const BIRTHDAY_EMBED_TITLE = "Birthday Hari Ini";
-
-type BirthdaySchedulerState = {
-  lastAnnouncementDate?: string;
-};
 
 function getJakartaDateParts(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -49,40 +38,12 @@ function getJakartaDateKey(now = new Date()) {
   ].join("-");
 }
 
-function getDelayUntilNext9amJakarta(now = new Date()) {
-  const today = getJakartaDateParts(now);
-  // 09:00 WIB besok = 02:00 UTC (WIB = UTC+7, jadi jam UTC = 9 - 7 = 2).
-  const next9amUtc = Date.UTC(today.year, today.month - 1, today.day + 1, 2);
-  return Math.max(1_000, next9amUtc - now.getTime());
-}
-
-async function readSchedulerState(): Promise<BirthdaySchedulerState> {
-  try {
-    const content = await readFile(LAST_RUN_FILE, "utf8");
-    return JSON.parse(content) as BirthdaySchedulerState;
-  } catch {
-    return {};
-  }
-}
-
-async function writeSchedulerState(state: BirthdaySchedulerState) {
-  await mkdir(dirname(LAST_RUN_FILE), { recursive: true });
-  await writeFile(LAST_RUN_FILE, `${JSON.stringify(state, null, 2)}\n`);
-}
-
 /**
  * Ucapan hari ini SUDAH ada di channel?
  *
- * Penanda "sudah dikirim" disimpan di `data/birthday-last-run.json`, dan folder
- * `data/` TIDAK punya volume persisten — jadi tiap redeploy penanda itu hilang,
- * catch-up saat start mengira ucapan hari ini belum terkirim, dan mengirimnya
- * LAGI. Itulah kenapa ucapan yang sama muncul berulang tiap kali bot di-deploy.
- *
- * Obatnya: jangan cuma percaya file yang bisa hilang — tanya Discord-nya
- * langsung. Channel-nya sendiri yang jadi catatan permanen, dan itu tidak ikut
- * terhapus saat redeploy. File-nya tetap dipakai sebagai jalan pintas (biar tak
- * perlu menarik riwayat channel tiap tengah malam), tapi bukan lagi satu-satunya
- * pegangan.
+ * Channel-nya sendiri yang jadi catatan — bot tidak punya volume persisten,
+ * jadi penanda di berkas hilang tiap redeploy dan dulu membuat ucapan yang sama
+ * terkirim berulang. Ini juga yang membuat hanayo aman mengirim ulang.
  */
 async function announcementAlreadyPosted(
   client: Client<true>,
@@ -110,83 +71,43 @@ async function announcementAlreadyPosted(
   }
 }
 
-async function sendBirthdayAnnouncement(client: Client<true>) {
-  if (!hasMetabaseConfig()) {
-    console.warn("Birthday scheduler skipped: konfigurasi Metabase belum lengkap.");
-    return false;
-  }
+export type BirthdayPerson = {
+  username: string;
+  name: string;
+  birthdate: string;
+};
 
-  const birthdayRows = await fetchTodayBirthdayRows();
+export type BirthdayAnnounceResult = "sent" | "already-posted" | "empty" | "wrong-date" | "no-channel";
 
-  if (birthdayRows.length === 0) {
-    console.log("Birthday scheduler: tidak ada birthday hari ini.");
-    return false;
-  }
+/**
+ * Posts today's greeting from a list pushed by hanayo (`jolyne:birthday`, 09:00 WIB).
+ *
+ * The bot used to fetch this list from Metabase on its own schedule. Metabase
+ * started rejecting the bot's login on 21 Sep 2026 and the greeting stopped
+ * without a trace, so hanayo now reads the database and sends the list here.
+ */
+export async function announceBirthdays(
+  client: Client<true>,
+  date: string,
+  people: BirthdayPerson[]
+): Promise<BirthdayAnnounceResult> {
+  // A retry that arrives after midnight must not greet yesterday's people "today".
+  if (date !== getJakartaDateKey()) return "wrong-date";
+  if (people.length === 0) return "empty";
 
   if (await announcementAlreadyPosted(client, env.BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID)) {
-    console.log("Birthday scheduler: ucapan hari ini sudah ada di channel — tidak dikirim ulang.");
-    return true; // true = anggap beres, supaya penandanya ikut ditulis ulang
+    console.log("Birthday: ucapan hari ini sudah ada di channel — tidak dikirim ulang.");
+    return "already-posted";
   }
 
   const channel = await client.channels.fetch(env.BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID);
-
   if (!channel?.isTextBased() || !("send" in channel)) {
-    console.error(`Birthday scheduler: channel ${env.BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID} tidak bisa dikirimi pesan.`);
-    return false;
+    console.error(`Birthday: channel ${env.BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID} tidak bisa dikirimi pesan.`);
+    return "no-channel";
   }
 
-  await channel.send({
-    embeds: [buildBirthdayNowEmbed(birthdayRows)]
-  });
-
-  console.log(`Birthday scheduler: mengirim ${birthdayRows.length} ucapan birthday.`);
-  return true;
-}
-
-async function runBirthdayAnnouncementOncePerDay(client: Client<true>) {
-  const todayKey = getJakartaDateKey();
-  const state = await readSchedulerState();
-
-  if (state.lastAnnouncementDate === todayKey) {
-    console.log(`Birthday scheduler: announcement ${todayKey} sudah pernah dikirim.`);
-    return;
-  }
-
-  const sent = await sendBirthdayAnnouncement(client);
-
-  if (sent) {
-    await writeSchedulerState({
-      lastAnnouncementDate: todayKey
-    });
-  }
-}
-
-export function startBirthdayNowScheduler(client: Client<true>) {
-  let timeout: NodeJS.Timeout | undefined;
-
-  const scheduleNextRun = () => {
-    const delay = getDelayUntilNext9amJakarta();
-    timeout = setTimeout(async () => {
-      try {
-        await runBirthdayAnnouncementOncePerDay(client);
-      } catch (error) {
-        console.error("Birthday scheduler failed.", error);
-      } finally {
-        scheduleNextRun();
-      }
-    }, delay);
-  };
-
-  runBirthdayAnnouncementOncePerDay(client).catch((error) => {
-    console.error("Birthday scheduler catch-up failed.", error);
-  });
-
-  scheduleNextRun();
-  console.log(`Birthday scheduler aktif untuk channel ${env.BIRTHDAY_ANNOUNCEMENT_CHANNEL_ID}.`);
-
-  return () => {
-    if (timeout) {
-      clearTimeout(timeout);
-    }
-  };
+  const rows = people.map((person) => [person.username, person.name, person.birthdate]);
+  await channel.send({ embeds: [buildBirthdayNowEmbed(rows)] });
+  console.log(`Birthday: mengirim ${people.length} ucapan birthday.`);
+  return "sent";
 }

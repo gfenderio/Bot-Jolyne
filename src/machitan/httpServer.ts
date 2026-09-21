@@ -7,6 +7,7 @@ import { handleMachitanPickCancel } from "./pickCancelIntake.js";
 import { handleMachitanShipping } from "./shippingIntake.js";
 import { handleWsInboxIntake } from "./wsInboxIntake.js";
 import { handleWsrShipmentPush } from "./wsrShipmentIntake.js";
+import { handleBirthdayPush } from "./birthdayIntake.js";
 import { handleOpnameRequestPush } from "./opnameRequestIntake.js";
 import { handleOpnameRecountPush } from "./opnameRecountIntake.js";
 import { handleOpnameRequestProgress } from "./opnameRequestProgress.js";
@@ -110,6 +111,17 @@ export function startMachitanHttpServer(client: Client<true>) {
         console.error("Gagal mengumumkan kiriman WSR dorongan kakera", error);
         if (!response.headersSent) {
           sendJson(response, 500, { ok: false, error: "Internal server error handling WSR shipment push" });
+        }
+      });
+      return;
+    }
+
+    // Today's admin birthdays, pushed by hanayo at 09:00 WIB.
+    if (pathname === "/hanayo/birthday") {
+      handleBirthdayPush(request, response, client).catch((error) => {
+        console.error("Gagal mengirim ucapan birthday dari hanayo", error);
+        if (!response.headersSent) {
+          sendJson(response, 500, { ok: false, error: "Internal server error handling birthday push" });
         }
       });
       return;
