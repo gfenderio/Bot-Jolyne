@@ -44,7 +44,7 @@ const STORE_OF: Record<string, string> = {
 
 /**
  * Who to tag for these places: a role name or an id, deduplicated, in order.
- * Places with no entry (Omega, SS, OP, ORIPA, KCC) are not tagged.
+ * Places with no entry in the PIC list and no store role (KCC) are not tagged.
  */
 export function mentionKeys(sources: string[], picSpec: string = env.OPNAME_REQUEST_PIC): string[] {
   const pic = parsePicMap(picSpec);

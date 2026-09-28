@@ -25,6 +25,12 @@ test("tags: default PICs cover every store and Omega/SS", () => {
   assert.ok(keys.every((k) => /^\d+$/.test(k)));
 });
 
+test("tags: OP and ORIPA go to Jonathan, the same person as Sigma", () => {
+  assert.deepEqual(mentionKeys(["OP"]), ["715841421466402858"]);
+  assert.deepEqual(mentionKeys(["SIGMA", "OP", "ORIPA"]), ["715841421466402858"]);
+  assert.deepEqual(mentionKeys(["DELTA"]), ["686065875627147275"]);
+});
+
 test("item names with brackets and stars do not break the link", () => {
   assert.equal(escapeMarkdown("[Set of 10] Haikyu!! *Can* Badge_A"), "\\[Set of 10\\] Haikyu!! \\*Can\\* Badge\\_A");
 });

@@ -325,11 +325,13 @@ const envSchema = z.object({
   OPNAME_REQUEST_MENTION_SIGMA: optionalString.default("715841421466402858"),
   // PIC per place for the same request, "PLACE=discordUserId,...". The list
   // Cindy gave on 18-19 Sep: Alpha Nabila, Beta Vira, Gamma Fara, Delta Lucky,
-  // Lambda Shello, Omega/SS Agmoe, Sigma Jonathan.
+  // Lambda Shello, Omega/SS Agmoe, Sigma Jonathan. OP and ORIPA to Jonathan too
+  // (Gilang, 28 Sep 2026).
   OPNAME_REQUEST_PIC: optionalString.default(
     "ALPHA=399441990917423114,BETA=927584205628645497,GAMMA=440245305133236256," +
       "DELTA=686065875627147275,LAMBDA=1224581529854939138,OMEGA=1115194334497755157," +
-      "SS=1115194334497755157,SIGMA=715841421466402858"
+      "SS=1115194334497755157,SIGMA=715841421466402858,OP=715841421466402858," +
+      "ORIPA=715841421466402858"
   ),
   // Channel for round 2 ("cek silang") of an opname session. Empty = the
   // request channel above.
