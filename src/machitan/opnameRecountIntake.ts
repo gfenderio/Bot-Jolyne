@@ -83,7 +83,7 @@ export function recountEmbed(req: RecountRequest): EmbedBuilder {
   const who = req.people.map((p) => `• ${p.name} — ${p.items} barang`).join("\n").slice(0, 1024) || "-";
   const e = new EmbedBuilder()
     .setColor(0xe0a030)
-    .setAuthor({ name: "Opname event · Fase 2 hitung ulang" })
+    .setAuthor({ name: "Opname Full Count · Fase 2 hitung ulang" })
     .setTitle(`Opname ${req.source} — ${req.mismatch + req.unscanned} barang perlu dihitung ulang`.slice(0, 256))
     .setDescription(
       "Hitungan di Excel ini **tidak cocok** atau **belum di-scan**. Tolong hitung ulang lewat menu **Opname** di Machitan (gudang " +
