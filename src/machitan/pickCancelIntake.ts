@@ -3,6 +3,7 @@ import { EmbedBuilder, type Client, type Message, type TextChannel } from "disco
 import { isAuthorizedMachitanIntake } from "./intakeAuth.js";
 import { findProofMessage } from "./proofDelivery.js";
 import { mentionForEcommerce } from "./pickProofIntake.js";
+import { mentionForPickRequest } from "./pickRequesterMention.js";
 import { orderLink } from "../services/kyouLinks.js";
 
 /**
@@ -191,7 +192,10 @@ export async function handleMachitanPickCancel(
     // tidak ada hubungannya dengan Shopee. Salah panggil orang lebih buruk
     // daripada tidak memanggil siapa-siapa, jadi tanpa keterangan channel
     // dari PDA, kartunya dikirim tanpa mention.
-    const mention = mentionForEcommerce(String(body.channel ?? "")) || undefined;
+    //
+    // Kalau permintaan pick e-com-nya ketemu, pembuatnya yang dipanggil (SRV-20):
+    // barisnya ada berarti ini memang order e-commerce, jadi bukan tebakan.
+    const mention = (await mentionForPickRequest(orderId, itemId, mentionForEcommerce(String(body.channel ?? "")))) || undefined;
 
     // Dua jalur mencari kartu aslinya: catatan messageId dulu (murah), lalu
     // sisir riwayat channel (mahal tapi tidak bergantung pada `data/` yang

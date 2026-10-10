@@ -120,3 +120,12 @@ export type WsrShipmentPayload = {
 export async function fetchWsrShipment(batchId: number): Promise<WsrShipmentPayload> {
   return kakera<WsrShipmentPayload>(`/wsr/${batchId}`);
 }
+
+export type PickRequester = { invoice: string; itemId: string; name: string; discordId: string };
+
+/** Who made the e-com pick requests of these invoices (SRV-20); discordId "" = not on the roster. */
+export async function fetchPickRequesters(invoices: string[]): Promise<PickRequester[]> {
+  if (invoices.length === 0) return [];
+  const body = JSON.stringify({ invoices });
+  return (await kakera<{ requesters: PickRequester[] }>("/pick-requesters", { method: "POST", body })).requesters;
+}

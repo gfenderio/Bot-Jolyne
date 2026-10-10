@@ -5,6 +5,7 @@ import { addMachitanProof } from "./proofStore.js";
 import { isAuthorizedMachitanIntake } from "./intakeAuth.js";
 import { fitImageToLimit } from "./imageFit.js";
 import { orderLink } from "../services/kyouLinks.js";
+import { mentionForPickRequest } from "./pickRequesterMention.js";
 import { deriveProofKey, isPosted, markFailed, markPosted, markReceived, messageIdsForSubmission, messageKey } from "./proofDelivery.js";
 import {
   chunkByBytes,
@@ -411,7 +412,7 @@ export async function handleMachitanPickProof(
           // Pesannya disimpan, bukan dibuang: kartu BATAL PICK nanti membalas
           // pesan INI supaya kedua kartu bertaut. Lihat findProofMessage().
           const sent = await channel.send({
-            content: mentionForEcommerce(channelName),
+            content: (await mentionForPickRequest(rawOrderId, itemId, mentionForEcommerce(channelName))) || undefined,
             embeds: [embed],
             files: [attachment]
           });
@@ -619,7 +620,7 @@ export async function handleMachitanPickProof(
       // dari PDA memang tidak membawa rinciannya. Nomor ordernya masih ada, dan
       // itu cukup untuk tahu ini Shopee atau Tokopedia.
       if (ecomItem || looksLikeEcommerceOrderId(orderId)) {
-        mentionContent = mentionForEcommerce(inferEcommerceChannel(orderId, ecomItem));
+        mentionContent = await mentionForPickRequest(orderId, undefined, mentionForEcommerce(inferEcommerceChannel(orderId, ecomItem)));
       }
     }
 
